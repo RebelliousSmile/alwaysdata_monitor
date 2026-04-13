@@ -76,6 +76,11 @@ class CrawlerAnalyserService
     // Both are handled: skip optional leading hostname, capture IP, skip 2 dashes, parse rest.
     private const LOG_PATTERN = '/^(?:\S+\s+)?(\d[\d.:a-fA-F]+)\s+\S+\s+\S+\s+\[.*?\]\s+"[^"]*"\s+\d+\s+\S+(?:\s+"[^"]*"\s+"([^"]*)")?/';
 
+    public function getKnownBots(): array
+    {
+        return self::KNOWN_BOTS;
+    }
+
     public function analyse(array $logSources): array
     {
         /** @var array<string, array{uas: array<string, bool>, count: int}> $ipData */

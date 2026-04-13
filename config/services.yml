@@ -17,6 +17,11 @@ services:
   ScAlwaysdata\Service\HtaccessService:
     class: ScAlwaysdata\Service\HtaccessService
 
+  ScAlwaysdata\Service\HttpLogParserService:
+    class: ScAlwaysdata\Service\HttpLogParserService
+    arguments:
+      - '@ScAlwaysdata\Service\CrawlerAnalyserService'
+
   # Controller
   sc_alwaysdata.controller.sc_alwaysdata:
     class: ScAlwaysdata\Controller\Admin\ScAlwaysdataController

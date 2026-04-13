@@ -28,6 +28,31 @@ class LogReaderService
         return $v > 0 ? $v : (self::DEFAULT_LINES[$dir] ?? 5000);
     }
 
+    /**
+     * Resolve the absolute path of the HTTP log file for a given date (J-1 typically).
+     * Tries plain .log first, then .log.gz. Returns null if not found.
+     */
+    public function findHttpLogPath(string $date): ?string
+    {
+        $basePath = $this->resolveBasePath();
+        if ($basePath === null) {
+            return null;
+        }
+
+        $year = substr($date, 0, 4);
+        $base = $basePath . 'http/' . $year . '/http-' . $date;
+
+        if (is_readable($base . '.log')) {
+            return $base . '.log';
+        }
+
+        if (is_readable($base . '.log.gz')) {
+            return $base . '.log.gz';
+        }
+
+        return null;
+    }
+
     public function readTodayLogs(): array
     {
         set_time_limit(60);
