@@ -124,6 +124,61 @@
 <input type="hidden" id="csrf-apply-block" value="{{ csrf_token('sc_alwaysdata_apply_block') }}">
 
 {# ------------------------------------------------------------------ #}
+{# Stats & Conversion — chargées depuis la base (cron J-1)            #}
+{# ------------------------------------------------------------------ #}
+<div class="card mb-4" id="stats-section">
+    <div class="card-header d-flex align-items-center justify-content-between flex-wrap" style="gap:.5rem">
+        <ul class="nav nav-tabs card-header-tabs" id="stats-nav-tabs" role="tablist">
+            <li class="nav-item">
+                <a class="nav-link active" id="tab-trafic-link" data-toggle="tab" href="#tab-trafic" role="tab">
+                    <i class="material-icons align-middle" style="font-size:1rem">bar_chart</i>
+                    Statistiques trafic
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link" id="tab-conversion-link" data-toggle="tab" href="#tab-conversion" role="tab">
+                    <i class="material-icons align-middle" style="font-size:1rem">trending_down</i>
+                    Conversion
+                </a>
+            </li>
+        </ul>
+        <div class="d-flex align-items-center" style="gap:.5rem">
+            <input type="date" id="stats-date-picker" class="form-control form-control-sm" style="width:auto">
+            <div class="btn-group btn-group-sm" role="group">
+                <button type="button" class="btn btn-outline-secondary stats-period active" data-period="30">30j</button>
+                <button type="button" class="btn btn-outline-secondary stats-period" data-period="7">7j</button>
+            </div>
+            <div id="stats-spinner" style="display:none">
+                <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
+            </div>
+        </div>
+    </div>
+    <div class="tab-content" id="stats-tab-content">
+
+        {# --- Tab Trafic --- #}
+        <div class="tab-pane fade show active p-3" id="tab-trafic" role="tabpanel">
+            <div id="tab-trafic-content">
+                <div class="text-center text-muted py-4">
+                    <div class="spinner-border spinner-border-sm" role="status"></div>
+                    Chargement…
+                </div>
+            </div>
+        </div>
+
+        {# --- Tab Conversion --- #}
+        <div class="tab-pane fade p-3" id="tab-conversion" role="tabpanel">
+            <div id="tab-conversion-content">
+                <div class="text-center text-muted py-4">
+                    <div class="spinner-border spinner-border-sm" role="status"></div>
+                    Chargement…
+                </div>
+            </div>
+        </div>
+
+    </div>
+</div>
+
+{# ------------------------------------------------------------------ #}
 {# Results (populated by JS)                                           #}
 {# ------------------------------------------------------------------ #}
 <div id="results-section" style="display:none">
@@ -154,6 +209,219 @@
 var analyseUrl = '{{ path('sc_alwaysdata_analyse') }}';
 var applyBlockUrl = '{{ path('sc_alwaysdata_apply_block') }}';
 var applyUnblockUrl = '{{ path('sc_alwaysdata_apply_unblock') }}';
+var statsUrl = '{{ statsUrl }}';
+var conversionUrl = '{{ conversionUrl }}';
+</script>
+
+<script>
+(function() {
+    var yesterday = (function() {
+        var d = new Date(); d.setDate(d.getDate() - 1);
+        return d.toISOString().slice(0, 10);
+    })();
+
+    var currentPeriod = 30;
+    var currentDate = yesterday;
+    var activeTab = 'trafic';
+
+    var datePicker = document.getElementById('stats-date-picker');
+    var spinner = document.getElementById('stats-spinner');
+    if (datePicker) { datePicker.value = yesterday; datePicker.max = yesterday; }
+
+    function esc(s) {
+        return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
+    function pct(a, b) {
+        if (!b || b === 0) return '-';
+        return Math.round(a / b * 100) + '%';
+    }
+
+    function fetchStats() {
+        if (spinner) spinner.style.display = 'inline-block';
+        var url = statsUrl + '?date=' + currentDate + '&period=' + currentPeriod;
+        fetch(url, { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+            .then(function(r) { return r.json(); })
+            .then(function(d) { renderTrafic(d); })
+            .catch(function(e) { document.getElementById('tab-trafic-content').innerHTML = '<div class="alert alert-danger">Erreur: ' + esc(e.message) + '</div>'; })
+            .finally(function() { if (spinner) spinner.style.display = 'none'; });
+    }
+
+    function fetchConversion() {
+        if (spinner) spinner.style.display = 'inline-block';
+        var url = conversionUrl + '?date=' + currentDate + '&period=' + currentPeriod;
+        fetch(url, { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+            .then(function(r) { return r.json(); })
+            .then(function(d) { renderConversion(d); })
+            .catch(function(e) { document.getElementById('tab-conversion-content').innerHTML = '<div class="alert alert-danger">Erreur: ' + esc(e.message) + '</div>'; })
+            .finally(function() { if (spinner) spinner.style.display = 'none'; });
+    }
+
+    function fetchActive() {
+        if (activeTab === 'trafic') fetchStats();
+        else fetchConversion();
+    }
+
+    function renderTrafic(data) {
+        var s = data.snapshot;
+        var el = document.getElementById('tab-trafic-content');
+        if (!el) return;
+
+        if (!s) {
+            el.innerHTML = '<div class="alert alert-info">Aucune donnée pour le ' + esc(currentDate) + '. Le cron a-t-il tourné ?</div>'
+                + renderCronConfig(data);
+            return;
+        }
+
+        // Snapshot cards
+        var cards = [
+            ['Requêtes totales', s.requests_total, 'secondary'],
+            ['Requêtes humaines', s.requests_human, 'primary'],
+            ['Desktop', s.desktop, 'info'],
+            ['Mobile', s.mobile, 'info'],
+            ['500 front', s.errors_500_front, s.errors_500_front > 0 ? 'danger' : 'success'],
+            ['500 BO', s.errors_500_bo, s.errors_500_bo > 0 ? 'warning' : 'success'],
+            ['500 checkout', s.errors_500_checkout, s.errors_500_checkout > 0 ? 'danger' : 'success'],
+        ].map(function(c) {
+            return '<div class="col-6 col-md-3 col-lg-auto mb-2">'
+                + '<div class="card border-' + c[2] + ' text-center px-3 py-2" style="min-width:110px">'
+                + '<div class="small text-muted">' + esc(c[0]) + '</div>'
+                + '<div class="h4 mb-0 text-' + c[2] + '">' + esc(String(c[1])) + '</div>'
+                + '</div></div>';
+        }).join('');
+
+        // Top pages
+        var pages = (s.top_pages || []).slice(0, 10);
+        var pagesRows = pages.length
+            ? pages.map(function(p) {
+                return '<tr><td><small>' + esc(p.path) + '</small></td><td class="text-right">' + esc(String(p.count)) + '</td></tr>';
+            }).join('')
+            : '<tr><td colspan="2" class="text-muted text-center">-</td></tr>';
+
+        // Hourly
+        var hourly = s.hourly_breakdown || {};
+        var hourlyRows = Object.keys(hourly).map(function(h) {
+            return '<tr><td>' + esc(h) + 'h</td><td>' + esc(String(hourly[h])) + '</td></tr>';
+        }).filter(function(_, i) { return hourly[Object.keys(hourly)[i]] > 0; }).join('');
+
+        // Period table
+        var periodRows = (data.period || []).map(function(r) {
+            return '<tr><td>' + esc(r.stat_date) + '</td><td>' + esc(String(r.requests_human)) + '</td>'
+                + '<td>' + esc(String(r.views_product)) + '</td>'
+                + '<td>' + (r.errors_500_front > 0 ? '<span class="badge badge-danger">' + r.errors_500_front + '</span>' : '0') + '</td>'
+                + '</tr>';
+        }).join('') || '<tr><td colspan="4" class="text-muted text-center">Aucune donnée sur la période</td></tr>';
+
+        // 500 checkout detail
+        var detail500 = (s.errors_500_checkout_detail || []);
+        var detail500Html = detail500.length
+            ? '<table class="table table-sm"><thead class="thead-light"><tr><th>Heure</th><th>Path</th><th>IP</th></tr></thead><tbody>'
+              + detail500.map(function(e) {
+                  return '<tr><td>' + esc(String(e.hour)) + 'h</td><td><small>' + esc(e.path) + '</small></td><td><code>' + esc(e.ip) + '</code></td></tr>';
+              }).join('') + '</tbody></table>'
+            : '<p class="text-muted">Aucune erreur 500 sur /commande ce jour.</p>';
+
+        el.innerHTML = '<div class="row no-gutters mb-3">' + cards + '</div>'
+            + '<div class="row">'
+            + '<div class="col-md-6 mb-3"><h6>Top 10 pages</h6>'
+            + '<table class="table table-sm"><thead class="thead-light"><tr><th>Page</th><th class="text-right">Vues</th></tr></thead><tbody>' + pagesRows + '</tbody></table></div>'
+            + '<div class="col-md-6 mb-3"><h6>Détail 500 checkout</h6>' + detail500Html + '</div>'
+            + '</div>'
+            + '<h6>Évolution sur ' + currentPeriod + 'j</h6>'
+            + '<table class="table table-sm"><thead class="thead-light"><tr><th>Date</th><th>Humaines</th><th>Vues produit</th><th>500 front</th></tr></thead><tbody>' + periodRows + '</tbody></table>'
+            + renderCronConfig(data);
+    }
+
+    function renderCronConfig(data) {
+        if (!data.cronToken) return '';
+        return '<div class="mt-3 p-2 bg-light rounded"><small class="text-muted d-block mb-1">URL cron Alwaysdata :</small>'
+            + '<div class="input-group input-group-sm"><input type="text" class="form-control font-monospace" id="cron-url-input" value="' + esc(data.cronUrl || '') + '" readonly>'
+            + '<div class="input-group-append"><button class="btn btn-outline-secondary" type="button" onclick="var i=document.getElementById(\'cron-url-input\');i.select();document.execCommand(\'copy\')">Copier</button></div>'
+            + '</div></div>';
+    }
+
+    function renderConversion(data) {
+        var s = data.snapshot;
+        var el = document.getElementById('tab-conversion-content');
+        if (!el) return;
+
+        if (!s) {
+            el.innerHTML = '<div class="alert alert-info">Aucune donnée pour le ' + esc(currentDate) + '. Le cron a-t-il tourné ?</div>';
+            return;
+        }
+
+        var steps = [
+            ['Vues produit',       s.views_product,    null],
+            ['Ajouts panier',      s.cart_adds,        s.views_product],
+            ['Vues panier',        s.views_cart,       s.cart_adds],
+            ['Vues checkout',      s.views_checkout,   s.views_cart],
+            ['POST checkout',      s.post_checkout,    s.views_checkout],
+            ['Commandes confirmées', s.orders_confirmed, s.post_checkout],
+        ];
+
+        var funnelRows = steps.map(function(step) {
+            return '<tr><td>' + esc(step[0]) + '</td>'
+                + '<td class="text-right font-weight-bold">' + esc(String(step[1])) + '</td>'
+                + '<td class="text-right text-muted">' + (step[2] !== null ? pct(step[1], step[2]) : '—') + '</td>'
+                + '</tr>';
+        }).join('');
+
+        var periodRows = (data.period || []).map(function(r) {
+            return '<tr><td>' + esc(r.stat_date) + '</td>'
+                + '<td>' + esc(String(r.views_product)) + '</td>'
+                + '<td>' + esc(String(r.cart_adds)) + '</td>'
+                + '<td>' + esc(String(r.post_checkout)) + '</td>'
+                + '<td><strong>' + esc(String(r.orders_confirmed)) + '</strong></td></tr>';
+        }).join('') || '<tr><td colspan="5" class="text-muted text-center">Aucune donnée sur la période</td></tr>';
+
+        var detail500 = (s.errors_500_checkout_detail || []);
+        var detail500Html = detail500.length
+            ? '<table class="table table-sm"><thead class="thead-light"><tr><th>Heure</th><th>Path</th><th>IP</th></tr></thead><tbody>'
+              + detail500.map(function(e) {
+                  return '<tr><td>' + esc(String(e.hour)) + 'h</td><td><small>' + esc(e.path) + '</small></td><td><code>' + esc(e.ip) + '</code></td></tr>';
+              }).join('') + '</tbody></table>'
+            : '<p class="text-muted small">Aucune erreur 500 sur /commande.</p>';
+
+        el.innerHTML = '<div class="row">'
+            + '<div class="col-md-5 mb-3"><h6>Funnel — ' + esc(currentDate) + '</h6>'
+            + '<table class="table table-sm"><thead class="thead-light"><tr><th>Étape</th><th class="text-right">N</th><th class="text-right">Taux</th></tr></thead><tbody>' + funnelRows + '</tbody></table></div>'
+            + '<div class="col-md-7 mb-3"><h6>Erreurs 500 checkout</h6>' + detail500Html + '</div>'
+            + '</div>'
+            + '<h6>Évolution sur ' + currentPeriod + 'j</h6>'
+            + '<table class="table table-sm"><thead class="thead-light"><tr><th>Date</th><th>Vues produit</th><th>Ajouts panier</th><th>POST checkout</th><th>Commandes</th></tr></thead><tbody>' + periodRows + '</tbody></table>';
+    }
+
+    document.addEventListener('DOMContentLoaded', function() {
+        // Date picker
+        if (datePicker) {
+            datePicker.addEventListener('change', function() {
+                currentDate = this.value || yesterday;
+                fetchActive();
+            });
+        }
+
+        // Period buttons
+        document.querySelectorAll('.stats-period').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                document.querySelectorAll('.stats-period').forEach(function(b) { b.classList.remove('active'); });
+                this.classList.add('active');
+                currentPeriod = parseInt(this.dataset.period, 10);
+                fetchActive();
+            });
+        });
+
+        // Tab switch
+        document.querySelectorAll('#stats-nav-tabs a[data-toggle="tab"]').forEach(function(a) {
+            a.addEventListener('shown.bs.tab', function(e) {
+                activeTab = e.target.id === 'tab-trafic-link' ? 'trafic' : 'conversion';
+                fetchActive();
+            });
+        });
+
+        // Initial load
+        fetchStats();
+    });
+})();
 </script>
 
 <script>

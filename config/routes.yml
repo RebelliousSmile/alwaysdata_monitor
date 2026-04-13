@@ -13,6 +13,20 @@ sc_alwaysdata_analyse:
     _controller: sc_alwaysdata.controller.sc_alwaysdata::analyseAction
     _legacy_controller: AdminScAlwaysdata
 
+sc_alwaysdata_stats:
+  path: /sc-alwaysdata/stats
+  methods: [GET]
+  defaults:
+    _controller: sc_alwaysdata.controller.sc_alwaysdata::statsAction
+    _legacy_controller: AdminScAlwaysdata
+
+sc_alwaysdata_conversion:
+  path: /sc-alwaysdata/conversion
+  methods: [GET]
+  defaults:
+    _controller: sc_alwaysdata.controller.sc_alwaysdata::conversionAction
+    _legacy_controller: AdminScAlwaysdata
+
 sc_alwaysdata_apply_block:
   path: /sc-alwaysdata/apply-block
   methods: [POST]
