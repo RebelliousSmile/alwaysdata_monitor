@@ -33,6 +33,10 @@ class sc_alwaysdata extends Module
 
     public const CONFIG_LOGS_PATH = 'SC_ALWAYSDATA_LOGS_PATH';
     public const CONFIG_HTACCESS_PATH = 'SC_ALWAYSDATA_HTACCESS_PATH';
+    public const CONFIG_LINES_APACHE = 'SC_ALWAYSDATA_LINES_APACHE';
+    public const CONFIG_LINES_HTTP   = 'SC_ALWAYSDATA_LINES_HTTP';
+    public const CONFIG_LINES_PHP    = 'SC_ALWAYSDATA_LINES_PHP';
+    public const CONFIG_LINES_SITES  = 'SC_ALWAYSDATA_LINES_SITES';
 
     public function __construct()
     {
@@ -58,15 +62,38 @@ class sc_alwaysdata extends Module
 
     public function install(): bool
     {
-        return parent::install()
-            && (bool) Configuration::set(self::CONFIG_HTACCESS_PATH, _PS_ROOT_DIR_ . '/.htaccess');
+        if (!parent::install()) {
+            return false;
+        }
+
+        // Only set defaults if not already configured (preserve values across reinstalls)
+        $defaults = [
+            self::CONFIG_LOGS_PATH    => ($_SERVER['HOME'] ?? '') . '/admin/logs/',
+            self::CONFIG_HTACCESS_PATH => _PS_ROOT_DIR_ . '/.htaccess',
+            self::CONFIG_LINES_APACHE => 5000,
+            self::CONFIG_LINES_HTTP   => 10000,
+            self::CONFIG_LINES_PHP    => 5000,
+            self::CONFIG_LINES_SITES  => 2000,
+        ];
+
+        foreach ($defaults as $key => $value) {
+            if (Configuration::get($key) === false) {
+                Configuration::updateValue($key, $value);
+            }
+        }
+
+        return true;
     }
 
     public function uninstall(): bool
     {
         return parent::uninstall()
             && Configuration::deleteByName(self::CONFIG_LOGS_PATH)
-            && Configuration::deleteByName(self::CONFIG_HTACCESS_PATH);
+            && Configuration::deleteByName(self::CONFIG_HTACCESS_PATH)
+            && Configuration::deleteByName(self::CONFIG_LINES_APACHE)
+            && Configuration::deleteByName(self::CONFIG_LINES_HTTP)
+            && Configuration::deleteByName(self::CONFIG_LINES_PHP)
+            && Configuration::deleteByName(self::CONFIG_LINES_SITES);
     }
 
     public function getContent(): void

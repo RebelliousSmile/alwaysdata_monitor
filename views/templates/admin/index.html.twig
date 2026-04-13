@@ -17,21 +17,49 @@
 {% endfor %}
 
 {# ------------------------------------------------------------------ #}
-{# Section 1: Settings form                                             #}
+{# Top action bar                                                       #}
 {# ------------------------------------------------------------------ #}
-<div class="card mb-4">
+<div class="d-flex align-items-center mb-3">
+    <button type="button" class="btn btn-outline-secondary btn-sm mr-2" id="btn-toggle-config">
+        <i class="material-icons" style="font-size:1rem;vertical-align:middle">settings</i>
+        Paramètres
+    </button>
+    {% if logsPath is not empty %}
+    <button type="button" class="btn btn-primary btn-sm" id="btn-analyse">
+        <i class="material-icons" style="font-size:1rem;vertical-align:middle">refresh</i>
+        Actualiser
+    </button>
+    <div id="analyse-spinner" class="ml-2" style="display:none">
+        <div class="spinner-border spinner-border-sm text-primary" role="status">
+            <span class="sr-only">Analyse en cours...</span>
+        </div>
+        <span class="ml-1 text-muted small">Analyse en cours...</span>
+    </div>
+    {% endif %}
+</div>
+
+{# ------------------------------------------------------------------ #}
+{# Configuration form (hidden if already configured)                   #}
+{# ------------------------------------------------------------------ #}
+<div id="config-section" class="card mb-4" {% if logsPath is not empty %}style="display:none"{% endif %}>
     <div class="card-header">
         <h3 class="card-header-title">
             <i class="material-icons">settings</i>
-            {{ 'Configuration'|trans({}, 'Modules.Scalwaysdata.Admin') }}
+            Configuration
         </h3>
     </div>
     <div class="card-body">
+        {% if logsPath is empty %}
+        <div class="alert alert-warning">
+            <i class="material-icons align-middle mr-1" style="font-size:1rem">warning</i>
+            Configurez le chemin des logs pour commencer.
+        </div>
+        {% endif %}
         <form method="post" action="{{ path('sc_alwaysdata_index') }}">
             <input type="hidden" name="_token" value="{{ csrf_token('sc_alwaysdata_index') }}">
 
             <div class="form-group">
-                <label for="logs_path">{{ 'Chemin des logs'|trans({}, 'Modules.Scalwaysdata.Admin') }}</label>
+                <label for="logs_path">Chemin des logs</label>
                 <input
                     type="text"
                     id="logs_path"
@@ -42,12 +70,12 @@
                     required
                 >
                 <small class="form-text text-muted">
-                    {{ 'Chemin absolu vers le répertoire des logs Alwaysdata (ex: %hint%)'|trans({'%hint%': logsPathHint}, 'Modules.Scalwaysdata.Admin') }}
+                    Chemin absolu vers le répertoire des logs Alwaysdata (ex : {{ logsPathHint }})
                 </small>
             </div>
 
             <div class="form-group">
-                <label for="htaccess_path">{{ 'Chemin .htaccess'|trans({}, 'Modules.Scalwaysdata.Admin') }}</label>
+                <label for="htaccess_path">Chemin .htaccess</label>
                 <input
                     type="text"
                     id="htaccess_path"
@@ -56,115 +84,64 @@
                     value="{{ htaccessPath }}"
                 >
                 <small class="form-text text-muted">
-                    {{ 'Chemin absolu vers le fichier .htaccess de PrestaShop.'|trans({}, 'Modules.Scalwaysdata.Admin') }}
+                    Chemin absolu vers le fichier .htaccess de PrestaShop.
                 </small>
+            </div>
+
+            <div class="form-group">
+                <label>Lignes lues (tail -n) par source</label>
+                <div class="form-row">
+                    {% for dir, default in {apache: 5000, http: 10000, php: 5000, sites: 2000} %}
+                    <div class="col-md-3">
+                        <div class="input-group mb-2">
+                            <div class="input-group-prepend">
+                                <span class="input-group-text" style="min-width:60px">{{ dir }}</span>
+                            </div>
+                            <input type="number" name="lines_{{ dir }}" class="form-control"
+                                   value="{{ linesPerSource[dir] ?? default }}" min="100" max="100000">
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                <small class="form-text text-muted">Nombre de lignes lues depuis la fin de chaque fichier log.</small>
             </div>
 
             <button type="submit" class="btn btn-primary">
                 <i class="material-icons">save</i>
-                {{ 'Sauvegarder'|trans({}, 'Modules.Scalwaysdata.Admin') }}
+                Sauvegarder
             </button>
         </form>
     </div>
 </div>
 
-{# ------------------------------------------------------------------ #}
-{# Section 2: Analysis trigger                                          #}
-{# ------------------------------------------------------------------ #}
-<div class="card mb-4">
-    <div class="card-header">
-        <h3 class="card-header-title">
-            <i class="material-icons">analytics</i>
-            {{ 'Analyse'|trans({}, 'Modules.Scalwaysdata.Admin') }}
-        </h3>
-    </div>
-    <div class="card-body">
-        {% if logsPath is empty %}
-            <div class="alert alert-warning mb-0" role="alert">
-                {{ 'Veuillez configurer le chemin des logs avant de lancer l\'analyse.'|trans({}, 'Modules.Scalwaysdata.Admin') }}
-            </div>
-        {% else %}
-            <button type="button" class="btn btn-primary" id="btn-analyse">
-                <i class="material-icons">play_arrow</i>
-                {{ 'Analyser les logs du jour'|trans({}, 'Modules.Scalwaysdata.Admin') }}
-            </button>
-            <div id="analyse-spinner" class="mt-3" style="display:none">
-                <div class="spinner-border text-primary" role="status">
-                    <span class="sr-only">{{ 'Analyse en cours...'|trans({}, 'Modules.Scalwaysdata.Admin') }}</span>
-                </div>
-                <span class="ml-2 text-muted">{{ 'Analyse en cours...'|trans({}, 'Modules.Scalwaysdata.Admin') }}</span>
-            </div>
-        {% endif %}
-    </div>
+{% if logsPath is empty %}
+<div class="alert alert-info">
+    <i class="material-icons align-middle mr-1">info</i>
+    Renseignez le chemin des logs ci-dessus pour démarrer l'analyse.
 </div>
+{% endif %}
 
 <input type="hidden" id="csrf-apply-block" value="{{ csrf_token('sc_alwaysdata_apply_block') }}">
 
 {# ------------------------------------------------------------------ #}
-{# Section 3: Results (populated by JS)                                 #}
+{# Results (populated by JS)                                           #}
 {# ------------------------------------------------------------------ #}
 <div id="results-section" style="display:none">
 
     {# Source status badges #}
     <div id="sources-status" class="mb-3"></div>
 
-    {# Crawlers subsection #}
-    <div class="card mb-4" id="crawlers-section">
+    {# Log viewer — tabs built by JS #}
+    <div class="card mb-4" id="logs-viewer-section">
         <div class="card-header">
             <h3 class="card-header-title">
-                <i class="material-icons">bug_report</i>
-                {{ 'Crawlers détectés'|trans({}, 'Modules.Scalwaysdata.Admin') }}
+                <i class="material-icons">list_alt</i>
+                Logs du jour
             </h3>
         </div>
         <div class="card-body p-0">
-            <table id="crawlers-table" class="table table-sm mb-0">
-                <thead class="thead-light">
-                    <tr>
-                        <th>{{ 'IP'|trans({}, 'Modules.Scalwaysdata.Admin') }}</th>
-                        <th>{{ 'User-Agents'|trans({}, 'Modules.Scalwaysdata.Admin') }}</th>
-                        <th>{{ 'Requêtes/jour'|trans({}, 'Modules.Scalwaysdata.Admin') }}</th>
-                        <th>{{ 'Raison'|trans({}, 'Modules.Scalwaysdata.Admin') }}</th>
-                        <th>{{ 'Action'|trans({}, 'Modules.Scalwaysdata.Admin') }}</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <tr>
-                        <td colspan="5" class="text-center text-muted">
-                            {{ 'Aucun crawler invasif détecté'|trans({}, 'Modules.Scalwaysdata.Admin') }}
-                        </td>
-                    </tr>
-                </tbody>
-            </table>
-        </div>
-    </div>
-
-    {# PHP Errors subsection #}
-    <div class="card" id="php-errors-section">
-        <div class="card-header">
-            <h3 class="card-header-title">
-                <i class="material-icons">error_outline</i>
-                {{ 'Erreurs PHP'|trans({}, 'Modules.Scalwaysdata.Admin') }}
-            </h3>
-        </div>
-        <div class="card-body p-0">
-            <table id="php-errors-table" class="table table-sm mb-0">
-                <thead class="thead-light">
-                    <tr>
-                        <th>{{ 'Niveau'|trans({}, 'Modules.Scalwaysdata.Admin') }}</th>
-                        <th>{{ 'Fichier'|trans({}, 'Modules.Scalwaysdata.Admin') }}</th>
-                        <th>{{ 'Ligne'|trans({}, 'Modules.Scalwaysdata.Admin') }}</th>
-                        <th>{{ 'Message'|trans({}, 'Modules.Scalwaysdata.Admin') }}</th>
-                        <th>{{ 'Occurrences'|trans({}, 'Modules.Scalwaysdata.Admin') }}</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <tr>
-                        <td colspan="5" class="text-center text-muted">
-                            {{ 'Aucune erreur PHP détectée'|trans({}, 'Modules.Scalwaysdata.Admin') }}
-                        </td>
-                    </tr>
-                </tbody>
-            </table>
+            <ul class="nav nav-tabs px-3 pt-2" id="logs-tabs" role="tablist"></ul>
+            <div class="tab-content" id="logs-tab-content"></div>
         </div>
     </div>
 
@@ -176,6 +153,7 @@
 <script>
 var analyseUrl = '{{ path('sc_alwaysdata_analyse') }}';
 var applyBlockUrl = '{{ path('sc_alwaysdata_apply_block') }}';
+var applyUnblockUrl = '{{ path('sc_alwaysdata_apply_unblock') }}';
 </script>
 
 <script>
@@ -183,15 +161,21 @@ document.addEventListener('DOMContentLoaded', function() {
     var btn = document.getElementById('btn-analyse');
     var spinner = document.getElementById('analyse-spinner');
     var results = document.getElementById('results-section');
+    var configSection = document.getElementById('config-section');
+    var btnToggleConfig = document.getElementById('btn-toggle-config');
+
+    // Toggle config form
+    btnToggleConfig.addEventListener('click', function() {
+        var hidden = configSection.style.display === 'none';
+        configSection.style.display = hidden ? 'block' : 'none';
+    });
 
     if (!btn) return;
 
-    btn.addEventListener('click', function() {
+    function runAnalysis() {
         btn.disabled = true;
-        spinner.style.display = 'block';
+        spinner.style.display = 'inline-flex';
         results.style.display = 'none';
-
-        var csrfToken = getCsrfToken();
 
         fetch(analyseUrl, {
             method: 'POST',
@@ -199,16 +183,29 @@ document.addEventListener('DOMContentLoaded', function() {
                 'Content-Type': 'application/json',
                 'X-Requested-With': 'XMLHttpRequest'
             },
-            body: JSON.stringify({_token: csrfToken})
+            body: JSON.stringify({_token: getCsrfToken()})
         })
-        .then(function(r) { return r.json(); })
+        .then(function(r) {
+            var contentType = r.headers.get('content-type') || '';
+            if (!contentType.includes('application/json')) {
+                return r.text().then(function(html) {
+                    throw new Error('Le serveur a renvoyé du HTML (status ' + r.status + '). Vérifiez les logs serveur ou videz le cache Symfony.');
+                });
+            }
+            return r.json();
+        })
         .then(function(data) { renderResults(data); })
         .catch(function(err) { showError(err.message); })
         .finally(function() {
             btn.disabled = false;
             spinner.style.display = 'none';
         });
-    });
+    }
+
+    btn.addEventListener('click', runAnalysis);
+
+    // Auto-run on page load
+    runAnalysis();
 
     function renderResults(data) {
         if (data.error) {
@@ -217,17 +214,13 @@ document.addEventListener('DOMContentLoaded', function() {
         }
         results.style.display = 'block';
         renderSources(data.sources || []);
-        renderCrawlers(data.crawlers || []);
-        renderPhpErrors(data.php_errors || []);
+        renderLogViewer(data.sources || [], data.crawlers || [], data.php_errors || [], data.blocked_ips || [], data.blocked_uas || []);
     }
 
     function renderSources(sources) {
         var container = document.getElementById('sources-status');
         if (!container) return;
-        if (!sources.length) {
-            container.innerHTML = '';
-            return;
-        }
+        if (!sources.length) { container.innerHTML = ''; return; }
         container.innerHTML = sources.map(function(s) {
             var cls = 'success';
             var label = escapeHtml(s.source);
@@ -242,64 +235,231 @@ document.addEventListener('DOMContentLoaded', function() {
         }).join('');
     }
 
-    function renderCrawlers(crawlers) {
-        var tbody = document.querySelector('#crawlers-table tbody');
-        if (!tbody) return;
-        if (!crawlers.length) {
-            tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">Aucun crawler invasif d\u00e9tect\u00e9</td></tr>';
-            return;
-        }
-        tbody.innerHTML = crawlers.map(function(c) {
-            var userAgents = (c.user_agents || []).map(function(ua) {
-                return escapeHtml(ua);
-            }).join('<br>');
-            var action;
-            if (c.already_blocked) {
-                action = '<span class="badge badge-secondary">D\u00e9j\u00e0 bloqu\u00e9</span>';
+    function renderLogViewer(sources, crawlers, phpErrors, blockedIps, blockedUas) {
+        var tabs = document.getElementById('logs-tabs');
+        var content = document.getElementById('logs-tab-content');
+        if (!tabs || !content) return;
+
+        tabs.innerHTML = '';
+        content.innerHTML = '';
+
+        var savedTab = localStorage.getItem('sc_alwaysdata_tab') || '';
+
+        sources.forEach(function(s, i) {
+            var id = 'log-tab-' + s.source;
+            var isActive = savedTab ? (id === savedTab) : (i === 0);
+            var active = isActive ? ' active' : '';
+            var show = isActive ? ' show active' : '';
+
+            var label = s.source;
+            if (s.error) {
+                label += ' <span class="badge badge-danger ml-1">erreur</span>';
             } else {
-                action = '<button class="btn btn-sm btn-danger apply-block"'
-                    + ' data-type="ip"'
-                    + ' data-value="' + escapeHtml(c.ip) + '">'
-                    + 'Bloquer l\'IP'
-                    + '</button>';
+                label += ' <span class="badge badge-secondary ml-1">' + (s.line_count || 0) + ' lignes</span>';
             }
-            return '<tr class="' + (c.already_blocked ? 'text-muted' : '') + '">'
-                + '<td>' + escapeHtml(c.ip) + '</td>'
-                + '<td><small>' + userAgents + '</small></td>'
-                + '<td>' + escapeHtml(String(c.request_count)) + '</td>'
-                + '<td>' + escapeHtml(String(c.reason || '')) + '</td>'
-                + '<td>' + action + '</td>'
-                + '</tr>';
-        }).join('');
+
+            tabs.innerHTML += '<li class="nav-item">'
+                + '<a class="nav-link' + active + '" data-toggle="tab" href="#' + id + '" data-tab-id="' + id + '">' + label + '</a>'
+                + '</li>';
+
+            var analysisBlock = '';
+            if (s.source === 'http') {
+                analysisBlock = buildCrawlersBlock(crawlers || [], blockedIps || [], blockedUas || []);
+            } else if (s.source === 'php') {
+                analysisBlock = buildPhpErrorsBlock(phpErrors || []);
+            }
+
+            var logBlock;
+            if (s.error) {
+                logBlock = '<div class="alert alert-danger m-3">' + escapeHtml(s.error) + '</div>';
+            } else if (!s.preview || !s.preview.length) {
+                logBlock = '<div class="alert alert-info m-3">Aucune ligne disponible.</div>';
+            } else {
+                var lines = s.preview.map(function(l) { return escapeHtml(l); }).join('\n');
+                logBlock = '<pre class="m-0 p-3" style="font-size:0.75rem;max-height:400px;overflow-y:auto;background:#1e1e1e;color:#d4d4d4;white-space:pre-wrap;word-break:break-all;">'
+                    + lines + '</pre>';
+            }
+
+            content.innerHTML += '<div class="tab-pane fade' + show + '" id="' + id + '">'
+                + analysisBlock + logBlock + '</div>';
+        });
+
+        tabs.querySelectorAll('a[data-toggle="tab"]').forEach(function(a) {
+            a.addEventListener('shown.bs.tab', function() {
+                localStorage.setItem('sc_alwaysdata_tab', this.dataset.tabId);
+            });
+        });
+
         attachBlockHandlers();
+        attachUnblockHandlers();
     }
 
-    function renderPhpErrors(errors) {
-        var tbody = document.querySelector('#php-errors-table tbody');
-        if (!tbody) return;
-        if (!errors.length) {
-            tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">Aucune erreur PHP d\u00e9tect\u00e9e</td></tr>';
-            return;
-        }
-        var levelClass = {
-            fatal: 'danger',
-            error: 'danger',
-            warning: 'warning',
-            notice: 'secondary',
-            deprecated: 'light'
-        };
-        tbody.innerHTML = errors.map(function(e) {
-            var cls = levelClass[e.level] || 'secondary';
-            var filePath = String(e.file || '');
-            var file = filePath.length > 50 ? '...' + filePath.slice(-50) : filePath;
-            return '<tr>'
-                + '<td><span class="badge badge-' + cls + '">' + escapeHtml(e.level) + '</span></td>'
-                + '<td><small>' + escapeHtml(file) + '</small></td>'
-                + '<td>' + escapeHtml(String(e.line || '-')) + '</td>'
-                + '<td><small>' + escapeHtml(e.message || '') + '</small></td>'
-                + '<td>' + escapeHtml(String(e.count || 0)) + '</td>'
+    function buildCrawlersBlock(crawlers, blockedIps, blockedUas) {
+        // Crawlers detected in today's logs, not yet blocked
+        var active = crawlers.filter(function(c) { return !c.already_blocked; });
+
+        // Index crawlers-from-log by IP for quick lookup (to enrich the blocked section)
+        var crawlerByIp = {};
+        crawlers.forEach(function(c) {
+            (c.ips || []).forEach(function(ip) { crawlerByIp[ip] = c; });
+        });
+
+        var theadDetected = '<thead class="thead-light"><tr>'
+            + '<th>Bot / IP</th><th>User-Agents</th><th>Requ\u00eates/jour</th><th>Raison</th><th>Action</th>'
+            + '</tr></thead>';
+
+        // --- Section 1 : crawlers détectés aujourd'hui (non bloqués) ---
+        var activeRows = active.length
+            ? active.map(function(c) {
+                var isKnown = c.reason === 'known_bot';
+                var ipList = c.ips || [];
+
+                // Bot/IP column
+                var ipCell;
+                if (isKnown) {
+                    ipCell = '<strong>' + escapeHtml(c.matched_bot || '') + '</strong>'
+                        + (ipList.length ? '<br><small class="text-muted">' + ipList.length + '\u00a0IP(s)</small>' : '');
+                } else {
+                    ipCell = '<code>' + escapeHtml(ipList[0] || '?') + '</code>';
+                }
+
+                // UA column
+                var uaList = c.user_agents || [];
+                var uaCell = uaList.length
+                    ? '<small style="word-break:break-all">' + escapeHtml(uaList[0]) + '</small>'
+                      + (uaList.length > 1 ? ' <span class="badge badge-light">+' + (uaList.length - 1) + '</span>' : '')
+                    : '<em class="text-muted">-</em>';
+
+                // Actions
+                var actions;
+                if (isKnown) {
+                    actions = '<button class="btn btn-sm btn-danger apply-block" data-type="ua" data-value="' + escapeAttr(c.matched_bot || '') + '">'
+                        + 'Bloquer ' + escapeHtml(c.matched_bot || '') + '</button>';
+                } else {
+                    actions = '<button class="btn btn-sm btn-danger apply-block" data-type="ip" data-value="' + escapeAttr(ipList[0] || '') + '">'
+                        + 'Bloquer l\'IP</button>';
+                }
+
+                var reasonBadge = '<span class="badge badge-' + (isKnown ? 'warning' : 'info') + '">'
+                    + (isKnown ? 'Bot connu' : 'Haute fr\u00e9quence') + '</span>';
+
+                return '<tr>'
+                    + '<td style="min-width:140px">' + ipCell + '</td>'
+                    + '<td>' + uaCell + '</td>'
+                    + '<td class="text-right">' + escapeHtml(String(c.request_count)) + '</td>'
+                    + '<td>' + reasonBadge + '</td>'
+                    + '<td style="white-space:nowrap">' + actions + '</td>'
+                    + '</tr>';
+            }).join('')
+            : '<tr><td colspan="5" class="text-center text-muted">Aucun nouveau crawler invasif d\u00e9tect\u00e9</td></tr>';
+
+        var html = '<div class="p-3 border-bottom">'
+            + '<h6 class="mb-2"><i class="material-icons align-middle" style="font-size:1rem">bug_report</i>'
+            + ' Crawlers d\u00e9tect\u00e9s aujourd\'hui'
+            + (active.length ? ' <span class="badge badge-danger ml-1">' + active.length + '</span>' : '')
+            + '</h6>'
+            + '<table class="table table-sm mb-0">' + theadDetected + '<tbody>' + activeRows + '</tbody></table>'
+            + '</div>';
+
+        // --- Section 2 : règles .htaccess existantes (avec bouton Débloquer) ---
+        var hasBlocked = blockedIps.length > 0 || blockedUas.length > 0;
+        var theadBlocked = '<thead class="thead-light"><tr><th>Type</th><th>Valeur</th><th>Requ\u00eates aujourd\'hui</th><th>Action</th></tr></thead>';
+
+        var blockedRows = '';
+
+        blockedIps.forEach(function(ip) {
+            var entry = crawlerByIp[ip];
+            var count = entry ? entry.request_count : '-';
+            blockedRows += '<tr data-blocked-type="ip" data-blocked-value="' + escapeAttr(ip) + '">'
+                + '<td><span class="badge badge-secondary">IP</span></td>'
+                + '<td><code>' + escapeHtml(ip) + '</code></td>'
+                + '<td>' + escapeHtml(String(count)) + '</td>'
+                + '<td><button class="btn btn-sm btn-outline-warning apply-unblock" data-type="ip" data-value="' + escapeAttr(ip) + '">D\u00e9bloquer</button></td>'
                 + '</tr>';
-        }).join('');
+        });
+
+        blockedUas.forEach(function(ua) {
+            blockedRows += '<tr data-blocked-type="ua" data-blocked-value="' + escapeAttr(ua) + '">'
+                + '<td><span class="badge badge-secondary">User-Agent</span></td>'
+                + '<td><small>' + escapeHtml(ua) + '</small></td>'
+                + '<td>-</td>'
+                + '<td><button class="btn btn-sm btn-outline-warning apply-unblock" data-type="ua" data-value="' + escapeAttr(ua) + '">D\u00e9bloquer</button></td>'
+                + '</tr>';
+        });
+
+        if (!hasBlocked) {
+            blockedRows = '<tr><td colspan="4" class="text-center text-muted">Aucune r\u00e8gle de blocage dans .htaccess</td></tr>';
+        }
+
+        html += '<div class="p-3 border-bottom">'
+            + '<h6 class="mb-2"><i class="material-icons align-middle" style="font-size:1rem">block</i>'
+            + ' D\u00e9j\u00e0 bloqu\u00e9s dans .htaccess'
+            + (hasBlocked ? ' <span class="badge badge-secondary ml-1">' + (blockedIps.length + blockedUas.length) + '</span>' : '')
+            + '</h6>'
+            + '<table class="table table-sm mb-0">' + theadBlocked + '<tbody>' + blockedRows + '</tbody></table>'
+            + '</div>';
+
+        return html;
+    }
+
+    function buildPhpErrorsBlock(errors) {
+        var cls = {fatal:'danger',error:'danger',warning:'warning',notice:'secondary',deprecated:'light'};
+        var rows = !errors.length
+            ? '<tr><td colspan="5" class="text-center text-muted">Aucune erreur PHP d\u00e9tect\u00e9e</td></tr>'
+            : errors.map(function(e) {
+                var c = cls[e.level] || 'secondary';
+                var f = String(e.file || '');
+                f = f.length > 60 ? '...' + f.slice(-60) : f;
+                return '<tr><td><span class="badge badge-' + c + '">' + escapeHtml(e.level) + '</span></td>'
+                    + '<td><small>' + escapeHtml(f) + '</small></td>'
+                    + '<td>' + escapeHtml(String(e.line || '-')) + '</td>'
+                    + '<td><small>' + escapeHtml(e.message || '') + '</small></td>'
+                    + '<td>' + escapeHtml(String(e.count || 0)) + '</td></tr>';
+            }).join('');
+        return '<div class="p-3 border-bottom">'
+            + '<h6 class="mb-2"><i class="material-icons align-middle" style="font-size:1rem">error_outline</i> Erreurs PHP</h6>'
+            + '<table class="table table-sm mb-0"><thead class="thead-light"><tr>'
+            + '<th>Niveau</th><th>Fichier</th><th>Ligne</th><th>Message</th><th>Occurrences</th>'
+            + '</tr></thead><tbody>' + rows + '</tbody></table></div>';
+    }
+
+    function attachUnblockHandlers() {
+        document.querySelectorAll('.apply-unblock').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                var type = this.dataset.type;
+                var value = this.dataset.value;
+                var row = this.closest('tr');
+                var self = this;
+                self.disabled = true;
+
+                var formData = new URLSearchParams();
+                formData.append('_token', getCsrfToken());
+                formData.append('type', type);
+                formData.append('value', value);
+
+                fetch(applyUnblockUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                        'X-Requested-With': 'XMLHttpRequest'
+                    },
+                    body: formData.toString()
+                })
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (data.success) {
+                        row.style.opacity = '0.4';
+                        row.querySelector('td:last-child').innerHTML = '<span class="badge badge-light">D\u00e9bloqu\u00e9</span>';
+                    } else {
+                        alert('Erreur: ' + (data.message || 'Erreur inconnue'));
+                        self.disabled = false;
+                    }
+                })
+                .catch(function() {
+                    self.disabled = false;
+                });
+            });
+        });
     }
 
     function attachBlockHandlers() {
@@ -351,6 +511,13 @@ document.addEventListener('DOMContentLoaded', function() {
             .replace(/&/g, '&amp;')
             .replace(/</g, '&lt;')
             .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
+    }
+
+    function escapeAttr(str) {
+        return String(str)
+            .replace(/&/g, '&amp;')
             .replace(/"/g, '&quot;')
             .replace(/'/g, '&#039;');
     }
