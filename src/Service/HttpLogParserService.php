@@ -46,7 +46,7 @@ class HttpLogParserService
     public function parse(string $logFilePath): array
     {
         $isGz = str_ends_with($logFilePath, '.gz');
-        $handle = $isGz ? gzopen($logFilePath, 'rb') : fopen($logFilePath, 'rb');
+        $handle = $isGz ? @gzopen($logFilePath, 'rb') : @fopen($logFilePath, 'rb');
 
         if ($handle === false) {
             throw new \RuntimeException('Cannot open log file: ' . $logFilePath);
