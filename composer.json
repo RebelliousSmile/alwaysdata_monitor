@@ -13,8 +13,19 @@
             "ScAlwaysdata\\": "src/"
         }
     },
+    "autoload-dev": {
+        "psr-4": {
+            "ScAlwaysdata\\Tests\\": "tests/"
+        }
+    },
     "require": {
         "php": "^8.1"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^10.5"
+    },
+    "scripts": {
+        "test": "vendor/bin/phpunit --testdox"
     },
     "config": {
         "preferred-install": "dist"

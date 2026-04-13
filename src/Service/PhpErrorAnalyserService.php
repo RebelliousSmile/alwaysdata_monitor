@@ -23,7 +23,15 @@ class PhpErrorAnalyserService
         'deprecated' => 1,
     ];
 
-    private const LOG_PATTERN = '/\[(?P<date>[^\]]+)\]\s+PHP\s+(?P<level>Fatal error|Parse error|Warning|Notice|Deprecated|Strict Standards):\s+(?P<message>.+?)\s+in\s+(?P<file>[^\s:]+)(?::(?P<line>\d+))?/i';
+    /**
+     * Matches PHP error lines in various formats:
+     *   [date] PHP Fatal error:  message in /file.php on line 42
+     *   [date] PHP Fatal error:  message in /file.php:42
+     *   PHP Fatal error:  message in /file.php:42            (no date)
+     *   [...] child N said into stderr: "PHP Fatal error: ..."  (PHP-FPM)
+     * Anchored at word boundary to avoid false positives.
+     */
+    private const LOG_PATTERN = '/\bPHP\s+(?P<level>Fatal error|Parse error|Warning|Notice|Deprecated|Strict Standards):\s+(?P<message>.+?)(?:\s+in\s+(?P<file>\S+?)(?:\s+on\s+line\s+(?P<line>\d+)|:(?P<line2>\d+))?)?"?\s*$/im';
 
     private const LEVEL_MAP = [
         'fatal error' => 'fatal',
@@ -40,7 +48,7 @@ class PhpErrorAnalyserService
         $entries = [];
 
         foreach ($logSources as $source) {
-            if (!isset($source['source'], $source['lines'], $source['error'])) {
+            if (!isset($source['source'], $source['lines'])) {
                 continue;
             }
 
@@ -68,8 +76,10 @@ class PhpErrorAnalyserService
 
                 $rawLevel = strtolower($matches['level']);
                 $level = self::LEVEL_MAP[$rawLevel] ?? 'error';
-                $file = $matches['file'];
-                $parsedLine = isset($matches['line']) && $matches['line'] !== '' ? (int) $matches['line'] : null;
+                $file = $matches['file'] ?? '';
+                $lineStr = (!empty($matches['line']) ? $matches['line'] : null)
+                    ?? (!empty($matches['line2']) ? $matches['line2'] : null);
+                $parsedLine = $lineStr !== null ? (int) $lineStr : null;
                 $message = $matches['message'];
 
                 $hash = md5($level . $file . (string) $parsedLine . $message);
