@@ -1,8 +1,8 @@
 services:
   _defaults:
     public: true
-    autowire: true
-    autoconfigure: true
+    autowire: false
+    autoconfigure: false
 
   # Services
   ScAlwaysdata\Service\LogReaderService:
@@ -27,5 +27,3 @@ services:
       - '@ScAlwaysdata\Service\HtaccessService'
     calls:
       - [setContainer, ['@service_container']]
-    tags:
-      - { name: controller.service_arguments }
