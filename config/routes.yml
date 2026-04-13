@@ -19,3 +19,10 @@ sc_alwaysdata_apply_block:
   defaults:
     _controller: sc_alwaysdata.controller.sc_alwaysdata::applyBlockAction
     _legacy_controller: AdminScAlwaysdata
+
+sc_alwaysdata_apply_unblock:
+  path: /sc-alwaysdata/apply-unblock
+  methods: [POST]
+  defaults:
+    _controller: sc_alwaysdata.controller.sc_alwaysdata::applyUnblockAction
+    _legacy_controller: AdminScAlwaysdata
