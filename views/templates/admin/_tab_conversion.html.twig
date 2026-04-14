@@ -1,0 +1,71 @@
+{#
+ * SC Alwaysdata — Tab partial: Conversion funnel
+ * Included by index.html.twig inside #stats-tab-content
+ #}
+
+<div class="tab-pane fade p-3" id="tab-conversion" role="tabpanel">
+    <div id="tab-conversion-content">
+        <div class="text-center text-muted py-4">
+            <div class="spinner-border spinner-border-sm" role="status"></div>
+            Chargement…
+        </div>
+    </div>
+</div>
+
+<script>
+function renderConversion(data, date, period) {
+    var s = data.snapshot;
+    var el = document.getElementById('tab-conversion-content');
+    if (!el) return;
+
+    if (!s) {
+        el.innerHTML = '<div class="alert alert-info">Aucune donnée pour le ' + esc(date) + '. Le cron a-t-il tourné ?</div>';
+        return;
+    }
+
+    var steps = [
+        ['Vues produit',         s.views_product,    null],
+        ['Ajouts panier',        s.cart_adds,         s.views_product],
+        ['Vues panier',          s.views_cart,        s.cart_adds],
+        ['Vues checkout',        s.views_checkout,    s.views_cart],
+        ['POST checkout',        s.post_checkout,     s.views_checkout],
+        ['Commandes confirmées', s.orders_confirmed,  s.post_checkout],
+    ];
+
+    var funnelRows = steps.map(function(step) {
+        return '<tr><td>' + esc(step[0]) + '</td>'
+            + '<td class="text-right font-weight-bold">' + esc(String(step[1])) + '</td>'
+            + '<td class="text-right text-muted">' + (step[2] !== null ? pct(step[1], step[2]) : '—') + '</td>'
+            + '</tr>';
+    }).join('');
+
+    var periodRows = (data.period || []).map(function(r) {
+        return '<tr><td>' + esc(r.stat_date) + '</td>'
+            + '<td>' + esc(String(r.views_product)) + '</td>'
+            + '<td>' + esc(String(r.cart_adds)) + '</td>'
+            + '<td>' + esc(String(r.post_checkout)) + '</td>'
+            + '<td><strong>' + esc(String(r.orders_confirmed)) + '</strong></td></tr>';
+    }).join('') || '<tr><td colspan="5" class="text-muted text-center">Aucune donnée sur la période</td></tr>';
+
+    // 500 funnel groupés par path
+    var detail500 = (s.errors_500_checkout_detail || []);
+    var byPath = {};
+    detail500.forEach(function(e) {
+        byPath[e.path] = (byPath[e.path] || 0) + 1;
+    });
+    var funnel500Rows = Object.keys(byPath).sort(function(a, b) { return byPath[b] - byPath[a]; })
+        .map(function(p) {
+            return '<tr><td><small>' + esc(p) + '</small></td><td class="text-right font-weight-bold">' + esc(String(byPath[p])) + '</td></tr>';
+        }).join('') || '<tr><td colspan="2" class="text-muted text-center small">Aucune erreur 500 sur le funnel.</td></tr>';
+
+    el.innerHTML = '<div class="row">'
+        + '<div class="col-md-5 mb-3"><h6>Funnel — ' + esc(date) + '</h6>'
+        + '<table class="table table-sm"><thead class="thead-light"><tr><th>Étape</th><th class="text-right">N</th><th class="text-right">Taux</th></tr></thead><tbody>' + funnelRows + '</tbody></table></div>'
+        + '<div class="col-md-7 mb-3"><h6>Erreurs 500 funnel</h6>'
+        + '<table class="table table-sm"><thead class="thead-light"><tr><th>Page</th><th class="text-right">Erreurs</th></tr></thead><tbody>' + funnel500Rows + '</tbody></table>'
+        + '</div>'
+        + '</div>'
+        + '<h6>Évolution sur ' + period + 'j</h6>'
+        + '<table class="table table-sm"><thead class="thead-light"><tr><th>Date</th><th>Vues produit</th><th>Ajouts panier</th><th>POST checkout</th><th>Commandes</th></tr></thead><tbody>' + periodRows + '</tbody></table>';
+}
+</script>

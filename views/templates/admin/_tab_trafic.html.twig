@@ -1,0 +1,149 @@
+{#
+ * SC Alwaysdata — Tab partial: Statistiques trafic
+ * Included by index.html.twig inside #stats-tab-content
+ #}
+
+<div class="tab-pane fade{% if isActiveTab is defined and isActiveTab %} show active{% endif %} p-3" id="tab-trafic" role="tabpanel">
+    <div id="tab-trafic-content">
+        <div class="text-center text-muted py-4">
+            <div class="spinner-border spinner-border-sm" role="status"></div>
+            Chargement…
+        </div>
+    </div>
+</div>
+
+<script>
+function renderTrafic(data, date, period) {
+    var s = data.snapshot;
+    var el = document.getElementById('tab-trafic-content');
+    if (!el) return;
+
+    if (!s) {
+        el.innerHTML = '<div class="alert alert-info">Aucune donnée pour le ' + esc(date) + '. Le cron a-t-il tourné ?</div>'
+            + renderCronConfig(data);
+        return;
+    }
+
+    // Snapshot cards
+    var cards = [
+        ['Requêtes totales', s.requests_total, 'secondary'],
+        ['Requêtes humaines', s.requests_human, 'primary'],
+        ['Robots', s.requests_total - s.requests_human, 'secondary'],
+        ['Desktop', s.desktop, 'info'],
+        ['Mobile', s.mobile, 'info'],
+        ['500 front', s.errors_500_front + s.errors_500_checkout, (s.errors_500_front + s.errors_500_checkout) > 0 ? 'danger' : 'success'],
+        ['500 BO', s.errors_500_bo, s.errors_500_bo > 0 ? 'warning' : 'success'],
+        ['— dont funnel', s.errors_500_checkout, s.errors_500_checkout > 0 ? 'warning' : 'success'],
+    ].map(function(c) {
+        return '<div class="col-6 col-md-3 col-lg-auto mb-2">'
+            + '<div class="card border-' + c[2] + ' text-center px-3 py-2" style="min-width:110px">'
+            + '<div class="small text-muted">' + esc(c[0]) + '</div>'
+            + '<div class="h4 mb-0 text-' + c[2] + '">' + esc(String(c[1])) + '</div>'
+            + '</div></div>';
+    }).join('');
+
+    // Top pages
+    var pages = (s.top_pages || []).slice(0, 10);
+    var pagesRows = pages.length
+        ? pages.map(function(p) {
+            return '<tr><td><small>' + esc(p.path) + '</small></td><td class="text-right">' + esc(String(p.count)) + '</td></tr>';
+        }).join('')
+        : '<tr><td colspan="2" class="text-muted text-center">-</td></tr>';
+
+    // Hourly
+    var hourly = s.hourly_breakdown || {};
+    var hourlyRows = Object.keys(hourly).map(function(h) {
+        return '<tr><td>' + esc(h) + 'h</td><td>' + esc(String(hourly[h])) + '</td></tr>';
+    }).filter(function(_, i) { return hourly[Object.keys(hourly)[i]] > 0; }).join('');
+
+    // Period table
+    var periodRows = (data.period || []).map(function(r) {
+        return '<tr><td>' + esc(r.stat_date) + '</td><td>' + esc(String(r.requests_human)) + '</td>'
+            + '<td>' + esc(String(r.views_product)) + '</td>'
+            + '<td>' + (function(v){ return v > 0 ? '<span class="badge badge-danger">' + v + '</span>' : '0'; })(r.errors_500_front + r.errors_500_checkout) + '</td>'
+            + '</tr>';
+    }).join('') || '<tr><td colspan="4" class="text-muted text-center">Aucune donnée sur la période</td></tr>';
+
+    // Pages 500 — front inclut les pages funnel (/panier, /commande)
+    var pages500 = s.errors_500_pages || {};
+    var combinedFront = Object.assign({}, pages500.front || {});
+    (s.errors_500_checkout_detail || []).forEach(function(e) {
+        combinedFront[e.path] = (combinedFront[e.path] || 0) + 1;
+    });
+    // Trier par count décroissant
+    var combinedFrontSorted = {};
+    Object.keys(combinedFront).sort(function(a, b) { return combinedFront[b] - combinedFront[a]; })
+        .forEach(function(k) { combinedFrontSorted[k] = combinedFront[k]; });
+
+    function render500Pages(pages) {
+        var keys = Object.keys(pages || {});
+        if (!keys.length) return '<p class="text-muted small mb-0">Aucune erreur.</p>';
+        return '<table class="table table-sm mb-0"><tbody>'
+            + keys.map(function(p) {
+                return '<tr><td><small>' + esc(p) + '</small></td><td class="text-right">' + esc(String(pages[p])) + '</td></tr>';
+            }).join('') + '</tbody></table>';
+    }
+
+    el.innerHTML = '<div class="row no-gutters mb-3">' + cards + '</div>'
+        + '<div class="row">'
+        + '<div class="col-md-6 mb-3"><h6>Top 10 pages</h6>'
+        + '<table class="table table-sm"><thead class="thead-light"><tr><th>Page</th><th class="text-right">Vues</th></tr></thead><tbody>' + pagesRows + '</tbody></table></div>'
+        + '<div class="col-md-6 mb-3"><h6>Pages en erreur 500</h6>'
+        + '<p class="small text-muted mb-1">Front (funnel inclus)</p>' + render500Pages(combinedFrontSorted)
+        + '<p class="small text-muted mb-1 mt-2">BO</p>' + render500Pages(pages500.bo)
+        + '</div>'
+        + '</div>'
+        + '<h6>Évolution sur ' + period + 'j</h6>'
+        + '<table class="table table-sm"><thead class="thead-light"><tr><th>Date</th><th>Humaines</th><th>Vues produit</th><th>500 front</th></tr></thead><tbody>' + periodRows + '</tbody></table>'
+        ;
+}
+
+function renderCronConfig(data) {
+    if (!data.cronToken) return '';
+    return '<div class="mt-3 p-2 bg-light rounded">'
+        + '<small class="text-muted d-block mb-1">URL cron Alwaysdata :</small>'
+        + '<div class="input-group input-group-sm">'
+        + '<input type="text" class="form-control font-monospace" id="cron-url-input" value="' + esc(data.cronUrl || '') + '" readonly>'
+        + '<div class="input-group-append">'
+        + '<button class="btn btn-outline-secondary" type="button" onclick="var i=document.getElementById(\'cron-url-input\');i.select();document.execCommand(\'copy\')">Copier</button>'
+        + '</div>'
+        + '</div>'
+        + '</div>';
+}
+
+function runCron(cronUrl) {
+    var btn = document.getElementById('btn-run-cron');
+    var result = document.getElementById('cron-run-result');
+    if (!cronUrl) return;
+
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status"></span>';
+    }
+    if (result) result.innerHTML = '';
+
+    fetch(cronUrl)
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+            if (!result) return;
+            if (d.error) {
+                result.innerHTML = '<span class="text-danger">' + esc(d.error) + '</span>';
+            } else if (d.skipped) {
+                result.innerHTML = '<span class="text-warning">Déjà traité (' + esc(d.date) + ')</span>';
+            } else {
+                result.innerHTML = '<span class="text-success">OK — ' + esc(String(d.requests_total)) + ' req, '
+                    + esc(String(d.orders_confirmed)) + ' commandes (' + esc(d.date) + ')</span>';
+                setTimeout(function() { window.fetchStats && window.fetchStats(); }, 800);
+            }
+        })
+        .catch(function(e) {
+            if (result) result.innerHTML = '<span class="text-danger">' + esc(e.message) + '</span>';
+        })
+        .finally(function() {
+            if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="material-icons" style="font-size:1rem;vertical-align:middle">play_arrow</i> Cron J-1';
+            }
+        });
+}
+</script>
