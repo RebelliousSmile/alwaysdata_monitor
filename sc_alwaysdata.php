@@ -29,7 +29,7 @@ if (file_exists($autoloadPath)) {
 
 class sc_alwaysdata extends Module
 {
-    public const VERSION = '1.0.0';
+    public const VERSION = '1.2.0';
 
     public const CONFIG_LOGS_PATH = 'SC_ALWAYSDATA_LOGS_PATH';
     public const CONFIG_HTACCESS_PATH = 'SC_ALWAYSDATA_HTACCESS_PATH';
