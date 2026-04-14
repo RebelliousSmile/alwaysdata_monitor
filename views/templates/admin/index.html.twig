@@ -36,6 +36,14 @@
         <span class="ml-1 text-muted small">Analyse en cours...</span>
     </div>
     {% endif %}
+    {% if cronUrl is not empty %}
+    <button type="button" class="btn btn-outline-primary btn-sm ml-2" id="btn-run-cron"
+            onclick="runCron('{{ cronUrl|e('js') }}')">
+        <i class="material-icons" style="font-size:1rem;vertical-align:middle">play_arrow</i>
+        Cron J-1
+    </button>
+    <span id="cron-run-result" class="ml-2 small"></span>
+    {% endif %}
 </div>
 
 {# ------------------------------------------------------------------ #}
@@ -111,6 +119,30 @@
                 Sauvegarder
             </button>
         </form>
+
+        {% if cronUrl is not empty %}
+        <div class="mt-4 border-top pt-3">
+          <h6><i class="material-icons align-middle" style="font-size:1rem">schedule</i> Configuration cron Alwaysdata</h6>
+          <p class="text-muted small mb-2">
+            Dans le panneau Alwaysdata → <strong>Tâches planifiées</strong>, créer une tâche de type <strong>URL</strong> avec les paramètres suivants :
+          </p>
+          <table class="table table-sm table-bordered small">
+            <tr><th style="width:140px">Type</th><td>URL</td></tr>
+            <tr><th>Fréquence</th><td>Tous les jours à 02:00</td></tr>
+            <tr><th>URL</th><td>
+              <div class="input-group input-group-sm">
+                <input type="text" class="form-control font-monospace" id="cron-url-config" value="{{ cronUrl }}" readonly>
+                <div class="input-group-append">
+                  <button class="btn btn-outline-secondary" type="button"
+                          onclick="var i=document.getElementById('cron-url-config');i.select();document.execCommand('copy')">Copier</button>
+                </div>
+              </div>
+            </td></tr>
+          </table>
+          <small class="text-muted">Le cron parse le log HTTP de la veille et enregistre les métriques en base.</small>
+        </div>
+        {% endif %}
+
     </div>
 </div>
 
@@ -124,82 +156,68 @@
 <input type="hidden" id="csrf-apply-block" value="{{ csrf_token('sc_alwaysdata_apply_block') }}">
 
 {# ------------------------------------------------------------------ #}
-{# Stats & Conversion — chargées depuis la base (cron J-1)            #}
+{# Main tabs — Statistiques trafic | Conversion | Logs du jour         #}
 {# ------------------------------------------------------------------ #}
-<div class="card mb-4" id="stats-section">
+<div class="card mb-4" id="main-tabs-section">
     <div class="card-header d-flex align-items-center justify-content-between flex-wrap" style="gap:.5rem">
-        <ul class="nav nav-tabs card-header-tabs" id="stats-nav-tabs" role="tablist">
+        <ul class="nav nav-tabs card-header-tabs" id="main-nav-tabs" role="tablist">
+            {% if logsPath is not empty %}
             <li class="nav-item">
-                <a class="nav-link active" id="tab-trafic-link" data-toggle="tab" href="#tab-trafic" role="tab">
+                <a class="nav-link active" id="tab-logs-link" data-toggle="tab" href="#tab-logs" role="tab">
+                    <i class="material-icons align-middle" style="font-size:1rem">list_alt</i>
+                    Logs du jour
+                </a>
+            </li>
+            {% endif %}
+            <li class="nav-item">
+                <a class="nav-link {% if logsPath is empty %}active{% endif %}" id="tab-trafic-link" data-toggle="tab" href="#tab-trafic" role="tab">
                     <i class="material-icons align-middle" style="font-size:1rem">bar_chart</i>
                     Statistiques trafic
                 </a>
             </li>
             <li class="nav-item">
                 <a class="nav-link" id="tab-conversion-link" data-toggle="tab" href="#tab-conversion" role="tab">
-                    <i class="material-icons align-middle" style="font-size:1rem">trending_down</i>
+                    <i class="material-icons align-middle" style="font-size:1rem">trending_up</i>
                     Conversion
                 </a>
             </li>
         </ul>
-        <div class="d-flex align-items-center" style="gap:.5rem">
+        <div class="d-flex align-items-center d-none" id="stats-controls" style="gap:.5rem">
             <input type="date" id="stats-date-picker" class="form-control form-control-sm" style="width:auto">
             <div class="btn-group btn-group-sm" role="group">
-                <button type="button" class="btn btn-outline-secondary stats-period active" data-period="30">30j</button>
-                <button type="button" class="btn btn-outline-secondary stats-period" data-period="7">7j</button>
+                <button type="button" class="btn btn-outline-secondary stats-period" data-period="30">30j</button>
+                <button type="button" class="btn btn-outline-secondary stats-period active" data-period="7">7j</button>
             </div>
             <div id="stats-spinner" style="display:none">
                 <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
             </div>
         </div>
     </div>
-    <div class="tab-content" id="stats-tab-content">
+    <div class="tab-content" id="main-tab-content">
 
         {# --- Tab Trafic --- #}
-        <div class="tab-pane fade show active p-3" id="tab-trafic" role="tabpanel">
-            <div id="tab-trafic-content">
-                <div class="text-center text-muted py-4">
-                    <div class="spinner-border spinner-border-sm" role="status"></div>
-                    Chargement…
-                </div>
-            </div>
-        </div>
+        {{ include('@Modules/sc_alwaysdata/views/templates/admin/_tab_trafic.html.twig', {'isActiveTab': logsPath is empty}) }}
 
         {# --- Tab Conversion --- #}
-        <div class="tab-pane fade p-3" id="tab-conversion" role="tabpanel">
-            <div id="tab-conversion-content">
-                <div class="text-center text-muted py-4">
-                    <div class="spinner-border spinner-border-sm" role="status"></div>
-                    Chargement…
+        {{ include('@Modules/sc_alwaysdata/views/templates/admin/_tab_conversion.html.twig') }}
+
+        {# --- Tab Logs du jour --- #}
+        {% if logsPath is not empty %}
+        <div class="tab-pane fade show active" id="tab-logs" role="tabpanel">
+            {# Source status badges #}
+            <div id="sources-status" class="p-3 pb-0"></div>
+
+            {# Log viewer — tabs built by JS #}
+            <div id="logs-viewer-section">
+                <div class="px-3 pt-2">
+                    <ul class="nav nav-tabs" id="logs-tabs" role="tablist"></ul>
                 </div>
+                <div class="tab-content" id="logs-tab-content"></div>
             </div>
         </div>
+        {% endif %}
 
     </div>
-</div>
-
-{# ------------------------------------------------------------------ #}
-{# Results (populated by JS)                                           #}
-{# ------------------------------------------------------------------ #}
-<div id="results-section" style="display:none">
-
-    {# Source status badges #}
-    <div id="sources-status" class="mb-3"></div>
-
-    {# Log viewer — tabs built by JS #}
-    <div class="card mb-4" id="logs-viewer-section">
-        <div class="card-header">
-            <h3 class="card-header-title">
-                <i class="material-icons">list_alt</i>
-                Logs du jour
-            </h3>
-        </div>
-        <div class="card-body p-0">
-            <ul class="nav nav-tabs px-3 pt-2" id="logs-tabs" role="tablist"></ul>
-            <div class="tab-content" id="logs-tab-content"></div>
-        </div>
-    </div>
-
 </div>
 
 {# ------------------------------------------------------------------ #}
@@ -214,13 +232,26 @@ var conversionUrl = '{{ conversionUrl }}';
 </script>
 
 <script>
+// Helpers globaux utilisés par les partiels _tab_trafic et _tab_conversion
+function esc(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function pct(a, b) {
+    if (!b || b === 0) return '-';
+    return Math.round(a / b * 100) + '%';
+}
+</script>
+
+<script>
 (function() {
     var yesterday = (function() {
         var d = new Date(); d.setDate(d.getDate() - 1);
-        return d.toISOString().slice(0, 10);
+        var mm = String(d.getMonth() + 1).padStart(2, '0');
+        var dd = String(d.getDate()).padStart(2, '0');
+        return d.getFullYear() + '-' + mm + '-' + dd;
     })();
 
-    var currentPeriod = 30;
+    var currentPeriod = 7;
     var currentDate = yesterday;
     var activeTab = 'trafic';
 
@@ -228,31 +259,29 @@ var conversionUrl = '{{ conversionUrl }}';
     var spinner = document.getElementById('stats-spinner');
     if (datePicker) { datePicker.value = yesterday; datePicker.max = yesterday; }
 
-    function esc(s) {
-        return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-    }
-
-    function pct(a, b) {
-        if (!b || b === 0) return '-';
-        return Math.round(a / b * 100) + '%';
+    function postJson(url, params) {
+        var body = new URLSearchParams(params);
+        return fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-Requested-With': 'XMLHttpRequest' },
+            body: body.toString()
+        });
     }
 
     function fetchStats() {
         if (spinner) spinner.style.display = 'inline-block';
-        var url = statsUrl + '?date=' + currentDate + '&period=' + currentPeriod;
-        fetch(url, { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+        postJson(statsUrl, { date: currentDate, period: String(currentPeriod) })
             .then(function(r) { return r.json(); })
-            .then(function(d) { renderTrafic(d); })
+            .then(function(d) { renderTrafic(d, currentDate, currentPeriod); })
             .catch(function(e) { document.getElementById('tab-trafic-content').innerHTML = '<div class="alert alert-danger">Erreur: ' + esc(e.message) + '</div>'; })
             .finally(function() { if (spinner) spinner.style.display = 'none'; });
     }
 
     function fetchConversion() {
         if (spinner) spinner.style.display = 'inline-block';
-        var url = conversionUrl + '?date=' + currentDate + '&period=' + currentPeriod;
-        fetch(url, { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+        postJson(conversionUrl, { date: currentDate, period: String(currentPeriod) })
             .then(function(r) { return r.json(); })
-            .then(function(d) { renderConversion(d); })
+            .then(function(d) { renderConversion(d, currentDate, currentPeriod); })
             .catch(function(e) { document.getElementById('tab-conversion-content').innerHTML = '<div class="alert alert-danger">Erreur: ' + esc(e.message) + '</div>'; })
             .finally(function() { if (spinner) spinner.style.display = 'none'; });
     }
@@ -262,134 +291,8 @@ var conversionUrl = '{{ conversionUrl }}';
         else fetchConversion();
     }
 
-    function renderTrafic(data) {
-        var s = data.snapshot;
-        var el = document.getElementById('tab-trafic-content');
-        if (!el) return;
-
-        if (!s) {
-            el.innerHTML = '<div class="alert alert-info">Aucune donnée pour le ' + esc(currentDate) + '. Le cron a-t-il tourné ?</div>'
-                + renderCronConfig(data);
-            return;
-        }
-
-        // Snapshot cards
-        var cards = [
-            ['Requêtes totales', s.requests_total, 'secondary'],
-            ['Requêtes humaines', s.requests_human, 'primary'],
-            ['Desktop', s.desktop, 'info'],
-            ['Mobile', s.mobile, 'info'],
-            ['500 front', s.errors_500_front, s.errors_500_front > 0 ? 'danger' : 'success'],
-            ['500 BO', s.errors_500_bo, s.errors_500_bo > 0 ? 'warning' : 'success'],
-            ['500 checkout', s.errors_500_checkout, s.errors_500_checkout > 0 ? 'danger' : 'success'],
-        ].map(function(c) {
-            return '<div class="col-6 col-md-3 col-lg-auto mb-2">'
-                + '<div class="card border-' + c[2] + ' text-center px-3 py-2" style="min-width:110px">'
-                + '<div class="small text-muted">' + esc(c[0]) + '</div>'
-                + '<div class="h4 mb-0 text-' + c[2] + '">' + esc(String(c[1])) + '</div>'
-                + '</div></div>';
-        }).join('');
-
-        // Top pages
-        var pages = (s.top_pages || []).slice(0, 10);
-        var pagesRows = pages.length
-            ? pages.map(function(p) {
-                return '<tr><td><small>' + esc(p.path) + '</small></td><td class="text-right">' + esc(String(p.count)) + '</td></tr>';
-            }).join('')
-            : '<tr><td colspan="2" class="text-muted text-center">-</td></tr>';
-
-        // Hourly
-        var hourly = s.hourly_breakdown || {};
-        var hourlyRows = Object.keys(hourly).map(function(h) {
-            return '<tr><td>' + esc(h) + 'h</td><td>' + esc(String(hourly[h])) + '</td></tr>';
-        }).filter(function(_, i) { return hourly[Object.keys(hourly)[i]] > 0; }).join('');
-
-        // Period table
-        var periodRows = (data.period || []).map(function(r) {
-            return '<tr><td>' + esc(r.stat_date) + '</td><td>' + esc(String(r.requests_human)) + '</td>'
-                + '<td>' + esc(String(r.views_product)) + '</td>'
-                + '<td>' + (r.errors_500_front > 0 ? '<span class="badge badge-danger">' + r.errors_500_front + '</span>' : '0') + '</td>'
-                + '</tr>';
-        }).join('') || '<tr><td colspan="4" class="text-muted text-center">Aucune donnée sur la période</td></tr>';
-
-        // 500 checkout detail
-        var detail500 = (s.errors_500_checkout_detail || []);
-        var detail500Html = detail500.length
-            ? '<table class="table table-sm"><thead class="thead-light"><tr><th>Heure</th><th>Path</th><th>IP</th></tr></thead><tbody>'
-              + detail500.map(function(e) {
-                  return '<tr><td>' + esc(String(e.hour)) + 'h</td><td><small>' + esc(e.path) + '</small></td><td><code>' + esc(e.ip) + '</code></td></tr>';
-              }).join('') + '</tbody></table>'
-            : '<p class="text-muted">Aucune erreur 500 sur /commande ce jour.</p>';
-
-        el.innerHTML = '<div class="row no-gutters mb-3">' + cards + '</div>'
-            + '<div class="row">'
-            + '<div class="col-md-6 mb-3"><h6>Top 10 pages</h6>'
-            + '<table class="table table-sm"><thead class="thead-light"><tr><th>Page</th><th class="text-right">Vues</th></tr></thead><tbody>' + pagesRows + '</tbody></table></div>'
-            + '<div class="col-md-6 mb-3"><h6>Détail 500 checkout</h6>' + detail500Html + '</div>'
-            + '</div>'
-            + '<h6>Évolution sur ' + currentPeriod + 'j</h6>'
-            + '<table class="table table-sm"><thead class="thead-light"><tr><th>Date</th><th>Humaines</th><th>Vues produit</th><th>500 front</th></tr></thead><tbody>' + periodRows + '</tbody></table>'
-            + renderCronConfig(data);
-    }
-
-    function renderCronConfig(data) {
-        if (!data.cronToken) return '';
-        return '<div class="mt-3 p-2 bg-light rounded"><small class="text-muted d-block mb-1">URL cron Alwaysdata :</small>'
-            + '<div class="input-group input-group-sm"><input type="text" class="form-control font-monospace" id="cron-url-input" value="' + esc(data.cronUrl || '') + '" readonly>'
-            + '<div class="input-group-append"><button class="btn btn-outline-secondary" type="button" onclick="var i=document.getElementById(\'cron-url-input\');i.select();document.execCommand(\'copy\')">Copier</button></div>'
-            + '</div></div>';
-    }
-
-    function renderConversion(data) {
-        var s = data.snapshot;
-        var el = document.getElementById('tab-conversion-content');
-        if (!el) return;
-
-        if (!s) {
-            el.innerHTML = '<div class="alert alert-info">Aucune donnée pour le ' + esc(currentDate) + '. Le cron a-t-il tourné ?</div>';
-            return;
-        }
-
-        var steps = [
-            ['Vues produit',       s.views_product,    null],
-            ['Ajouts panier',      s.cart_adds,        s.views_product],
-            ['Vues panier',        s.views_cart,       s.cart_adds],
-            ['Vues checkout',      s.views_checkout,   s.views_cart],
-            ['POST checkout',      s.post_checkout,    s.views_checkout],
-            ['Commandes confirmées', s.orders_confirmed, s.post_checkout],
-        ];
-
-        var funnelRows = steps.map(function(step) {
-            return '<tr><td>' + esc(step[0]) + '</td>'
-                + '<td class="text-right font-weight-bold">' + esc(String(step[1])) + '</td>'
-                + '<td class="text-right text-muted">' + (step[2] !== null ? pct(step[1], step[2]) : '—') + '</td>'
-                + '</tr>';
-        }).join('');
-
-        var periodRows = (data.period || []).map(function(r) {
-            return '<tr><td>' + esc(r.stat_date) + '</td>'
-                + '<td>' + esc(String(r.views_product)) + '</td>'
-                + '<td>' + esc(String(r.cart_adds)) + '</td>'
-                + '<td>' + esc(String(r.post_checkout)) + '</td>'
-                + '<td><strong>' + esc(String(r.orders_confirmed)) + '</strong></td></tr>';
-        }).join('') || '<tr><td colspan="5" class="text-muted text-center">Aucune donnée sur la période</td></tr>';
-
-        var detail500 = (s.errors_500_checkout_detail || []);
-        var detail500Html = detail500.length
-            ? '<table class="table table-sm"><thead class="thead-light"><tr><th>Heure</th><th>Path</th><th>IP</th></tr></thead><tbody>'
-              + detail500.map(function(e) {
-                  return '<tr><td>' + esc(String(e.hour)) + 'h</td><td><small>' + esc(e.path) + '</small></td><td><code>' + esc(e.ip) + '</code></td></tr>';
-              }).join('') + '</tbody></table>'
-            : '<p class="text-muted small">Aucune erreur 500 sur /commande.</p>';
-
-        el.innerHTML = '<div class="row">'
-            + '<div class="col-md-5 mb-3"><h6>Funnel — ' + esc(currentDate) + '</h6>'
-            + '<table class="table table-sm"><thead class="thead-light"><tr><th>Étape</th><th class="text-right">N</th><th class="text-right">Taux</th></tr></thead><tbody>' + funnelRows + '</tbody></table></div>'
-            + '<div class="col-md-7 mb-3"><h6>Erreurs 500 checkout</h6>' + detail500Html + '</div>'
-            + '</div>'
-            + '<h6>Évolution sur ' + currentPeriod + 'j</h6>'
-            + '<table class="table table-sm"><thead class="thead-light"><tr><th>Date</th><th>Vues produit</th><th>Ajouts panier</th><th>POST checkout</th><th>Commandes</th></tr></thead><tbody>' + periodRows + '</tbody></table>';
-    }
+    // Exposé globalement pour runCron() dans _tab_trafic.html.twig
+    window.fetchStats = fetchStats;
 
     document.addEventListener('DOMContentLoaded', function() {
         // Date picker
@@ -410,12 +313,21 @@ var conversionUrl = '{{ conversionUrl }}';
             });
         });
 
-        // Tab switch
-        document.querySelectorAll('#stats-nav-tabs a[data-toggle="tab"]').forEach(function(a) {
-            a.addEventListener('shown.bs.tab', function(e) {
-                activeTab = e.target.id === 'tab-trafic-link' ? 'trafic' : 'conversion';
+        // Tab switch — Bootstrap 4 utilise jQuery, il faut .on() et non addEventListener
+        $('#main-nav-tabs a[data-toggle="tab"]').on('shown.bs.tab', function(e) {
+            var tabId = $(e.target).attr('id');
+            var statsControls = document.getElementById('stats-controls');
+
+            if (tabId === 'tab-logs-link') {
+                if (statsControls) statsControls.classList.add('d-none');
+                if (!window.analysisRan) {
+                    window.runAnalysis && window.runAnalysis();
+                }
+            } else {
+                if (statsControls) statsControls.classList.remove('d-none');
+                activeTab = tabId === 'tab-trafic-link' ? 'trafic' : 'conversion';
                 fetchActive();
-            });
+            }
         });
 
         // Initial load
@@ -428,9 +340,11 @@ var conversionUrl = '{{ conversionUrl }}';
 document.addEventListener('DOMContentLoaded', function() {
     var btn = document.getElementById('btn-analyse');
     var spinner = document.getElementById('analyse-spinner');
-    var results = document.getElementById('results-section');
     var configSection = document.getElementById('config-section');
     var btnToggleConfig = document.getElementById('btn-toggle-config');
+
+    // Flag pour savoir si l'analyse a déjà été lancée
+    window.analysisRan = false;
 
     // Toggle config form
     btnToggleConfig.addEventListener('click', function() {
@@ -443,7 +357,6 @@ document.addEventListener('DOMContentLoaded', function() {
     function runAnalysis() {
         btn.disabled = true;
         spinner.style.display = 'inline-flex';
-        results.style.display = 'none';
 
         fetch(analyseUrl, {
             method: 'POST',
@@ -462,7 +375,10 @@ document.addEventListener('DOMContentLoaded', function() {
             }
             return r.json();
         })
-        .then(function(data) { renderResults(data); })
+        .then(function(data) {
+            window.analysisRan = true;
+            renderResults(data);
+        })
         .catch(function(err) { showError(err.message); })
         .finally(function() {
             btn.disabled = false;
@@ -470,7 +386,19 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    btn.addEventListener('click', runAnalysis);
+    // Exposé globalement pour le tab switch
+    window.runAnalysis = runAnalysis;
+
+    btn.addEventListener('click', function() {
+        // Forcer re-run et switcher sur l'onglet Logs
+        window.analysisRan = false;
+        var logsTabLink = document.getElementById('tab-logs-link');
+        if (logsTabLink) {
+            $(logsTabLink).tab('show');
+        } else {
+            runAnalysis();
+        }
+    });
 
     // Auto-run on page load
     runAnalysis();
@@ -480,7 +408,6 @@ document.addEventListener('DOMContentLoaded', function() {
             showError(data.error);
             return;
         }
-        results.style.display = 'block';
         renderSources(data.sources || []);
         renderLogViewer(data.sources || [], data.crawlers || [], data.php_errors || [], data.blocked_ips || [], data.blocked_uas || []);
     }
@@ -791,11 +718,13 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     function showError(msg) {
-        results.style.display = 'block';
-        results.innerHTML = '<div class="alert alert-danger">'
-            + '<i class="material-icons align-middle mr-1">error</i>'
-            + escapeHtml(msg)
-            + '</div>';
+        var sourcesStatus = document.getElementById('sources-status');
+        if (sourcesStatus) {
+            sourcesStatus.innerHTML = '<div class="alert alert-danger m-0">'
+                + '<i class="material-icons align-middle mr-1">error</i>'
+                + escapeHtml(msg)
+                + '</div>';
+        }
     }
 });
 </script>
