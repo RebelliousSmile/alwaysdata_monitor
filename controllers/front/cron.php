@@ -34,7 +34,7 @@ class Sc_alwaysdataCronModuleFrontController extends ModuleFrontController
         $date = date('Y-m-d', strtotime('yesterday'));
 
         try {
-            $this->run($date);
+            $this->processCron($date);
         } catch (\Throwable $e) {
             PrestaShopLogger::addLog(
                 '[sc_alwaysdata] Cron error for ' . $date . ': ' . $e->getMessage(),
@@ -46,7 +46,7 @@ class Sc_alwaysdataCronModuleFrontController extends ModuleFrontController
         }
     }
 
-    private function run(string $date): void
+    private function processCron(string $date): void
     {
         // --- Idempotence check ---
         $existing = DailyStat::getByDate($date);
@@ -97,6 +97,10 @@ class Sc_alwaysdataCronModuleFrontController extends ModuleFrontController
         $stat->errors_500_bo                = $metrics['errors_500_bo'];
         $stat->errors_500_checkout          = $metrics['errors_500_checkout'];
         $stat->errors_500_checkout_detail   = json_encode($metrics['errors_500_checkout_detail']);
+        $stat->errors_500_pages             = json_encode([
+            'front' => $metrics['errors_500_front_pages'],
+            'bo'    => $metrics['errors_500_bo_pages'],
+        ]);
         $stat->top_pages                    = json_encode(
             array_map(
                 fn ($path, $count) => ['path' => $path, 'count' => $count],
@@ -111,7 +115,7 @@ class Sc_alwaysdataCronModuleFrontController extends ModuleFrontController
                 array_values($metrics['ip_counts'])
             )
         );
-        $stat->hourly_breakdown             = json_encode($metrics['hourly_counts']);
+        $stat->hourly_breakdown             = json_encode($metrics['hourly_product_views']);
         $stat->date_add                     = date('Y-m-d H:i:s');
 
         if (!$stat->add()) {
