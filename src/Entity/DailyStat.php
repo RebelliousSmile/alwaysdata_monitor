@@ -17,9 +17,6 @@ if (!defined('_PS_VERSION_')) {
 
 class DailyStat extends \ObjectModel
 {
-    /** @var int */
-    public $id_stat;
-
     /** @var string Y-m-d */
     public $stat_date;
 
@@ -65,6 +62,9 @@ class DailyStat extends \ObjectModel
     /** @var string JSON [{path, ip, datetime}] */
     public $errors_500_checkout_detail = '[]';
 
+    /** @var string JSON {front: {path: count}, bo: {path: count}} */
+    public $errors_500_pages = '{}';
+
     /** @var string JSON [{path, count}] top 20 */
     public $top_pages = '[]';
 
@@ -96,6 +96,7 @@ class DailyStat extends \ObjectModel
             'errors_500_bo' => ['type' => self::TYPE_INT, 'validate' => 'isUnsignedInt'],
             'errors_500_checkout' => ['type' => self::TYPE_INT, 'validate' => 'isUnsignedInt'],
             'errors_500_checkout_detail' => ['type' => self::TYPE_HTML, 'allow_html' => true],
+            'errors_500_pages' => ['type' => self::TYPE_HTML, 'allow_html' => true],
             'top_pages' => ['type' => self::TYPE_HTML, 'allow_html' => true],
             'top_ips' => ['type' => self::TYPE_HTML, 'allow_html' => true],
             'hourly_breakdown' => ['type' => self::TYPE_HTML, 'allow_html' => true],
@@ -126,6 +127,7 @@ class DailyStat extends \ObjectModel
                 `errors_500_bo` int(11) UNSIGNED NOT NULL DEFAULT 0,
                 `errors_500_checkout` int(11) UNSIGNED NOT NULL DEFAULT 0,
                 `errors_500_checkout_detail` text NULL,
+                `errors_500_pages` text NULL,
                 `top_pages` text NULL,
                 `top_ips` text NULL,
                 `hourly_breakdown` text NULL,
