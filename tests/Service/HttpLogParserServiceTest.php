@@ -276,7 +276,7 @@ class HttpLogParserServiceTest extends TestCase
         $result = $this->service->parse($path);
 
         $this->assertSame(1, $result['views_product']);
-        $this->assertSame(1, $result['hourly_counts'][14]);
+        $this->assertSame(1, $result['hourly_product_views'][14]);
     }
 
     public function testPostPanierIncrementsCartAdds(): void
@@ -441,8 +441,8 @@ class HttpLogParserServiceTest extends TestCase
 
         $result = $this->service->parse($path);
 
-        $this->assertSame(2, $result['hourly_counts'][8]);
-        $this->assertSame(1, $result['hourly_counts'][20]);
-        $this->assertSame(0, $result['hourly_counts'][12]);
+        $this->assertSame(2, $result['hourly_product_views'][8]);
+        $this->assertSame(1, $result['hourly_product_views'][20]);
+        $this->assertSame(0, $result['hourly_product_views'][12]);
     }
 }

@@ -68,7 +68,9 @@ class HttpLogParserService
             'errors_500_bo'               => 0,
             'errors_500_checkout'         => 0,
             'errors_500_checkout_detail'  => [],
-            'hourly_counts'               => array_fill(0, 24, 0),
+            'errors_500_front_pages'      => [],
+            'errors_500_bo_pages'         => [],
+            'hourly_product_views'               => array_fill(0, 24, 0),
             'page_counts'                 => [],
             'ip_counts'                   => [],
         ];
@@ -101,19 +103,21 @@ class HttpLogParserService
                 $isAdmin = strpos($path, self::ADMIN_PATH) !== false;
 
                 // 500 errors — counted before bot filter to get all server errors
+                // Categories are mutually exclusive: BO | checkout | front
                 if ($status === 500) {
                     if ($isAdmin) {
                         $counters['errors_500_bo']++;
-                    } else {
-                        $counters['errors_500_front']++;
-                    }
-                    if (strpos($path, '/commande') !== false) {
+                        $counters['errors_500_bo_pages'][$path] = ($counters['errors_500_bo_pages'][$path] ?? 0) + 1;
+                    } elseif (strpos($path, '/commande') !== false || strpos($path, '/panier') !== false) {
                         $counters['errors_500_checkout']++;
                         $counters['errors_500_checkout_detail'][] = [
                             'path' => $path,
                             'ip'   => $ip,
                             'hour' => $hour,
                         ];
+                    } else {
+                        $counters['errors_500_front']++;
+                        $counters['errors_500_front_pages'][$path] = ($counters['errors_500_front_pages'][$path] ?? 0) + 1;
                     }
                 }
 
@@ -152,7 +156,7 @@ class HttpLogParserService
                     // Product pages (.html)
                     if (str_ends_with($path, '.html')) {
                         $counters['views_product']++;
-                        $counters['hourly_counts'][$hour]++;
+                        $counters['hourly_product_views'][$hour]++;
                     }
                 }
 
@@ -183,6 +187,12 @@ class HttpLogParserService
 
         arsort($counters['ip_counts']);
         $counters['ip_counts'] = array_slice($counters['ip_counts'], 0, self::TOP_LIMIT, true);
+
+        arsort($counters['errors_500_front_pages']);
+        $counters['errors_500_front_pages'] = array_slice($counters['errors_500_front_pages'], 0, 10, true);
+
+        arsort($counters['errors_500_bo_pages']);
+        $counters['errors_500_bo_pages'] = array_slice($counters['errors_500_bo_pages'], 0, 10, true);
 
         return $counters;
     }

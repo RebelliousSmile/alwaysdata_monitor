@@ -93,18 +93,26 @@ class ScAlwaysdataController extends FrameworkBundleAdminController
             $linesPerSource[$dir] = $v > 0 ? $v : $default;
         }
 
+        $cronToken = (string) Configuration::get('SC_ALWAYSDATA_CRON_TOKEN');
+        if (!$cronToken) {
+            $cronToken = \Tools::passwdGen(32);
+            Configuration::updateValue('SC_ALWAYSDATA_CRON_TOKEN', $cronToken);
+        }
+        $cronUrl = (string) \Tools::getShopDomainSsl(true) . '/module/sc_alwaysdata/cron?token=' . urlencode($cronToken);
+
         return $this->render(
             '@Modules/sc_alwaysdata/views/templates/admin/index.html.twig',
             [
-                'layoutTitle'   => $this->trans('Alwaysdata Log Viewer', 'Modules.Scalwaysdata.Admin'),
-                'enableSidebar' => true,
-                'help_link'     => false,
-                'logsPath'      => $logsPath,
-                'htaccessPath'  => $htaccessPath,
-                'logsPathHint'  => $logsPathHint,
+                'layoutTitle'    => $this->trans('Alwaysdata Log Viewer', 'Modules.Scalwaysdata.Admin'),
+                'enableSidebar'  => true,
+                'help_link'      => false,
+                'logsPath'       => $logsPath,
+                'htaccessPath'   => $htaccessPath,
+                'logsPathHint'   => $logsPathHint,
                 'linesPerSource' => $linesPerSource,
-                'statsUrl'      => $this->generateUrl('sc_alwaysdata_stats'),
-                'conversionUrl' => $this->generateUrl('sc_alwaysdata_conversion'),
+                'statsUrl'       => $this->generateUrl('sc_alwaysdata_stats'),
+                'conversionUrl'  => $this->generateUrl('sc_alwaysdata_conversion'),
+                'cronUrl'        => $cronUrl,
             ]
         );
     }
@@ -186,28 +194,32 @@ class ScAlwaysdataController extends FrameworkBundleAdminController
      */
     public function statsAction(Request $request): JsonResponse
     {
-        $date = $this->resolveDate((string) $request->query->get('date', ''));
-        $period = $this->resolvePeriod((int) $request->query->get('period', 30));
+        try {
+            $date = $this->resolveDate((string) $request->request->get('date', ''));
+            $period = $this->resolvePeriod((int) $request->request->get('period', 30));
 
-        $snapshot = DailyStat::getByDate($date);
+            $snapshot = DailyStat::getByDate($date);
 
-        $rows = Db::getInstance()->executeS(
-            'SELECT stat_date, requests_human, views_product, errors_500_front, errors_500_bo, errors_500_checkout
-             FROM `' . _DB_PREFIX_ . 'sc_alwaysdata_stats_daily`
-             WHERE stat_date >= DATE_SUB(\'' . pSQL($date) . '\', INTERVAL ' . $period . ' DAY)
-             AND stat_date <= \'' . pSQL($date) . '\'
-             ORDER BY stat_date ASC'
-        );
+            $rows = Db::getInstance()->executeS(
+                'SELECT stat_date, requests_human, views_product, errors_500_front, errors_500_bo, errors_500_checkout
+                 FROM `' . _DB_PREFIX_ . 'sc_alwaysdata_stats_daily`
+                 WHERE stat_date >= DATE_SUB(\'' . pSQL($date) . '\', INTERVAL ' . $period . ' DAY)
+                 AND stat_date <= \'' . pSQL($date) . '\'
+                 ORDER BY stat_date ASC'
+            );
 
-        $cronToken = (string) Configuration::get(\sc_alwaysdata::CONFIG_CRON_TOKEN);
-        $baseUrl = (string) \Tools::getShopDomainSsl(true);
+            $cronToken = (string) Configuration::get('SC_ALWAYSDATA_CRON_TOKEN');
+            $baseUrl = (string) \Tools::getShopDomainSsl(true);
 
-        return new JsonResponse([
-            'snapshot'  => $snapshot ? $this->serializeStat($snapshot) : null,
-            'period'    => $rows ?: [],
-            'cronToken' => $cronToken,
-            'cronUrl'   => $baseUrl . '/module/sc_alwaysdata/cron?token=' . urlencode($cronToken),
-        ]);
+            return new JsonResponse([
+                'snapshot'  => $snapshot ? $this->serializeStat($snapshot) : null,
+                'period'    => $rows ?: [],
+                'cronToken' => $cronToken,
+                'cronUrl'   => $baseUrl . '/module/sc_alwaysdata/cron?token=' . urlencode($cronToken),
+            ]);
+        } catch (\Throwable $e) {
+            return new JsonResponse(['error' => $e->getMessage(), 'trace' => $e->getFile() . ':' . $e->getLine()], 500);
+        }
     }
 
     /**
@@ -219,23 +231,27 @@ class ScAlwaysdataController extends FrameworkBundleAdminController
      */
     public function conversionAction(Request $request): JsonResponse
     {
-        $date = $this->resolveDate((string) $request->query->get('date', ''));
-        $period = $this->resolvePeriod((int) $request->query->get('period', 30));
+        try {
+            $date = $this->resolveDate((string) $request->request->get('date', ''));
+            $period = $this->resolvePeriod((int) $request->request->get('period', 30));
 
-        $snapshot = DailyStat::getByDate($date);
+            $snapshot = DailyStat::getByDate($date);
 
-        $rows = Db::getInstance()->executeS(
-            'SELECT stat_date, views_product, cart_adds, views_cart, views_checkout, post_checkout, orders_confirmed
-             FROM `' . _DB_PREFIX_ . 'sc_alwaysdata_stats_daily`
-             WHERE stat_date >= DATE_SUB(\'' . pSQL($date) . '\', INTERVAL ' . $period . ' DAY)
-             AND stat_date <= \'' . pSQL($date) . '\'
-             ORDER BY stat_date ASC'
-        );
+            $rows = Db::getInstance()->executeS(
+                'SELECT stat_date, views_product, cart_adds, views_cart, views_checkout, post_checkout, orders_confirmed
+                 FROM `' . _DB_PREFIX_ . 'sc_alwaysdata_stats_daily`
+                 WHERE stat_date >= DATE_SUB(\'' . pSQL($date) . '\', INTERVAL ' . $period . ' DAY)
+                 AND stat_date <= \'' . pSQL($date) . '\'
+                 ORDER BY stat_date ASC'
+            );
 
-        return new JsonResponse([
-            'snapshot' => $snapshot ? $this->serializeStat($snapshot) : null,
-            'period'   => $rows ?: [],
-        ]);
+            return new JsonResponse([
+                'snapshot' => $snapshot ? $this->serializeStat($snapshot) : null,
+                'period'   => $rows ?: [],
+            ]);
+        } catch (\Throwable $e) {
+            return new JsonResponse(['error' => $e->getMessage(), 'trace' => $e->getFile() . ':' . $e->getLine()], 500);
+        }
     }
 
     /**
@@ -336,6 +352,7 @@ class ScAlwaysdataController extends FrameworkBundleAdminController
             'errors_500_bo'              => (int) $stat->errors_500_bo,
             'errors_500_checkout'        => (int) $stat->errors_500_checkout,
             'errors_500_checkout_detail' => json_decode($stat->errors_500_checkout_detail ?: '[]', true),
+            'errors_500_pages'           => json_decode($stat->errors_500_pages ?: '{}', true),
             'top_pages'                  => json_decode($stat->top_pages ?: '[]', true),
             'top_ips'                    => json_decode($stat->top_ips ?: '[]', true),
             'hourly_breakdown'           => json_decode($stat->hourly_breakdown ?: '{}', true),
