@@ -53,6 +53,82 @@ class LogReaderService
         return null;
     }
 
+    /**
+     * Lit le fichier de log PHP d'une date donnée et retourne un "source"
+     * exploitable par PhpErrorAnalyserService::analyse().
+     *
+     * @return array{source: string, lines: array<int, string>, truncated: bool, error: string|null}
+     */
+    public function readPhpLogForDate(string $date): array
+    {
+        $basePath = $this->resolveBasePath();
+        if ($basePath === null) {
+            return ['source' => 'php', 'lines' => [], 'truncated' => false, 'error' => 'No readable log base path'];
+        }
+
+        $phpDir = $basePath . 'php/';
+        if (!is_readable($phpDir)) {
+            return ['source' => 'php', 'lines' => [], 'truncated' => false, 'error' => 'PHP log directory not readable: ' . $phpDir];
+        }
+
+        $file = $this->findTodayFile($phpDir, $date);
+        if ($file === null) {
+            return ['source' => 'php', 'lines' => [], 'truncated' => false, 'error' => 'No PHP log file found for ' . $date];
+        }
+
+        try {
+            $maxLines = $this->getLinesForDir('php');
+            $lines = $this->readLogLines($file, $maxLines);
+
+            return [
+                'source'    => 'php',
+                'lines'     => $lines,
+                'truncated' => false,
+                'error'     => null,
+                'max_lines' => $maxLines,
+            ];
+        } catch (\Throwable $e) {
+            return ['source' => 'php', 'lines' => [], 'truncated' => false, 'error' => $e->getMessage()];
+        }
+    }
+
+    /**
+     * Lit un fichier texte ou gzip (dernier maxLines) et retourne les lignes.
+     *
+     * @return array<int, string>
+     */
+    private function readLogLines(string $filePath, int $maxLines): array
+    {
+        if (substr($filePath, -3) === '.gz') {
+            return $this->tailFileGz($filePath, $maxLines);
+        }
+        return $this->tailFile($filePath, $maxLines);
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function tailFileGz(string $filePath, int $maxLines): array
+    {
+        $fh = gzopen($filePath, 'rb');
+        if ($fh === false) {
+            return [];
+        }
+
+        try {
+            $lines = [];
+            while (!gzeof($fh)) {
+                $line = gzgets($fh);
+                if ($line !== false) {
+                    $lines[] = rtrim($line, "\r\n");
+                }
+            }
+            return array_slice($lines, -$maxLines);
+        } finally {
+            gzclose($fh);
+        }
+    }
+
     public function readTodayLogs(): array
     {
         set_time_limit(60);

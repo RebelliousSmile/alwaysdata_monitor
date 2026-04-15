@@ -17,9 +17,9 @@ class HttpLogParserService
      * Alwaysdata/Apache combined log format.
      * Optional leading hostname, then: IP - - [DD/Mon/YYYY:HH:mm:ss +TZ] "METHOD /path HTTP/x" STATUS size "ref" "ua"
      *
-     * Groups: 1=IP, 2=hour(00-23), 3=method, 4=path(no query), 5=status, 6=ua(optional)
+     * Groups: 1=IP, 2=hour(00-23), 3=minute(00-59), 4=second(00-59), 5=method, 6=path(no query), 7=status, 8=ua(optional)
      */
-    private const LOG_PATTERN = '/^(?:\S+\s+)?(\S+)\s+\S+\s+\S+\s+\[\d+\/\w+\/\d+:(\d{2}):\d+:\d+\s[^\]]+\]\s+"(\w+)\s+([^?"\ ]+)[^"]*"\s+(\d{3})\s+\S+(?:\s+"[^"]*"\s+"([^"]*)")?/';
+    private const LOG_PATTERN = '/^(?:\S+\s+)?(\S+)\s+\S+\s+\S+\s+\[\d+\/\w+\/\d+:(\d{2}):(\d{2}):(\d{2})\s[^\]]+\]\s+"(\w+)\s+([^?"\ ]+)[^"]*"\s+(\d{3})\s+\S+(?:\s+"[^"]*"\s+"([^"]*)")?/';
 
     /** Google IPs not identified by UA */
     private const BOT_IP_PREFIXES = ['74.125.'];
@@ -95,10 +95,11 @@ class HttpLogParserService
 
                 $ip     = $m[1];
                 $hour   = (int) $m[2];
-                $method = strtoupper($m[3]);
-                $path   = $m[4];
-                $status = (int) $m[5];
-                $ua     = $m[6] ?? '';
+                $time   = $m[2] . ':' . $m[3] . ':' . $m[4];
+                $method = strtoupper($m[5]);
+                $path   = $m[6];
+                $status = (int) $m[7];
+                $ua     = $m[8] ?? '';
 
                 $isAdmin = strpos($path, self::ADMIN_PATH) !== false;
 
@@ -114,6 +115,7 @@ class HttpLogParserService
                             'path' => $path,
                             'ip'   => $ip,
                             'hour' => $hour,
+                            'time' => $time,
                         ];
                     } else {
                         $counters['errors_500_front']++;

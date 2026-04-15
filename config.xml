@@ -2,7 +2,7 @@
 <module>
     <name>sc_alwaysdata</name>
     <displayName><![CDATA[Alwaysdata Log Viewer]]></displayName>
-    <version><![CDATA[1.2.0]]></version>
+    <version><![CDATA[1.4.2]]></version>
     <description><![CDATA[Analyse les logs Alwaysdata et gère le fichier .htaccess.]]></description>
     <author><![CDATA[Scriptami]]></author>
     <tab><![CDATA[administration]]></tab>

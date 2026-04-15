@@ -27,6 +27,13 @@ sc_alwaysdata_conversion:
     _controller: sc_alwaysdata.controller.sc_alwaysdata::conversionAction
     _legacy_controller: AdminScAlwaysdata
 
+sc_alwaysdata_resources_stats:
+  path: /sc-alwaysdata/resources-stats
+  methods: [POST]
+  defaults:
+    _controller: sc_alwaysdata.controller.sc_alwaysdata::resourcesStatsAction
+    _legacy_controller: AdminScAlwaysdata
+
 sc_alwaysdata_apply_block:
   path: /sc-alwaysdata/apply-block
   methods: [POST]

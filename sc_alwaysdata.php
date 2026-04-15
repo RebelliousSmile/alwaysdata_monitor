@@ -29,7 +29,7 @@ if (file_exists($autoloadPath)) {
 
 class sc_alwaysdata extends Module
 {
-    public const VERSION = '1.2.0';
+    public const VERSION = '1.4.2';
 
     public const CONFIG_LOGS_PATH = 'SC_ALWAYSDATA_LOGS_PATH';
     public const CONFIG_HTACCESS_PATH = 'SC_ALWAYSDATA_HTACCESS_PATH';
@@ -84,6 +84,8 @@ class sc_alwaysdata extends Module
         }
 
         return $this->createStatsTable()
+            && $this->createResourcesDailyTable()
+            && $this->createResourcesSamplesTable()
             && $this->initCronToken();
     }
 
@@ -97,7 +99,9 @@ class sc_alwaysdata extends Module
             && Configuration::deleteByName(self::CONFIG_LINES_PHP)
             && Configuration::deleteByName(self::CONFIG_LINES_SITES)
             && Configuration::deleteByName(self::CONFIG_CRON_TOKEN)
-            && $this->dropStatsTable();
+            && $this->dropStatsTable()
+            && $this->dropResourcesDailyTable()
+            && $this->dropResourcesSamplesTable();
     }
 
     public function getContent(): void
@@ -118,6 +122,34 @@ class sc_alwaysdata extends Module
     {
         return Db::getInstance()->execute(
             'DROP TABLE IF EXISTS `' . _DB_PREFIX_ . 'sc_alwaysdata_stats_daily`'
+        );
+    }
+
+    private function createResourcesDailyTable(): bool
+    {
+        require_once __DIR__ . '/src/Entity/DailyResource.php';
+
+        return Db::getInstance()->execute(\ScAlwaysdata\Entity\DailyResource::getCreateTableSql());
+    }
+
+    private function dropResourcesDailyTable(): bool
+    {
+        return Db::getInstance()->execute(
+            'DROP TABLE IF EXISTS `' . _DB_PREFIX_ . 'sc_alwaysdata_resources_daily`'
+        );
+    }
+
+    private function createResourcesSamplesTable(): bool
+    {
+        require_once __DIR__ . '/src/Entity/ResourceSample.php';
+
+        return Db::getInstance()->execute(\ScAlwaysdata\Entity\ResourceSample::getCreateTableSql());
+    }
+
+    private function dropResourcesSamplesTable(): bool
+    {
+        return Db::getInstance()->execute(
+            'DROP TABLE IF EXISTS `' . _DB_PREFIX_ . 'sc_alwaysdata_resources_samples`'
         );
     }
 
