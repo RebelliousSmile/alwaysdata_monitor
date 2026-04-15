@@ -1,0 +1,294 @@
+<div class="tab-pane fade" id="tab-resources" role="tabpanel">
+    <div id="tab-resources-content" class="p-3">
+        <div class="text-center text-muted py-4">
+            <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
+            <span class="ml-2">Chargement…</span>
+        </div>
+    </div>
+</div>
+
+<script>
+function renderResources(data, date, period) {
+    var container = document.getElementById('tab-resources-content');
+    if (!container) return;
+
+    if (data.error) {
+        container.innerHTML = '<div class="alert alert-danger">' + esc(data.error) + '</div>';
+        return;
+    }
+
+    var stats  = data.stats  || {};
+    var series = data.series || [];
+    var latest = data.latest || null;
+    var topPages = data.top_pages || [];
+    var daily  = data.daily  || [];
+
+    // Empty state
+    if (!stats.samples) {
+        var cronSampleUrl = window.cronResourcesSampleUrl || '';
+        container.innerHTML = '<div class="alert alert-info">'
+            + '<i class="material-icons align-middle mr-1" style="font-size:1rem">info</i>'
+            + 'Aucun sample sur la période sélectionnée. Démarrez le cron sample (15 min) pour commencer à collecter :'
+            + (cronSampleUrl ? '<div class="mt-2 input-group input-group-sm" style="max-width:700px">'
+                + '<input type="text" class="form-control font-monospace" value="' + esc(cronSampleUrl) + '" readonly id="cron-sample-url-copy">'
+                + '<div class="input-group-append"><button class="btn btn-outline-secondary" type="button"'
+                + ' onclick="var i=document.getElementById(\'cron-sample-url-copy\');i.select();document.execCommand(\'copy\')">Copier</button></div>'
+                + '</div>' : '')
+            + '</div>';
+        return;
+    }
+
+    // --- Stat cards (period aggregates) ---
+    var ramAvgPct  = stats.ram_total_mb > 0 ? Math.round(stats.ram_avg_mb  * 100 / stats.ram_total_mb) : 0;
+    var ramPeakPct = stats.ram_total_mb > 0 ? Math.round(stats.ram_peak_mb * 100 / stats.ram_total_mb) : 0;
+    var ramAvgBadge  = ramAvgPct  > 80 ? 'danger' : (ramAvgPct  > 60 ? 'warning' : 'success');
+    var ramPeakBadge = ramPeakPct > 90 ? 'danger' : (ramPeakPct > 80 ? 'warning' : 'success');
+    var peaksBadge   = stats.peaks_95 > 0 ? 'danger' : 'success';
+    var cpuAvgBadge  = parseFloat(stats.cpu_avg) > 1.5 ? 'warning' : 'success';
+
+    var periodCards = '<div class="row mb-3">'
+        + statCard('RAM moyenne', ramAvgBadge, ramAvgPct + '%', stats.ram_avg_mb + ' Mo', 'memory')
+        + statCard('RAM pic max',  ramPeakBadge, ramPeakPct + '%', stats.ram_peak_mb + ' Mo', 'trending_up')
+        + statCard('Pics ≥95%',    peaksBadge, stats.peaks_95 + ' samples', '(' + stats.peaks_80 + ' samples ≥80%)', 'warning')
+        + statCard('CPU moyen',    cpuAvgBadge, parseFloat(stats.cpu_avg).toFixed(2), 'pic : ' + parseFloat(stats.cpu_peak).toFixed(2), 'speed')
+        + '</div>';
+
+    // --- Daily stats table ---
+    var dailyTable = renderDailyStats(daily);
+
+    // --- Latest snapshot cards ---
+    var snapshotCards = '';
+    if (latest) {
+        var ramNowPct = latest.ram_total_mb > 0 ? Math.round(latest.ram_used_mb * 100 / latest.ram_total_mb) : 0;
+        var ramNowBadge = ramNowPct > 80 ? 'danger' : (ramNowPct > 60 ? 'warning' : 'success');
+        var diskPct     = latest.disk_total_gb > 0 ? Math.round(latest.disk_used_gb * 100 / latest.disk_total_gb) : 0;
+        var diskBadge   = diskPct > 80 ? 'danger' : (diskPct > 60 ? 'warning' : 'success');
+        var cpuNowBadge = parseFloat(latest.cpu_load_1) > 1.5 ? 'warning' : 'success';
+
+        snapshotCards = '<h6 class="mb-2">Dernier sample</h6>'
+            + '<div class="row mb-3">'
+
+            + '<div class="col-md-4 mb-3"><div class="card h-100"><div class="card-body text-center">'
+            + '<i class="material-icons text-muted" style="font-size:2rem">memory</i>'
+            + '<h6 class="card-title mt-1">RAM</h6>'
+            + '<h3 class="mb-1"><span class="badge badge-' + ramNowBadge + '">' + ramNowPct + '%</span></h3>'
+            + '<p class="text-muted small mb-0">' + latest.ram_used_mb + ' Mo / ' + latest.ram_total_mb + ' Mo</p>'
+            + '</div></div></div>'
+
+            + '<div class="col-md-4 mb-3"><div class="card h-100"><div class="card-body text-center">'
+            + '<i class="material-icons text-muted" style="font-size:2rem">speed</i>'
+            + '<h6 class="card-title mt-1">CPU load 1 min</h6>'
+            + '<h3 class="mb-1"><span class="badge badge-' + cpuNowBadge + '">' + parseFloat(latest.cpu_load_1).toFixed(2) + '</span></h3>'
+            + '<p class="text-muted small mb-0">5 min : ' + parseFloat(latest.cpu_load_5).toFixed(2)
+            +   ' — 15 min : ' + parseFloat(latest.cpu_load_15).toFixed(2) + '</p>'
+            + '</div></div></div>'
+
+            + '<div class="col-md-4 mb-3"><div class="card h-100"><div class="card-body text-center">'
+            + '<i class="material-icons text-muted" style="font-size:2rem">storage</i>'
+            + '<h6 class="card-title mt-1">Disque</h6>'
+            + '<h3 class="mb-1"><span class="badge badge-' + diskBadge + '">' + diskPct + '%</span></h3>'
+            + '<p class="text-muted small mb-0">' + parseFloat(latest.disk_used_gb).toFixed(1) + ' Go / ' + parseFloat(latest.disk_total_gb).toFixed(1) + ' Go</p>'
+            + '</div></div></div>'
+
+            + '</div>';
+    }
+
+    // --- Sparkline ---
+    var sparkline = renderSparkline(series, period);
+
+    // --- Top tables ---
+    var topTables = '<div class="row">';
+
+    // Top processes
+    var topProc = (latest && latest.top_processes) || [];
+    topTables += '<div class="col-md-4 mb-3"><div class="card h-100"><div class="card-body p-2">'
+        + '<h6 class="mb-2 px-2"><i class="material-icons align-middle" style="font-size:1rem">list</i> Top processus</h6>'
+        + topTable(topProc, function(p) {
+            return '<tr><td><code class="small">' + esc(p.name) + '</code><div class="text-muted small">PID ' + p.pid + '</div></td>'
+                + '<td class="text-right"><span class="badge badge-secondary">' + p.rss_mb + ' Mo</span></td></tr>';
+        })
+        + '</div></div></div>';
+
+    // Top modules OPcache
+    var topModules = (latest && latest.top_modules_opcache) || [];
+    topTables += '<div class="col-md-4 mb-3"><div class="card h-100"><div class="card-body p-2">'
+        + '<h6 class="mb-2 px-2"><i class="material-icons align-middle" style="font-size:1rem">extension</i> Top modules OPcache</h6>'
+        + topTable(topModules, function(m) {
+            return '<tr><td><code class="small">' + esc(m.module) + '</code><div class="text-muted small">' + m.script_count + ' scripts</div></td>'
+                + '<td class="text-right"><span class="badge badge-secondary">' + m.size_mb + ' Mo</span></td></tr>';
+        })
+        + '</div></div></div>';
+
+    // Top pages (merged from DailyStat)
+    topTables += '<div class="col-md-4 mb-3"><div class="card h-100"><div class="card-body p-2">'
+        + '<h6 class="mb-2 px-2"><i class="material-icons align-middle" style="font-size:1rem">web</i> Top pages (7j)</h6>'
+        + topTable(topPages, function(p) {
+            return '<tr><td><code class="small" style="word-break:break-all">' + esc(p.path) + '</code></td>'
+                + '<td class="text-right"><span class="badge badge-secondary">' + p.count + '</span></td></tr>';
+        })
+        + '</div></div></div>';
+
+    topTables += '</div>';
+
+    var reportHtml = renderReport(data.report);
+
+    container.innerHTML = periodCards + dailyTable + snapshotCards + sparkline + topTables + reportHtml;
+}
+
+function renderReport(report) {
+    if (!report || !report.findings || !report.findings.length) {
+        return '';
+    }
+
+    var bannerColor = report.overall === 'critical' ? 'danger'
+                    : report.overall === 'warning'  ? 'warning'
+                    : report.overall === 'info'     ? 'info'
+                    : 'success';
+
+    var findingsHtml = report.findings.map(function(f) {
+        var sevColor = f.severity === 'critical' ? 'danger'
+                     : f.severity === 'warning'  ? 'warning'
+                     : f.severity === 'info'     ? 'info'
+                     : 'success';
+        var sevIcon = f.severity === 'critical' ? 'error'
+                    : f.severity === 'warning'  ? 'warning'
+                    : f.severity === 'info'     ? 'info'
+                    : 'check_circle';
+
+        return '<div class="d-flex align-items-start mb-3">'
+            + '<i class="material-icons text-' + sevColor + ' mr-2 mt-1" style="font-size:1.3rem">' + sevIcon + '</i>'
+            + '<div class="flex-grow-1">'
+            + '<div class="font-weight-bold">' + esc(f.title || '')
+            + (f.category ? ' <span class="text-muted small font-weight-normal">[' + esc(f.category) + ']</span>' : '')
+            + '</div>'
+            + '<div class="small">' + esc(f.detail || '') + '</div>'
+            + (f.recommendation
+                ? '<div class="small text-muted mt-1"><strong>Que faire :</strong> ' + esc(f.recommendation) + '</div>'
+                : '')
+            + '</div>'
+            + '</div>';
+    }).join('');
+
+    return '<h6 class="mt-4 mb-2">Rapport d\'état</h6>'
+        + '<div class="alert alert-' + bannerColor + ' d-flex align-items-center mb-2 mb-md-0">'
+        + '<i class="material-icons mr-2">' + esc(report.overall_icon || 'info') + '</i>'
+        + '<strong>' + esc(report.overall_label || '') + '</strong>'
+        + '</div>'
+        + '<div class="card mb-4 border-top-0"><div class="card-body">' + findingsHtml + '</div></div>';
+}
+
+function renderDailyStats(daily) {
+    if (!daily || !daily.length) {
+        return '';
+    }
+
+    var rows = daily.map(function(d) {
+        var ramAvgPct  = d.ram_total_mb > 0 ? Math.round(d.ram_avg_mb  * 100 / d.ram_total_mb) : 0;
+        var ramPeakPct = d.ram_total_mb > 0 ? Math.round(d.ram_peak_mb * 100 / d.ram_total_mb) : 0;
+        var ramAvgBadge  = ramAvgPct  > 80 ? 'danger' : (ramAvgPct  > 60 ? 'warning' : 'success');
+        var ramPeakBadge = ramPeakPct > 90 ? 'danger' : (ramPeakPct > 80 ? 'warning' : 'success');
+        var peaksBadge   = d.peaks_95 > 0 ? 'danger' : (d.peaks_80 > 0 ? 'warning' : 'success');
+        var cpuAvgBadge  = parseFloat(d.cpu_avg) > 1.5 ? 'warning' : 'success';
+
+        return '<tr>'
+            + '<td><strong>' + esc(d.day) + '</strong></td>'
+            + '<td class="text-right text-muted small">' + d.samples + '</td>'
+            + '<td class="text-right"><span class="badge badge-' + ramAvgBadge + '">' + ramAvgPct + '%</span>'
+              + '<span class="text-muted small ml-1">' + d.ram_avg_mb + ' Mo</span></td>'
+            + '<td class="text-right"><span class="badge badge-' + ramPeakBadge + '">' + ramPeakPct + '%</span>'
+              + '<span class="text-muted small ml-1">' + d.ram_peak_mb + ' Mo</span></td>'
+            + '<td class="text-right">'
+              + (d.peaks_95 > 0
+                  ? '<span class="badge badge-' + peaksBadge + '">' + d.peaks_95 + '</span>'
+                  : (d.peaks_80 > 0
+                      ? '<span class="badge badge-warning">' + d.peaks_80 + ' ≥80%</span>'
+                      : '<span class="text-muted">0</span>'))
+            + '</td>'
+            + '<td class="text-right"><span class="badge badge-' + cpuAvgBadge + '">' + parseFloat(d.cpu_avg).toFixed(2) + '</span>'
+              + '<span class="text-muted small ml-1">pic ' + parseFloat(d.cpu_peak).toFixed(2) + '</span></td>'
+            + '<td class="text-right text-muted small">' + parseFloat(d.opcache_avg).toFixed(1) + ' Mo</td>'
+            + '</tr>';
+    }).join('');
+
+    return '<h6 class="mb-2">Stats par jour</h6>'
+        + '<div class="table-responsive mb-4"><table class="table table-sm table-hover mb-0">'
+        + '<thead class="thead-light"><tr>'
+        + '<th>Date</th>'
+        + '<th class="text-right">Samples</th>'
+        + '<th class="text-right">RAM moy.</th>'
+        + '<th class="text-right">RAM pic</th>'
+        + '<th class="text-right">Pics ≥95%</th>'
+        + '<th class="text-right">CPU moy.</th>'
+        + '<th class="text-right">OPcache</th>'
+        + '</tr></thead><tbody>' + rows + '</tbody></table></div>';
+}
+
+// --- Helpers ---
+
+function statCard(title, badgeClass, big, small, icon) {
+    return '<div class="col-md-3 mb-3"><div class="card h-100"><div class="card-body text-center">'
+        + '<i class="material-icons text-muted" style="font-size:1.5rem">' + icon + '</i>'
+        + '<h6 class="card-title mt-1">' + title + '</h6>'
+        + '<h4 class="mb-1"><span class="badge badge-' + badgeClass + '">' + big + '</span></h4>'
+        + '<p class="text-muted small mb-0">' + small + '</p>'
+        + '</div></div></div>';
+}
+
+function topTable(rows, rowRenderer) {
+    if (!rows || !rows.length) {
+        return '<div class="text-muted small p-2">Aucune donnée</div>';
+    }
+    var body = rows.map(rowRenderer).join('');
+    return '<table class="table table-sm table-hover mb-0"><tbody>' + body + '</tbody></table>';
+}
+
+function renderSparkline(series, period) {
+    if (!series || series.length < 2) {
+        return '';
+    }
+
+    var w = 800, h = 140, pad = 8;
+    var n = series.length;
+
+    // All series include ram_used_mb and ram_total_mb (via MAX downsampling preserves peaks)
+    var points = series.map(function(r) {
+        var ramPct = r.ram_total_mb > 0 ? (r.ram_used_mb * 100 / r.ram_total_mb) : 0;
+        var cpu    = parseFloat(r.cpu_load_1) || 0;
+        return { ramPct: ramPct, cpu: cpu, ts: r.sampled_at };
+    });
+
+    // Scale: Y = 0-110% (ram) and 0-3 (cpu mapped on same axis as 0-100%)
+    var maxRam = 110;
+    var maxCpu = 3;
+
+    function xFor(i) { return pad + (i * (w - 2 * pad) / (n - 1)); }
+    function yForRam(pct) { return pad + (1 - Math.min(pct, maxRam) / maxRam) * (h - 2 * pad); }
+    function yForCpu(v)   { return pad + (1 - Math.min(v, maxCpu) / maxCpu) * (h - 2 * pad); }
+
+    var ramPath = points.map(function(p, i) { return (i === 0 ? 'M' : 'L') + xFor(i).toFixed(1) + ',' + yForRam(p.ramPct).toFixed(1); }).join(' ');
+    var cpuPath = points.map(function(p, i) { return (i === 0 ? 'M' : 'L') + xFor(i).toFixed(1) + ',' + yForCpu(p.cpu).toFixed(1); }).join(' ');
+
+    // Threshold lines (RAM 95% and 80%)
+    var y95 = yForRam(95).toFixed(1);
+    var y80 = yForRam(80).toFixed(1);
+
+    var svg = '<svg viewBox="0 0 ' + w + ' ' + h + '" preserveAspectRatio="none" style="width:100%;height:140px;display:block">'
+        + '<line x1="0" y1="' + y95 + '" x2="' + w + '" y2="' + y95 + '" stroke="#dc3545" stroke-dasharray="4 4" stroke-width="1" opacity="0.5"/>'
+        + '<line x1="0" y1="' + y80 + '" x2="' + w + '" y2="' + y80 + '" stroke="#ffc107" stroke-dasharray="4 4" stroke-width="1" opacity="0.5"/>'
+        + '<path d="' + ramPath + '" fill="none" stroke="#25b9d7" stroke-width="1.8"/>'
+        + '<path d="' + cpuPath + '" fill="none" stroke="#6c757d" stroke-width="1.2" stroke-dasharray="3 3"/>'
+        + '</svg>';
+
+    var firstTs = points[0].ts;
+    var lastTs  = points[n - 1].ts;
+
+    return '<h6 class="mt-2 mb-2">Évolution sur ' + period + 'j — ' + n + ' points</h6>'
+        + '<div class="card mb-3"><div class="card-body p-2">'
+        + svg
+        + '<div class="d-flex justify-content-between text-muted small mt-1">'
+        + '<span>' + esc(firstTs) + '</span>'
+        + '<span><span style="color:#25b9d7">●</span> RAM % &nbsp; <span style="color:#6c757d">●</span> CPU load 1m</span>'
+        + '<span>' + esc(lastTs) + '</span>'
+        + '</div></div></div>';
+}
+</script>

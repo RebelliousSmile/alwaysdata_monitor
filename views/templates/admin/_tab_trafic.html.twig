@@ -60,7 +60,7 @@ function renderTrafic(data, date, period) {
     var periodRows = (data.period || []).map(function(r) {
         return '<tr><td>' + esc(r.stat_date) + '</td><td>' + esc(String(r.requests_human)) + '</td>'
             + '<td>' + esc(String(r.views_product)) + '</td>'
-            + '<td>' + (function(v){ return v > 0 ? '<span class="badge badge-danger">' + v + '</span>' : '0'; })(r.errors_500_front + r.errors_500_checkout) + '</td>'
+            + '<td>' + (function(v){ return v > 0 ? '<span class="badge badge-danger">' + v + '</span>' : '0'; })(parseInt(r.errors_500_front, 10) + parseInt(r.errors_500_checkout, 10)) + '</td>'
             + '</tr>';
     }).join('') || '<tr><td colspan="4" class="text-muted text-center">Aucune donnée sur la période</td></tr>';
 
@@ -111,11 +111,12 @@ function renderCronConfig(data) {
         + '</div>';
 }
 
-function runCron(cronUrl) {
-    var btn = document.getElementById('btn-run-cron');
+function runCron(cronUrl, clickedBtn) {
+    var btn = clickedBtn || document.getElementById('btn-run-cron');
     var result = document.getElementById('cron-run-result');
     if (!cronUrl) return;
 
+    var originalLabel = btn ? btn.innerHTML : '';
     if (btn) {
         btn.disabled = true;
         btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status"></span>';
@@ -128,12 +129,18 @@ function runCron(cronUrl) {
             if (!result) return;
             if (d.error) {
                 result.innerHTML = '<span class="text-danger">' + esc(d.error) + '</span>';
+            } else if (d.warning) {
+                result.innerHTML = '<span class="text-warning">' + esc(d.warning) + ' (' + esc(d.date) + ')</span>';
             } else if (d.skipped) {
-                result.innerHTML = '<span class="text-warning">Déjà traité (' + esc(d.date) + ')</span>';
-            } else {
+                result.innerHTML = '<span class="text-warning">Déjà traité (' + esc(d.date || '') + ')</span>';
+            } else if (d.requests_total !== undefined) {
                 result.innerHTML = '<span class="text-success">OK — ' + esc(String(d.requests_total)) + ' req, '
                     + esc(String(d.orders_confirmed)) + ' commandes (' + esc(d.date) + ')</span>';
                 setTimeout(function() { window.fetchStats && window.fetchStats(); }, 800);
+            } else if (d.samples_aggregated !== undefined) {
+                result.innerHTML = '<span class="text-success">Rollup OK — ' + esc(String(d.samples_aggregated)) + ' samples agrégés, '
+                    + 'pic RAM\u00a0: ' + esc(String(d.ram_peak_mb)) + '\u00a0Mo (' + esc(d.date) + ')</span>';
+                setTimeout(function() { window.fetchResources && window.fetchResources(); }, 800);
             }
         })
         .catch(function(e) {
@@ -142,7 +149,51 @@ function runCron(cronUrl) {
         .finally(function() {
             if (btn) {
                 btn.disabled = false;
-                btn.innerHTML = '<i class="material-icons" style="font-size:1rem;vertical-align:middle">play_arrow</i> Cron J-1';
+                btn.innerHTML = originalLabel;
+            }
+        });
+}
+
+function sampleNow(clickedBtn) {
+    var btn = clickedBtn || document.getElementById('btn-sample-now');
+    var result = document.getElementById('cron-run-result');
+    var url = window.cronResourcesSampleUrl || '';
+    if (!url) return;
+
+    var originalLabel = btn ? btn.innerHTML : '';
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status"></span>';
+    }
+    if (result) result.innerHTML = '';
+
+    fetch(url)
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+            if (!result) return;
+            if (d.error) {
+                result.innerHTML = '<span class="text-danger">' + esc(d.error) + '</span>';
+            } else if (d.skipped) {
+                var nextIn = d.next_bucket_in_seconds;
+                var msg = 'Sample déjà pris pour ce bucket';
+                if (nextIn !== undefined) {
+                    msg += ' — prochain dans ' + Math.ceil(nextIn / 60) + ' min';
+                }
+                result.innerHTML = '<span class="text-warning">' + esc(msg) + '</span>';
+            } else {
+                result.innerHTML = '<span class="text-success">Sample enregistré — RAM\u00a0: '
+                    + esc(String(d.ram_used_mb)) + '\u00a0Mo, OPcache\u00a0: ' + esc(String(d.opcache_used_mb)) + '\u00a0Mo'
+                    + ' (' + esc(d.sampled_at) + ')</span>';
+                setTimeout(function() { window.fetchResources && window.fetchResources(); }, 800);
+            }
+        })
+        .catch(function(e) {
+            if (result) result.innerHTML = '<span class="text-danger">' + esc(e.message) + '</span>';
+        })
+        .finally(function() {
+            if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = originalLabel;
             }
         });
 }

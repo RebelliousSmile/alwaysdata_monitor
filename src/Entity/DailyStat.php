@@ -74,6 +74,9 @@ class DailyStat extends \ObjectModel
     /** @var string JSON {0: count, 1: count, ..., 23: count} */
     public $hourly_breakdown = '{}';
 
+    /** @var string JSON [{level, file, line, message, count}] */
+    public $php_errors = '[]';
+
     /** @var string */
     public $date_add;
 
@@ -100,6 +103,7 @@ class DailyStat extends \ObjectModel
             'top_pages' => ['type' => self::TYPE_HTML, 'allow_html' => true],
             'top_ips' => ['type' => self::TYPE_HTML, 'allow_html' => true],
             'hourly_breakdown' => ['type' => self::TYPE_HTML, 'allow_html' => true],
+            'php_errors' => ['type' => self::TYPE_HTML, 'allow_html' => true],
             'date_add' => ['type' => self::TYPE_DATE, 'validate' => 'isDate'],
         ],
     ];
@@ -131,6 +135,7 @@ class DailyStat extends \ObjectModel
                 `top_pages` text NULL,
                 `top_ips` text NULL,
                 `hourly_breakdown` text NULL,
+                `php_errors` text NULL,
                 `date_add` datetime NOT NULL,
                 PRIMARY KEY (`id_stat`),
                 UNIQUE KEY `idx_stat_date` (`stat_date`)

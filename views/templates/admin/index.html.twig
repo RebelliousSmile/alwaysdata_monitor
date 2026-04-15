@@ -19,17 +19,17 @@
 {# ------------------------------------------------------------------ #}
 {# Top action bar                                                       #}
 {# ------------------------------------------------------------------ #}
-<div class="d-flex align-items-center mb-3">
-    <button type="button" class="btn btn-outline-secondary btn-sm mr-2" id="btn-toggle-config">
+<div class="d-flex align-items-center mb-3" style="gap:.5rem">
+    <button type="button" class="btn btn-outline-secondary btn-sm" id="btn-toggle-config">
         <i class="material-icons" style="font-size:1rem;vertical-align:middle">settings</i>
         Paramètres
     </button>
     {% if logsPath is not empty %}
-    <button type="button" class="btn btn-primary btn-sm" id="btn-analyse">
+    <button type="button" class="btn btn-primary btn-sm tab-action tab-action-logs" id="btn-analyse">
         <i class="material-icons" style="font-size:1rem;vertical-align:middle">refresh</i>
         Actualiser
     </button>
-    <div id="analyse-spinner" class="ml-2" style="display:none">
+    <div id="analyse-spinner" class="tab-action tab-action-logs" style="display:none">
         <div class="spinner-border spinner-border-sm text-primary" role="status">
             <span class="sr-only">Analyse en cours...</span>
         </div>
@@ -37,12 +37,22 @@
     </div>
     {% endif %}
     {% if cronUrl is not empty %}
-    <button type="button" class="btn btn-outline-primary btn-sm ml-2" id="btn-run-cron"
-            onclick="runCron('{{ cronUrl|e('js') }}')">
+    <button type="button" class="btn btn-outline-primary btn-sm tab-action tab-action-trafic tab-action-conversion" id="btn-run-cron"
+            onclick="runCron('{{ cronUrl|e('js') }}', this)">
         <i class="material-icons" style="font-size:1rem;vertical-align:middle">play_arrow</i>
         Cron J-1
     </button>
-    <span id="cron-run-result" class="ml-2 small"></span>
+    <button type="button" class="btn btn-outline-primary btn-sm tab-action tab-action-resources" id="btn-sample-now"
+            onclick="sampleNow(this)">
+        <i class="material-icons" style="font-size:1rem;vertical-align:middle">timer</i>
+        Sample now
+    </button>
+    <button type="button" class="btn btn-outline-secondary btn-sm tab-action tab-action-resources" id="btn-run-cron-resources"
+            onclick="runCron('{{ cronResourcesUrl|e('js') }}', this)">
+        <i class="material-icons" style="font-size:1rem;vertical-align:middle">memory</i>
+        Rollup J-1
+    </button>
+    <span id="cron-run-result" class="ml-2 small tab-action tab-action-trafic tab-action-conversion tab-action-resources"></span>
     {% endif %}
 </div>
 
@@ -122,24 +132,46 @@
 
         {% if cronUrl is not empty %}
         <div class="mt-4 border-top pt-3">
-          <h6><i class="material-icons align-middle" style="font-size:1rem">schedule</i> Configuration cron Alwaysdata</h6>
+          <h6><i class="material-icons align-middle" style="font-size:1rem">schedule</i> Configuration crons Alwaysdata</h6>
           <p class="text-muted small mb-2">
-            Dans le panneau Alwaysdata → <strong>Tâches planifiées</strong>, créer une tâche de type <strong>URL</strong> avec les paramètres suivants :
+            Dans le panneau Alwaysdata → <strong>Tâches planifiées</strong>, créer <strong>3 tâches</strong> de type URL :
           </p>
-          <table class="table table-sm table-bordered small">
-            <tr><th style="width:140px">Type</th><td>URL</td></tr>
-            <tr><th>Fréquence</th><td>Tous les jours à 02:00</td></tr>
-            <tr><th>URL</th><td>
-              <div class="input-group input-group-sm">
-                <input type="text" class="form-control font-monospace" id="cron-url-config" value="{{ cronUrl }}" readonly>
-                <div class="input-group-append">
-                  <button class="btn btn-outline-secondary" type="button"
-                          onclick="var i=document.getElementById('cron-url-config');i.select();document.execCommand('copy')">Copier</button>
-                </div>
+
+          <div class="card card-body bg-light mb-2 p-2">
+            <div class="small font-weight-bold mb-1">1. Cron Stats (logs HTTP J-1)</div>
+            <div class="small text-muted mb-1">Fréquence recommandée : <strong>tous les jours à 02:00</strong></div>
+            <div class="input-group input-group-sm">
+              <input type="text" class="form-control font-monospace" id="cron-url-config" value="{{ cronUrl }}" readonly>
+              <div class="input-group-append">
+                <button class="btn btn-outline-secondary" type="button"
+                        onclick="var i=document.getElementById('cron-url-config');i.select();document.execCommand('copy')">Copier</button>
               </div>
-            </td></tr>
-          </table>
-          <small class="text-muted">Le cron parse le log HTTP de la veille et enregistre les métriques en base.</small>
+            </div>
+          </div>
+
+          <div class="card card-body bg-light mb-2 p-2">
+            <div class="small font-weight-bold mb-1">2. Cron Sample Ressources (haute fréquence)</div>
+            <div class="small text-muted mb-1">Fréquence recommandée : <strong>toutes les 15 minutes</strong> — collecte RAM / CPU / OPcache / top processes</div>
+            <div class="input-group input-group-sm">
+              <input type="text" class="form-control font-monospace" id="cron-sample-url-config" value="{{ cronResourcesSampleUrl }}" readonly>
+              <div class="input-group-append">
+                <button class="btn btn-outline-secondary" type="button"
+                        onclick="var i=document.getElementById('cron-sample-url-config');i.select();document.execCommand('copy')">Copier</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="card card-body bg-light mb-2 p-2">
+            <div class="small font-weight-bold mb-1">3. Cron Rollup Ressources (agrégation J-1)</div>
+            <div class="small text-muted mb-1">Fréquence recommandée : <strong>tous les jours à 02:15</strong> — consolide les samples de la veille en historique long (90j)</div>
+            <div class="input-group input-group-sm">
+              <input type="text" class="form-control font-monospace" id="cron-resources-url-config" value="{{ cronResourcesUrl }}" readonly>
+              <div class="input-group-append">
+                <button class="btn btn-outline-secondary" type="button"
+                        onclick="var i=document.getElementById('cron-resources-url-config');i.select();document.execCommand('copy')">Copier</button>
+              </div>
+            </div>
+          </div>
         </div>
         {% endif %}
 
@@ -158,9 +190,9 @@
 {# ------------------------------------------------------------------ #}
 {# Main tabs — Statistiques trafic | Conversion | Logs du jour         #}
 {# ------------------------------------------------------------------ #}
-<div class="card mb-4" id="main-tabs-section">
-    <div class="card-header d-flex align-items-center justify-content-between flex-wrap" style="gap:.5rem">
-        <ul class="nav nav-tabs card-header-tabs" id="main-nav-tabs" role="tablist">
+<div id="main-tabs-section" class="mb-4">
+    <div class="d-flex align-items-end flex-wrap mb-3" style="border-bottom:1px solid #dee2e6">
+        <ul class="nav nav-tabs flex-grow-1" id="main-nav-tabs" role="tablist" style="border-bottom:0;margin-bottom:-1px">
             {% if logsPath is not empty %}
             <li class="nav-item">
                 <a class="nav-link active" id="tab-logs-link" data-toggle="tab" href="#tab-logs" role="tab">
@@ -181,8 +213,14 @@
                     Conversion
                 </a>
             </li>
+            <li class="nav-item">
+                <a class="nav-link" id="tab-resources-link" data-toggle="tab" href="#tab-resources" role="tab">
+                    <i class="material-icons align-middle" style="font-size:1rem">memory</i>
+                    Ressources
+                </a>
+            </li>
         </ul>
-        <div class="d-flex align-items-center d-none" id="stats-controls" style="gap:.5rem">
+        <div class="d-flex align-items-center d-none pb-2" id="stats-controls" style="gap:.5rem">
             <input type="date" id="stats-date-picker" class="form-control form-control-sm" style="width:auto">
             <div class="btn-group btn-group-sm" role="group">
                 <button type="button" class="btn btn-outline-secondary stats-period" data-period="30">30j</button>
@@ -201,15 +239,18 @@
         {# --- Tab Conversion --- #}
         {{ include('@Modules/sc_alwaysdata/views/templates/admin/_tab_conversion.html.twig') }}
 
+        {# --- Tab Ressources --- #}
+        {{ include('@Modules/sc_alwaysdata/views/templates/admin/_tab_resources.html.twig') }}
+
         {# --- Tab Logs du jour --- #}
         {% if logsPath is not empty %}
         <div class="tab-pane fade show active" id="tab-logs" role="tabpanel">
             {# Source status badges #}
-            <div id="sources-status" class="p-3 pb-0"></div>
+            <div id="sources-status" class="pt-3"></div>
 
             {# Log viewer — tabs built by JS #}
             <div id="logs-viewer-section">
-                <div class="px-3 pt-2">
+                <div class="pt-2">
                     <ul class="nav nav-tabs" id="logs-tabs" role="tablist"></ul>
                 </div>
                 <div class="tab-content" id="logs-tab-content"></div>
@@ -229,6 +270,10 @@ var applyBlockUrl = '{{ path('sc_alwaysdata_apply_block') }}';
 var applyUnblockUrl = '{{ path('sc_alwaysdata_apply_unblock') }}';
 var statsUrl = '{{ statsUrl }}';
 var conversionUrl = '{{ conversionUrl }}';
+var resourcesStatsUrl = '{{ resourcesStatsUrl }}';
+var cronResourcesUrl = '{{ cronResourcesUrl }}';
+var cronResourcesSampleUrl = '{{ cronResourcesSampleUrl }}';
+window.cronResourcesSampleUrl = cronResourcesSampleUrl;
 </script>
 
 <script>
@@ -251,6 +296,13 @@ function pct(a, b) {
         return d.getFullYear() + '-' + mm + '-' + dd;
     })();
 
+    var today = (function() {
+        var d = new Date();
+        var mm = String(d.getMonth() + 1).padStart(2, '0');
+        var dd = String(d.getDate()).padStart(2, '0');
+        return d.getFullYear() + '-' + mm + '-' + dd;
+    })();
+
     var currentPeriod = 7;
     var currentDate = yesterday;
     var activeTab = 'trafic';
@@ -258,6 +310,14 @@ function pct(a, b) {
     var datePicker = document.getElementById('stats-date-picker');
     var spinner = document.getElementById('stats-spinner');
     if (datePicker) { datePicker.value = yesterday; datePicker.max = yesterday; }
+
+    function updateTabActions(tabName) {
+        document.querySelectorAll('.tab-action').forEach(function(el) {
+            var show = el.classList.contains('tab-action-' + tabName);
+            el.style.display = show ? '' : 'none';
+        });
+    }
+    window.updateTabActions = updateTabActions;
 
     function postJson(url, params) {
         var body = new URLSearchParams(params);
@@ -286,13 +346,24 @@ function pct(a, b) {
             .finally(function() { if (spinner) spinner.style.display = 'none'; });
     }
 
-    function fetchActive() {
-        if (activeTab === 'trafic') fetchStats();
-        else fetchConversion();
+    function fetchResources() {
+        if (spinner) spinner.style.display = 'inline-block';
+        postJson(resourcesStatsUrl, { date: currentDate, period: String(currentPeriod) })
+            .then(function(r) { return r.json(); })
+            .then(function(d) { renderResources(d, currentDate, currentPeriod); })
+            .catch(function(e) { document.getElementById('tab-resources-content').innerHTML = '<div class="alert alert-danger">Erreur: ' + esc(e.message) + '</div>'; })
+            .finally(function() { if (spinner) spinner.style.display = 'none'; });
     }
 
-    // Exposé globalement pour runCron() dans _tab_trafic.html.twig
+    function fetchActive() {
+        if (activeTab === 'trafic') fetchStats();
+        else if (activeTab === 'conversion') fetchConversion();
+        else if (activeTab === 'resources') fetchResources();
+    }
+
+    // Exposés globalement pour runCron() dans _tab_trafic.html.twig
     window.fetchStats = fetchStats;
+    window.fetchResources = fetchResources;
 
     document.addEventListener('DOMContentLoaded', function() {
         // Date picker
@@ -317,21 +388,73 @@ function pct(a, b) {
         $('#main-nav-tabs a[data-toggle="tab"]').on('shown.bs.tab', function(e) {
             var tabId = $(e.target).attr('id');
             var statsControls = document.getElementById('stats-controls');
+            var tabName = tabIdToName(tabId);
+
+            // Persist active tab in URL hash (sans scroll jump grâce à replaceState)
+            if (tabName) {
+                history.replaceState(null, '', '#' + tabName);
+            }
 
             if (tabId === 'tab-logs-link') {
                 if (statsControls) statsControls.classList.add('d-none');
+                updateTabActions('logs');
                 if (!window.analysisRan) {
                     window.runAnalysis && window.runAnalysis();
                 }
             } else {
                 if (statsControls) statsControls.classList.remove('d-none');
-                activeTab = tabId === 'tab-trafic-link' ? 'trafic' : 'conversion';
+                if (tabId === 'tab-trafic-link') {
+                    activeTab = 'trafic';
+                    // Ressources autorise aujourd'hui — rétablir hier pour les autres onglets
+                    if (datePicker) { datePicker.max = yesterday; if (currentDate > yesterday) { currentDate = yesterday; datePicker.value = yesterday; } }
+                } else if (tabId === 'tab-conversion-link') {
+                    activeTab = 'conversion';
+                    if (datePicker) { datePicker.max = yesterday; if (currentDate > yesterday) { currentDate = yesterday; datePicker.value = yesterday; } }
+                } else if (tabId === 'tab-resources-link') {
+                    activeTab = 'resources';
+                    // Ressources : autoriser aujourd'hui
+                    if (datePicker) { datePicker.max = today; if (currentDate === yesterday) { currentDate = today; datePicker.value = today; } }
+                }
+                updateTabActions(activeTab);
                 fetchActive();
             }
         });
 
-        // Initial load
-        fetchStats();
+        function tabIdToName(tabId) {
+            if (tabId === 'tab-logs-link')       return 'logs';
+            if (tabId === 'tab-trafic-link')     return 'trafic';
+            if (tabId === 'tab-conversion-link') return 'conversion';
+            if (tabId === 'tab-resources-link')  return 'resources';
+            return null;
+        }
+
+        // --- Initial tab selection ---
+        // Priorité : hash URL > onglet .active dans le DOM (défini côté template)
+        var hashTab = (window.location.hash || '').replace(/^#/, '');
+        var validTabs = ['logs', 'trafic', 'conversion', 'resources'];
+        var hashTarget = validTabs.indexOf(hashTab) !== -1
+            ? document.getElementById('tab-' + hashTab + '-link')
+            : null;
+
+        if (hashTarget) {
+            // Basculer vers l'onglet demandé — shown.bs.tab se chargera du reste (fetchActive etc.)
+            $(hashTarget).tab('show');
+        } else {
+            // Défaut : lire l'onglet .active posé par le template, initialiser en conséquence
+            var initialActiveTabLink = document.querySelector('#main-nav-tabs .nav-link.active');
+            var initialTabName = 'trafic';
+            if (initialActiveTabLink) {
+                initialTabName = tabIdToName(initialActiveTabLink.id) || 'trafic';
+            }
+            updateTabActions(initialTabName);
+            if (initialTabName !== 'logs' && statsControls) {
+                statsControls.classList.remove('d-none');
+            }
+            if (initialTabName === 'trafic')          fetchStats();
+            else if (initialTabName === 'conversion') { activeTab = 'conversion'; fetchConversion(); }
+            else if (initialTabName === 'resources')  { activeTab = 'resources';  fetchResources(); }
+            // logs : pas de fetch, runAnalysis tourne déjà via son propre script
+        }
     });
 })();
 </script>

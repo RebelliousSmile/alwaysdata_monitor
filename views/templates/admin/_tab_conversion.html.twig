@@ -23,19 +23,34 @@ function renderConversion(data, date, period) {
         return;
     }
 
-    var steps = [
-        ['Vues produit',         s.views_product,    null],
-        ['Ajouts panier',        s.cart_adds,         s.views_product],
-        ['Vues panier',          s.views_cart,        s.cart_adds],
-        ['Vues checkout',        s.views_checkout,    s.views_cart],
-        ['POST checkout',        s.post_checkout,     s.views_checkout],
-        ['Commandes confirmées', s.orders_confirmed,  s.post_checkout],
+    // --- Vrai funnel de conversion (étapes séquentielles) ---
+    var funnelSteps = [
+        ['Vues produit',       s.views_product,    null,                'Nombre de pages produit (.html) chargées en GET 200. C\'est le volume de trafic qualifié sur votre catalogue — indicateur de l\'intérêt suscité par vos produits.'],
+        ['Ajouts panier',      s.cart_adds,        s.views_product,     'Nombre de POST sur /panier (clic "Ajouter au panier" ou requête AJAX). Mesure l\'intention d\'achat : combien de visiteurs ont franchi le pas.'],
+        ['Soumissions tunnel', s.post_checkout,    s.cart_adds,         'Nombre de POST sur /commande — chaque validation d\'étape du tunnel (adresse, livraison, choix de paiement…). Mesure l\'engagement dans le processus de commande.'],
+        ['Commandes payées',   s.orders_confirmed, s.post_checkout,     'Commandes dont le statut est marqué comme "payé" en base (ps_orders.current_state → order_state.paid = 1). Source fiable : la base, pas les logs.'],
     ];
 
-    var funnelRows = steps.map(function(step) {
-        return '<tr><td>' + esc(step[0]) + '</td>'
+    var funnelRows = funnelSteps.map(function(step) {
+        return '<tr title="' + esc(step[3]) + '" style="cursor:help">'
+            + '<td>' + esc(step[0])
+            + ' <i class="material-icons text-muted align-middle" style="font-size:0.9rem;opacity:0.5">help_outline</i></td>'
             + '<td class="text-right font-weight-bold">' + esc(String(step[1])) + '</td>'
             + '<td class="text-right text-muted">' + (step[2] !== null ? pct(step[1], step[2]) : '—') + '</td>'
+            + '</tr>';
+    }).join('');
+
+    // --- Indicateurs informatifs (pas des étapes du funnel) ---
+    var infoSteps = [
+        ['Consultations panier', s.views_cart,     'Nombre de GET sur /panier + 200. Inclut les redirections automatiques après un ajout, les retours depuis le header, les rechargements. NE pas calculer de taux sur cet indicateur : un visiteur peut consulter son panier 10 fois sans rien acheter.'],
+        ['Consultations tunnel', s.views_checkout, 'Nombre de GET sur /commande + 200. Inclut chaque étape visualisée (adresse, livraison, paiement). Un visiteur qui valide son panier puis recule et avance plusieurs fois génère plusieurs consultations.'],
+    ];
+
+    var infoRows = infoSteps.map(function(step) {
+        return '<tr title="' + esc(step[2]) + '" style="cursor:help">'
+            + '<td class="text-muted">' + esc(step[0])
+            + ' <i class="material-icons text-muted align-middle" style="font-size:0.9rem;opacity:0.5">help_outline</i></td>'
+            + '<td class="text-right text-muted">' + esc(String(step[1])) + '</td>'
             + '</tr>';
     }).join('');
 
@@ -58,14 +73,101 @@ function renderConversion(data, date, period) {
             return '<tr><td><small>' + esc(p) + '</small></td><td class="text-right font-weight-bold">' + esc(String(byPath[p])) + '</td></tr>';
         }).join('') || '<tr><td colspan="2" class="text-muted text-center small">Aucune erreur 500 sur le funnel.</td></tr>';
 
+    // 500 détaillés : time + IP + path (triés par time décroissant)
+    function label500(e) {
+        // Nouveau format (1.4.2+) : time = "HH:MM:SS"
+        if (e.time) return String(e.time);
+        // Ancien format : hour = 0-23
+        if (e.hour !== undefined && e.hour !== null) return String(e.hour).padStart(2, '0') + 'h';
+        return '—';
+    }
+    function sortKey500(e) {
+        if (e.time) return e.time; // tri alphanumérique sur HH:MM:SS marche
+        if (e.hour !== undefined && e.hour !== null) return String(e.hour).padStart(2, '0') + ':00:00';
+        return '';
+    }
+    var sortedDetail500 = detail500.slice().sort(function(a, b) {
+        return sortKey500(b).localeCompare(sortKey500(a));
+    });
+    var detail500Rows = sortedDetail500.map(function(e) {
+        return '<tr>'
+            + '<td class="text-muted small" style="white-space:nowrap">' + esc(label500(e)) + '</td>'
+            + '<td><code class="small">' + esc(e.ip || '—') + '</code></td>'
+            + '<td><small style="word-break:break-all">' + esc(e.path || '—') + '</small></td>'
+            + '</tr>';
+    }).join('');
+
+    var detail500Block = '';
+    if (sortedDetail500.length) {
+        var hasSecondPrecision = sortedDetail500.some(function(e) { return !!e.time; });
+        var precisionNote = hasSecondPrecision
+            ? 'Précision à la seconde. Une même IP qui apparaît plusieurs fois correspond à un utilisateur (ou bot) qui a rechargé la page — souvent une seule cause racine à corriger.'
+            : 'L\'heure est approximative (précision&nbsp;: heure complète) — ce sont des données d\'avant la 1.4.2. Les nouvelles données seront à la seconde près.';
+        detail500Block = '<div class="mb-3">'
+            + '<h6>Détail des erreurs 500 funnel — ' + esc(date) + '</h6>'
+            + '<div class="alert alert-warning small mb-2">'
+            + '<i class="material-icons align-middle mr-1" style="font-size:1rem">info</i>'
+            + precisionNote + ' Pour retrouver la cause, regardez le tableau "Erreurs PHP enregistrées" ci-dessous au créneau indiqué.'
+            + '</div>'
+            + '<div class="table-responsive"><table class="table table-sm table-hover mb-0">'
+            + '<thead class="thead-light"><tr><th style="width:70px">Heure</th><th style="width:150px">IP</th><th>Page</th></tr></thead>'
+            + '<tbody>' + detail500Rows + '</tbody></table></div>'
+            + '</div>';
+    }
+
+    // Erreurs PHP enregistrées par le cron pour cette date
+    var phpErrors = (s.php_errors || []);
+    var phpErrorsBlock = '';
+    if (phpErrors.length) {
+        var levelBadge = {fatal: 'danger', error: 'danger', warning: 'warning', notice: 'secondary', deprecated: 'light'};
+        var phpRows = phpErrors.map(function(e) {
+            var badge = levelBadge[e.level] || 'secondary';
+            var file = String(e.file || '');
+            var fileShort = file.length > 80 ? '…' + file.slice(-80) : file;
+            return '<tr>'
+                + '<td><span class="badge badge-' + badge + '">' + esc(e.level) + '</span></td>'
+                + '<td><small style="word-break:break-all">' + esc(fileShort) + '</small></td>'
+                + '<td class="text-muted small">' + esc(String(e.line || '—')) + '</td>'
+                + '<td><small style="word-break:break-all">' + esc(e.message || '') + '</small></td>'
+                + '<td class="text-right"><span class="badge badge-light">' + esc(String(e.count || 0)) + '</span></td>'
+                + '</tr>';
+        }).join('');
+        phpErrorsBlock = '<div class="mb-3">'
+            + '<h6>Erreurs PHP enregistrées — ' + esc(date) + '</h6>'
+            + '<div class="alert alert-info small mb-2">'
+            + '<i class="material-icons align-middle mr-1" style="font-size:1rem">info</i>'
+            + 'Snapshot figé par le cron au moment de l\'analyse de cette journée. Disponible même pour les dates anciennes (90 jours de rétention).'
+            + '</div>'
+            + '<div class="table-responsive"><table class="table table-sm table-hover mb-0">'
+            + '<thead class="thead-light"><tr>'
+            + '<th>Niveau</th><th>Fichier</th><th>Ligne</th><th>Message</th><th class="text-right">Occurrences</th>'
+            + '</tr></thead><tbody>' + phpRows + '</tbody></table></div>'
+            + '</div>';
+    } else if (sortedDetail500.length > 0) {
+        phpErrorsBlock = '<div class="alert alert-secondary small mb-3">'
+            + 'Aucune erreur PHP n\'a été enregistrée par le cron pour cette date. '
+            + 'Si c\'est une date antérieure à la mise à jour 1.4.1, le snapshot n\'existe pas encore — les erreurs futures seront bien capturées.'
+            + '</div>';
+    }
+
     el.innerHTML = '<div class="row">'
-        + '<div class="col-md-5 mb-3"><h6>Funnel — ' + esc(date) + '</h6>'
-        + '<table class="table table-sm"><thead class="thead-light"><tr><th>Étape</th><th class="text-right">N</th><th class="text-right">Taux</th></tr></thead><tbody>' + funnelRows + '</tbody></table></div>'
+        + '<div class="col-md-5 mb-3">'
+        + '<h6>Funnel — ' + esc(date) + '</h6>'
+        + '<table class="table table-sm mb-2"><thead class="thead-light"><tr>'
+        + '<th>Étape</th><th class="text-right">N</th><th class="text-right">Taux</th>'
+        + '</tr></thead><tbody>' + funnelRows + '</tbody></table>'
+        + '<div class="small text-muted mb-1">Indicateurs annexes (trafic, pas des étapes de conversion)</div>'
+        + '<table class="table table-sm table-borderless mb-0"><tbody>' + infoRows + '</tbody></table>'
+        + '</div>'
         + '<div class="col-md-7 mb-3"><h6>Erreurs 500 funnel</h6>'
         + '<table class="table table-sm"><thead class="thead-light"><tr><th>Page</th><th class="text-right">Erreurs</th></tr></thead><tbody>' + funnel500Rows + '</tbody></table>'
         + '</div>'
         + '</div>'
+        + detail500Block
+        + phpErrorsBlock
         + '<h6>Évolution sur ' + period + 'j</h6>'
-        + '<table class="table table-sm"><thead class="thead-light"><tr><th>Date</th><th>Vues produit</th><th>Ajouts panier</th><th>POST checkout</th><th>Commandes</th></tr></thead><tbody>' + periodRows + '</tbody></table>';
+        + '<table class="table table-sm"><thead class="thead-light"><tr>'
+        + '<th>Date</th><th>Vues produit</th><th>Ajouts panier</th><th>Soumissions tunnel</th><th>Commandes payées</th>'
+        + '</tr></thead><tbody>' + periodRows + '</tbody></table>';
 }
 </script>
