@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<module>
+    <name>sc_alwaysdata</name>
+    <displayName><![CDATA[Alwaysdata Log Viewer]]></displayName>
+    <version><![CDATA[1.10.0]]></version>
+    <description><![CDATA[Analyse les logs Alwaysdata et g&egrave;re le fichier .htaccess.]]></description>
+    <author><![CDATA[Scriptami]]></author>
+    <tab><![CDATA[administration]]></tab>
+    <is_configurable>1</is_configurable>
+    <need_instance>0</need_instance>
+</module>

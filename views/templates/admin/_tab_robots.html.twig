@@ -1,0 +1,137 @@
+<div class="tab-pane fade" id="tab-robots" role="tabpanel">
+<div class="pt-3">
+
+<div id="robots-section" class="card mb-4">
+    <div class="card-header">
+        <h3 class="card-header-title">
+            <i class="material-icons">smart_toy</i>
+            robots.txt
+            {% if robots.enabled and robots.in_file %}
+            <span class="badge badge-success ml-2">Actif</span>
+            {% elseif robots.enabled %}
+            <span class="badge badge-warning ml-2">Absent du fichier</span>
+            {% else %}
+            <span class="badge badge-secondary ml-2">Inactif</span>
+            {% endif %}
+        </h3>
+    </div>
+    <div class="card-body">
+        <p class="text-muted small">
+            Bloc <code># BEGIN sc_alwaysdata robots</code> ajouté en fin de <code>{{ robotsPath }}</code>.
+            Réécrit automatiquement quand PrestaShop régénère le fichier (Paramètres &gt; Trafic &amp; SEO).
+            Seuls les robots honnêtes lisent ce fichier : les scrapers se bloquent dans l'onglet .htaccess.
+        </p>
+        {% if robots.enabled and not robots.in_file %}
+        <div class="alert alert-warning small">
+            Le bloc est activé mais absent du fichier (écrasé à la main ?). Cliquez sur Appliquer pour le rétablir.
+        </div>
+        {% endif %}
+        {% if not robots.configured %}
+        <div class="alert alert-info small">
+            Jamais configuré : les listes ci-dessous sont des valeurs suggérées, rien n'est encore écrit.
+        </div>
+        {% endif %}
+        <form method="post" action="{{ path('sc_alwaysdata_robots') }}">
+            <input type="hidden" name="_token" value="{{ csrf_token('sc_alwaysdata_robots') }}">
+
+            <div class="custom-control custom-checkbox mb-3">
+                <input type="checkbox" class="custom-control-input" id="robots_enabled" name="robots_enabled" value="1"
+                       {% if robots.enabled %}checked{% endif %}>
+                <label class="custom-control-label" for="robots_enabled">Écrire le bloc dans robots.txt</label>
+            </div>
+
+            <div class="form-row">
+                <div class="form-group col-md-6">
+                    <label for="robots_disallow">Chemins interdits à tous les robots (<code>User-agent: *</code>)</label>
+                    <textarea class="form-control text-monospace" id="robots_disallow" name="robots_disallow" rows="8">{{ robots.disallow|join("\n") }}</textarea>
+                    <small class="form-text text-muted">Un chemin par ligne, commençant par <code>/</code> ou <code>*</code>.</small>
+                </div>
+                <div class="form-group col-md-6">
+                    <label for="robots_bots">Robots interdits sur tout le site (<code>Disallow: /</code>)</label>
+                    <textarea class="form-control text-monospace" id="robots_bots" name="robots_bots" rows="8">{{ robots.bots|join("\n") }}</textarea>
+                    <small class="form-text text-muted">
+                        Un nom de robot par ligne (ex. <code>GPTBot</code>). Ne jamais y mettre Googlebot ni bingbot.
+                    </small>
+                </div>
+            </div>
+
+            <button type="submit" class="btn btn-primary">
+                <i class="material-icons">save</i>
+                Appliquer
+            </button>
+            <small class="text-muted ml-2">Décocher puis appliquer retire le bloc, les listes sont conservées.</small>
+        </form>
+    </div>
+</div>
+
+{% set purposeLabels = {
+    'training': ['Entraînement des modèles', 'Collecte des pages pour entraîner les IA. N\'amène aucun visiteur : blocage sans perte.'],
+    'search': ['Moteurs de réponse IA', 'Indexe la boutique pour les réponses de ChatGPT, Claude ou Perplexity, avec lien vers le site. Bloquer = disparaître de ces réponses.'],
+    'user': ['À la demande d\'un utilisateur', 'Une personne a demandé à l\'assistant de lire une page (souvent un client qui compare). Bloquer = refuser ce client.']
+} %}
+{% set robotsBotsLower = robots.bots|map(b => b|lower) %}
+{% set blockedUasLower = blockedUas|map(u => u|lower) %}
+<div id="ai-bots-section" class="card mb-4">
+    <div class="card-header">
+        <h3 class="card-header-title">
+            <i class="material-icons">psychology</i>
+            Robots des éditeurs d'IA
+        </h3>
+    </div>
+    <div class="card-body">
+        <p class="text-muted small">
+            Blocage préventif, même si le robot n'apparaît pas dans les logs. Chaque robot coché est ajouté aux interdits du
+            robots.txt ci-dessus <strong>et</strong> reçoit un 403 via le .htaccess, pour ceux qui ignorent le robots.txt.
+            Ajout uniquement : pour débloquer, retirez le nom de la liste robots.txt et la règle dans l'onglet .htaccess.
+        </p>
+        <form method="post" action="{{ path('sc_alwaysdata_ai_bots') }}">
+            <input type="hidden" name="_token" value="{{ csrf_token('sc_alwaysdata_ai_bots') }}">
+            {% for purpose, labels in purposeLabels %}
+            <h6 class="mt-3 mb-1">{{ labels[0] }}</h6>
+            <p class="small text-muted mb-2">{{ labels[1] }}</p>
+            <table class="table table-sm small mb-2">
+                <tbody>
+                {% for bot in aiBots|filter(b => b.purpose == purpose) %}
+                    {% set inRobots = bot.name|lower in robotsBotsLower %}
+                    {% set inHtaccess = bot.name|lower in blockedUasLower %}
+                    {% set done = inRobots and (bot.robots_only or inHtaccess) %}
+                    <tr>
+                        <td style="width:1%">
+                            <div class="custom-control custom-checkbox">
+                                <input type="checkbox" class="custom-control-input" id="ai_bot_{{ loop.parent.loop.index }}_{{ loop.index }}"
+                                       name="ai_bots[]" value="{{ bot.name }}"
+                                       {% if done %}disabled{% elseif purpose == 'training' %}checked{% endif %}>
+                                <label class="custom-control-label" for="ai_bot_{{ loop.parent.loop.index }}_{{ loop.index }}"></label>
+                            </div>
+                        </td>
+                        <td class="text-monospace">{{ bot.name }}</td>
+                        <td class="text-muted">{{ bot.vendor }}</td>
+                        <td>
+                            {% if bot.robots_only %}
+                            <span class="badge badge-light" title="Jeton lu dans robots.txt uniquement : l'éditeur crawle avec son robot de recherche habituel">robots.txt seul</span>
+                            {% elseif not bot.honours_robots %}
+                            <span class="badge badge-light" title="N'applique pas le robots.txt : seul le 403 du .htaccess l'arrête">ignore robots.txt</span>
+                            {% endif %}
+                        </td>
+                        <td class="text-right text-nowrap">
+                            <span class="badge {{ inRobots ? 'badge-success' : 'badge-secondary' }}">robots.txt {{ inRobots ? '✓' : '—' }}</span>
+                            {% if not bot.robots_only %}
+                            <span class="badge {{ inHtaccess ? 'badge-success' : 'badge-secondary' }}">.htaccess {{ inHtaccess ? '✓' : '—' }}</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            {% endfor %}
+            <button type="submit" class="btn btn-danger mt-2">
+                <i class="material-icons">block</i>
+                Bloquer la sélection
+            </button>
+            <small class="text-muted ml-2">Les robots d'entraînement sont précochés ; les deux autres groupes ont un coût, cochez-les en connaissance de cause.</small>
+        </form>
+    </div>
+</div>
+
+</div>
+</div>

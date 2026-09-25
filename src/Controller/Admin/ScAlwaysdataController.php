@@ -18,31 +18,42 @@ use PrestaShopBundle\Security\Annotation\AdminSecurity;
 use ScAlwaysdata\Entity\DailyResource;
 use ScAlwaysdata\Entity\DailyStat;
 use ScAlwaysdata\Entity\ResourceSample;
+use ScAlwaysdata\Service\AiBotCatalog;
 use ScAlwaysdata\Service\CrawlerAnalyserService;
 use ScAlwaysdata\Service\HtaccessService;
+use ScAlwaysdata\Service\LoadDiagnosticService;
 use ScAlwaysdata\Service\LogReaderService;
 use ScAlwaysdata\Service\PhpErrorAnalyserService;
+use ScAlwaysdata\Service\RobotsTxtService;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 
 class ScAlwaysdataController extends FrameworkBundleAdminController
 {
+    private const BACKUPS_KEPT_ON_PURGE = 10;
+
     private LogReaderService $logReaderService;
     private CrawlerAnalyserService $crawlerAnalyserService;
     private PhpErrorAnalyserService $phpErrorAnalyserService;
     private HtaccessService $htaccessService;
+    private RobotsTxtService $robotsTxtService;
+    private LoadDiagnosticService $loadDiagnosticService;
 
     public function __construct(
         LogReaderService $logReaderService,
         CrawlerAnalyserService $crawlerAnalyserService,
         PhpErrorAnalyserService $phpErrorAnalyserService,
-        HtaccessService $htaccessService
+        HtaccessService $htaccessService,
+        RobotsTxtService $robotsTxtService,
+        LoadDiagnosticService $loadDiagnosticService
     ) {
         $this->logReaderService = $logReaderService;
         $this->crawlerAnalyserService = $crawlerAnalyserService;
         $this->phpErrorAnalyserService = $phpErrorAnalyserService;
         $this->htaccessService = $htaccessService;
+        $this->robotsTxtService = $robotsTxtService;
+        $this->loadDiagnosticService = $loadDiagnosticService;
     }
 
     /**
@@ -96,6 +107,8 @@ class ScAlwaysdataController extends FrameworkBundleAdminController
             $linesPerSource[$dir] = $v > 0 ? $v : $default;
         }
 
+        $htaccessReadable = $htaccessPath !== '' && is_readable($htaccessPath);
+
         $cronToken = (string) Configuration::get('SC_ALWAYSDATA_CRON_TOKEN');
         if (!$cronToken) {
             $cronToken = \Tools::passwdGen(32);
@@ -114,11 +127,24 @@ class ScAlwaysdataController extends FrameworkBundleAdminController
                 'help_link'              => false,
                 'logsPath'               => $logsPath,
                 'htaccessPath'           => $htaccessPath,
+                'protection'             => $htaccessPath !== '' ? $this->htaccessService->readProtection() : null,
+                'shopDomains'            => $htaccessPath !== '' ? $this->fetchShopDomains() : [],
+                'robots'                 => $htaccessPath !== '' ? $this->robotsTxtService->readSettings() : null,
+                'robotsPath'             => $htaccessPath !== '' ? $this->robotsTxtService->getRobotsPath() : '',
+                'aiBots'                 => (new AiBotCatalog())->all(),
+                'facetMaxFiltersLimit'   => HtaccessService::FACET_MAX_FILTERS_LIMIT,
+                'htaccessHealth'         => $htaccessReadable ? $this->htaccessService->diagnose() : null,
+                'blockedIps'             => $htaccessReadable ? $this->htaccessService->readBlockedIps() : [],
+                'blockedUas'             => $htaccessReadable ? $this->htaccessService->readBlockedUAs() : [],
+                'htaccessBackups'        => $htaccessReadable ? $this->htaccessService->listBackups(15) : [],
+                'htaccessBackupCount'    => $htaccessReadable ? $this->htaccessService->countBackups() : 0,
+                'backupsKeptOnPurge'     => self::BACKUPS_KEPT_ON_PURGE,
                 'logsPathHint'           => $logsPathHint,
                 'linesPerSource'         => $linesPerSource,
                 'statsUrl'               => $this->generateUrl('sc_alwaysdata_stats'),
                 'conversionUrl'          => $this->generateUrl('sc_alwaysdata_conversion'),
                 'resourcesStatsUrl'      => $this->generateUrl('sc_alwaysdata_resources_stats'),
+                'diagnosticUrl'          => $this->generateUrl('sc_alwaysdata_diagnostic'),
                 'cronUrl'                => $cronUrl,
                 'cronResourcesUrl'       => $cronResourcesUrl,
                 'cronResourcesSampleUrl' => $cronResourcesSampleUrl,
@@ -135,6 +161,8 @@ class ScAlwaysdataController extends FrameworkBundleAdminController
      */
     public function analyseAction(): JsonResponse
     {
+        $this->registerFatalErrorJsonHandler();
+
         try {
             $sources = $this->logReaderService->readTodayLogs();
 
@@ -192,6 +220,33 @@ class ScAlwaysdataController extends FrameworkBundleAdminController
         } catch (\Throwable $e) {
             return new JsonResponse(['error' => $e->getMessage()], 500);
         }
+    }
+
+    /**
+     * Fatal errors (memory exhaustion, max_execution_time) bypass try/catch and
+     * make the endpoint answer an HTML error page, which the front-end cannot
+     * read. Convert them into the JSON envelope the caller expects.
+     */
+    private function registerFatalErrorJsonHandler(): void
+    {
+        register_shutdown_function(function (): void {
+            $error = error_get_last();
+            if ($error === null || !in_array($error['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR], true)) {
+                return;
+            }
+
+            while (ob_get_level() > 0) {
+                ob_end_clean();
+            }
+
+            if (!headers_sent()) {
+                header('Content-Type: application/json', true, 500);
+            }
+
+            echo json_encode([
+                'error' => sprintf('%s (%s:%d)', $error['message'], $error['file'], $error['line']),
+            ]);
+        });
     }
 
     /**
@@ -293,6 +348,75 @@ class ScAlwaysdataController extends FrameworkBundleAdminController
             ]);
         } catch (\Throwable $e) {
             return new JsonResponse(['error' => $e->getMessage(), 'trace' => $e->getFile() . ':' . $e->getLine()], 500);
+        }
+    }
+
+    /**
+     * Load diagnostic of one day of HTTP logs (port of diag-site-a.sh).
+     *
+     * A past day's log no longer changes: its result is cached on disk, keyed by
+     * the file's size and mtime, so re-opening the tab during an incident does
+     * not re-read a 300k-line file.
+     *
+     * @AdminSecurity(
+     *     "is_granted('read', request.get('_legacy_controller'))",
+     *     message="You do not have permission to access this.",
+     *     redirectRoute="admin_dashboard"
+     * )
+     */
+    public function diagnosticAction(Request $request): JsonResponse
+    {
+        $this->registerFatalErrorJsonHandler();
+
+        try {
+            $date = $this->resolveDate((string) $request->request->get('date', ''), true);
+            $logPath = $this->logReaderService->findHttpLogPath($date);
+            if ($logPath === null) {
+                return new JsonResponse(['error' => sprintf('Aucun log HTTP pour le %s.', $date)], 404);
+            }
+
+            $signature = $logPath . '|' . filesize($logPath) . '|' . filemtime($logPath);
+            $cacheFile = _PS_CACHE_DIR_ . 'sc_alwaysdata/diagnostic-v4-' . $date . '.json';
+            $cached = is_readable($cacheFile) ? json_decode((string) file_get_contents($cacheFile), true) : null;
+
+            if (is_array($cached) && ($cached['signature'] ?? null) === $signature) {
+                $result = $cached['result'];
+            } else {
+                @set_time_limit(180);
+                $result = $this->loadDiagnosticService->analyse($logPath, $this->fetchShopDomains());
+                $result['file'] = basename($logPath);
+                if ($date < date('Y-m-d')) {
+                    @mkdir(dirname($cacheFile), 0755, true);
+                    @file_put_contents($cacheFile, json_encode(['signature' => $signature, 'result' => $result]));
+                }
+            }
+
+            // Kept apart from the day's cache: the blocked list changes after each block/unblock
+            $blockedIps = $this->htaccessService->readBlockedIps();
+            $auditSignature = $signature . '|' . md5(implode(',', $blockedIps));
+            $auditFile = _PS_CACHE_DIR_ . 'sc_alwaysdata/blocked-audit-v1-' . $date . '.json';
+            $cachedAudit = is_readable($auditFile) ? json_decode((string) file_get_contents($auditFile), true) : null;
+            if (is_array($cachedAudit) && ($cachedAudit['signature'] ?? null) === $auditSignature) {
+                $audit = $cachedAudit['audit'];
+            } else {
+                $audit = $blockedIps === []
+                    ? ['seen' => [], 'absent' => []]
+                    : $this->loadDiagnosticService->auditBlockedIps($logPath, $blockedIps, $this->fetchShopDomains());
+                if ($date < date('Y-m-d')) {
+                    @mkdir(dirname($auditFile), 0755, true);
+                    @file_put_contents($auditFile, json_encode(['signature' => $auditSignature, 'audit' => $audit]));
+                }
+            }
+
+            return new JsonResponse([
+                'date'        => $date,
+                'diagnostic'  => $result,
+                'blocked_audit' => $audit,
+                'blocked_ips' => $blockedIps,
+                'blocked_uas' => $this->htaccessService->readBlockedUAs(),
+            ]);
+        } catch (\Throwable $e) {
+            return new JsonResponse(['error' => $e->getMessage()], 500);
         }
     }
 
@@ -842,7 +966,7 @@ class ScAlwaysdataController extends FrameworkBundleAdminController
             'SELECT sampled_at, ram_used_mb, ram_total_mb,
                     cpu_load_1, cpu_load_5, cpu_load_15,
                     disk_used_gb, disk_total_gb, opcache_used_mb,
-                    top_processes, top_modules_opcache
+                    top_processes, top_modules_opcache, process_summary
              FROM `' . _DB_PREFIX_ . 'sc_alwaysdata_resources_samples`
              ORDER BY sampled_at DESC'
         );
@@ -861,6 +985,8 @@ class ScAlwaysdataController extends FrameworkBundleAdminController
         $row['opcache_used_mb']     = (float) $row['opcache_used_mb'];
         $row['top_processes']       = json_decode($row['top_processes'] ?: '[]', true) ?: [];
         $row['top_modules_opcache'] = json_decode($row['top_modules_opcache'] ?: '[]', true) ?: [];
+        // Column added in 1.5.0 — a sample stored before the upgrade has NULL here.
+        $row['process_summary']     = json_decode($row['process_summary'] ?? '[]' ?: '[]', true) ?: [];
 
         return $row;
     }
@@ -915,10 +1041,10 @@ class ScAlwaysdataController extends FrameworkBundleAdminController
      *     redirectRoute="admin_dashboard"
      * )
      */
-    public function applyBlockAction(Request $request): JsonResponse
+    public function applyBlockAction(Request $request): Response
     {
         if (!$this->isCsrfTokenValid('sc_alwaysdata_apply_block', $request->request->get('_token'))) {
-            return new JsonResponse(['success' => false, 'message' => 'Invalid CSRF token'], 403);
+            return $this->blockResponse($request, false, 'Invalid CSRF token', 403);
         }
 
         $type = (string) $request->request->get('type', '');
@@ -930,15 +1056,15 @@ class ScAlwaysdataController extends FrameworkBundleAdminController
             } elseif ($type === 'ua') {
                 $this->htaccessService->blockUserAgent($value);
             } else {
-                return new JsonResponse(['success' => false, 'message' => 'Unknown block type: ' . $type]);
+                return $this->blockResponse($request, false, 'Unknown block type: ' . $type);
             }
-        } catch (\InvalidArgumentException $e) {
-            return new JsonResponse(['success' => false, 'message' => $e->getMessage()]);
-        } catch (\RuntimeException $e) {
-            return new JsonResponse(['success' => false, 'message' => $e->getMessage()]);
+        } catch (\InvalidArgumentException|\RuntimeException $e) {
+            return $this->blockResponse($request, false, $e->getMessage());
         }
 
-        return new JsonResponse(['success' => true, 'message' => 'Blocked successfully']);
+        return $this->blockResponse($request, true, $request->isXmlHttpRequest()
+            ? 'Blocked successfully'
+            : sprintf($this->trans('« %s » bloqué dans le .htaccess.', 'Modules.Scalwaysdata.Admin'), $value));
     }
 
     /**
@@ -948,10 +1074,10 @@ class ScAlwaysdataController extends FrameworkBundleAdminController
      *     redirectRoute="admin_dashboard"
      * )
      */
-    public function applyUnblockAction(Request $request): JsonResponse
+    public function applyUnblockAction(Request $request): Response
     {
         if (!$this->isCsrfTokenValid('sc_alwaysdata_apply_block', $request->request->get('_token'))) {
-            return new JsonResponse(['success' => false, 'message' => 'Invalid CSRF token'], 403);
+            return $this->blockResponse($request, false, 'Invalid CSRF token', 403);
         }
 
         $type = (string) $request->request->get('type', '');
@@ -963,15 +1089,250 @@ class ScAlwaysdataController extends FrameworkBundleAdminController
             } elseif ($type === 'ua') {
                 $this->htaccessService->unblockUserAgent($value);
             } else {
-                return new JsonResponse(['success' => false, 'message' => 'Unknown unblock type: ' . $type]);
+                return $this->blockResponse($request, false, 'Unknown unblock type: ' . $type);
             }
-        } catch (\InvalidArgumentException $e) {
-            return new JsonResponse(['success' => false, 'message' => $e->getMessage()]);
-        } catch (\RuntimeException $e) {
-            return new JsonResponse(['success' => false, 'message' => $e->getMessage()]);
+        } catch (\InvalidArgumentException|\RuntimeException $e) {
+            return $this->blockResponse($request, false, $e->getMessage());
         }
 
-        return new JsonResponse(['success' => true, 'message' => 'Unblocked successfully']);
+        return $this->blockResponse($request, true, $request->isXmlHttpRequest()
+            ? 'Unblocked successfully'
+            : sprintf($this->trans('« %s » débloqué.', 'Modules.Scalwaysdata.Admin'), $value));
+    }
+
+    /**
+     * @AdminSecurity(
+     *     "is_granted('update', request.get('_legacy_controller'))",
+     *     message="You do not have permission to modify this.",
+     *     redirectRoute="admin_dashboard"
+     * )
+     */
+    public function protectionAction(Request $request): Response
+    {
+        if (!$this->isCsrfTokenValid('sc_alwaysdata_protection', $request->request->get('_token'))) {
+            $this->addFlash('error', $this->trans('Jeton CSRF invalide.', 'Modules.Scalwaysdata.Admin'));
+
+            return $this->redirectToTab('htaccess');
+        }
+
+        $facetReferer = $request->request->getBoolean('facet_referer');
+        $facetMaxFilters = $request->request->getBoolean('facet_depth')
+            ? $request->request->getInt('facet_max_filters')
+            : 0;
+
+        try {
+            $this->htaccessService->applyProtection($this->fetchShopDomains(), $facetReferer, $facetMaxFilters);
+            $this->addFlash('success', $this->trans('Protection .htaccess mise à jour.', 'Modules.Scalwaysdata.Admin'));
+        } catch (\InvalidArgumentException|\RuntimeException $e) {
+            $this->addFlash('error', $e->getMessage());
+        }
+
+        return $this->redirectToTab('htaccess');
+    }
+
+    /**
+     * @AdminSecurity(
+     *     "is_granted('update', request.get('_legacy_controller'))",
+     *     message="You do not have permission to modify this.",
+     *     redirectRoute="admin_dashboard"
+     * )
+     */
+    public function robotsAction(Request $request): Response
+    {
+        if (!$this->isCsrfTokenValid('sc_alwaysdata_robots', $request->request->get('_token'))) {
+            $this->addFlash('error', $this->trans('Jeton CSRF invalide.', 'Modules.Scalwaysdata.Admin'));
+
+            return $this->redirectToTab('robots');
+        }
+
+        $toLines = static function (string $raw): array {
+            return preg_split('/\R/', $raw) ?: [];
+        };
+
+        try {
+            $this->robotsTxtService->saveAndApply(
+                $request->request->getBoolean('robots_enabled'),
+                $toLines((string) $request->request->get('robots_disallow', '')),
+                $toLines((string) $request->request->get('robots_bots', ''))
+            );
+            $this->addFlash('success', $this->trans('robots.txt mis à jour.', 'Modules.Scalwaysdata.Admin'));
+        } catch (\InvalidArgumentException|\RuntimeException $e) {
+            $this->addFlash('error', $e->getMessage());
+        }
+
+        return $this->redirectToTab('robots');
+    }
+
+    /**
+     * Preventive block of LLM vendors' crawlers, whether or not they show in the logs:
+     * robots.txt for the honest ones, .htaccess (403) for every bot with a real user-agent.
+     *
+     * @AdminSecurity(
+     *     "is_granted('update', request.get('_legacy_controller'))",
+     *     message="You do not have permission to modify this.",
+     *     redirectRoute="admin_dashboard"
+     * )
+     */
+    public function aiBotsAction(Request $request): Response
+    {
+        if (!$this->isCsrfTokenValid('sc_alwaysdata_ai_bots', $request->request->get('_token'))) {
+            $this->addFlash('error', $this->trans('Jeton CSRF invalide.', 'Modules.Scalwaysdata.Admin'));
+
+            return $this->redirectToTab('robots');
+        }
+
+        $catalog = new AiBotCatalog();
+        // Symfony 4.4 ParameterBag: get() returns the array, all($key) does not exist yet
+        $raw = $request->request->get('ai_bots', []);
+        $selected = $catalog->filter(is_array($raw) ? $raw : []);
+        if ($selected === []) {
+            $this->addFlash('warning', $this->trans('Aucun robot sélectionné.', 'Modules.Scalwaysdata.Admin'));
+
+            return $this->redirectToTab('robots');
+        }
+
+        try {
+            $this->robotsTxtService->addBots($selected);
+            $withUa = $catalog->withUserAgent($selected);
+            $this->htaccessService->blockUserAgents($withUa);
+            $this->addFlash('success', sprintf(
+                $this->trans('%d robot(s) interdit(s) dans robots.txt, %d bloqué(s) en 403 dans le .htaccess.', 'Modules.Scalwaysdata.Admin'),
+                count($selected),
+                count($withUa)
+            ));
+        } catch (\InvalidArgumentException|\RuntimeException $e) {
+            $this->addFlash('error', $e->getMessage());
+        }
+
+        return $this->redirectToTab('robots');
+    }
+
+    /**
+     * @AdminSecurity(
+     *     "is_granted('update', request.get('_legacy_controller'))",
+     *     message="You do not have permission to modify this.",
+     *     redirectRoute="admin_dashboard"
+     * )
+     */
+    public function htaccessRepairAction(Request $request): Response
+    {
+        if (!$this->isCsrfTokenValid('sc_alwaysdata_htaccess', $request->request->get('_token'))) {
+            $this->addFlash('error', $this->trans('Jeton CSRF invalide.', 'Modules.Scalwaysdata.Admin'));
+
+            return $this->redirectToTab('htaccess');
+        }
+
+        try {
+            $this->htaccessService->repair((string) $request->request->get('code', ''));
+            $this->addFlash('success', $this->trans('.htaccess réparé. Annulable depuis l\'historique des sauvegardes.', 'Modules.Scalwaysdata.Admin'));
+        } catch (\InvalidArgumentException|\RuntimeException $e) {
+            $this->addFlash('error', $e->getMessage());
+        }
+
+        return $this->redirectToTab('htaccess');
+    }
+
+    /**
+     * @AdminSecurity(
+     *     "is_granted('update', request.get('_legacy_controller'))",
+     *     message="You do not have permission to modify this.",
+     *     redirectRoute="admin_dashboard"
+     * )
+     */
+    public function htaccessRestoreAction(Request $request): Response
+    {
+        if (!$this->isCsrfTokenValid('sc_alwaysdata_htaccess', $request->request->get('_token'))) {
+            $this->addFlash('error', $this->trans('Jeton CSRF invalide.', 'Modules.Scalwaysdata.Admin'));
+
+            return $this->redirectToTab('htaccess');
+        }
+
+        $name = (string) $request->request->get('backup', '');
+        try {
+            $this->htaccessService->restoreBackup($name);
+            $this->addFlash('success', sprintf(
+                $this->trans('.htaccess restauré depuis %s. L\'état précédent a été sauvegardé : la restauration est elle-même annulable.', 'Modules.Scalwaysdata.Admin'),
+                $name
+            ));
+        } catch (\InvalidArgumentException|\RuntimeException $e) {
+            $this->addFlash('error', $e->getMessage());
+        }
+
+        return $this->redirectToTab('htaccess');
+    }
+
+    /**
+     * @AdminSecurity(
+     *     "is_granted('update', request.get('_legacy_controller'))",
+     *     message="You do not have permission to modify this.",
+     *     redirectRoute="admin_dashboard"
+     * )
+     */
+    public function htaccessPurgeAction(Request $request): Response
+    {
+        if (!$this->isCsrfTokenValid('sc_alwaysdata_htaccess', $request->request->get('_token'))) {
+            $this->addFlash('error', $this->trans('Jeton CSRF invalide.', 'Modules.Scalwaysdata.Admin'));
+
+            return $this->redirectToTab('htaccess');
+        }
+
+        $keep = $request->request->getInt('keep', self::BACKUPS_KEPT_ON_PURGE);
+        try {
+            $deleted = $this->htaccessService->purgeBackups($keep);
+            $this->addFlash('success', sprintf(
+                $this->trans('%d sauvegarde(s) supprimée(s), les %d plus récentes sont conservées.', 'Modules.Scalwaysdata.Admin'),
+                $deleted,
+                $keep
+            ));
+        } catch (\InvalidArgumentException $e) {
+            $this->addFlash('error', $e->getMessage());
+        }
+
+        return $this->redirectToTab('htaccess');
+    }
+
+    private function redirectToTab(string $tab): Response
+    {
+        return $this->redirect($this->generateUrl('sc_alwaysdata_index') . '#' . $tab);
+    }
+
+    /**
+     * JSON for the log viewer (XHR), flash message + redirect for the .htaccess card forms.
+     */
+    private function blockResponse(Request $request, bool $success, string $message, int $status = 200): Response
+    {
+        if ($request->isXmlHttpRequest()) {
+            return new JsonResponse(['success' => $success, 'message' => $message], $status);
+        }
+
+        $this->addFlash($success ? 'success' : 'error', $message);
+
+        return $this->redirectToTab('htaccess');
+    }
+
+    /**
+     * Hostnames of every active shop URL (multishop: one per country domain).
+     *
+     * @return string[]
+     */
+    private function fetchShopDomains(): array
+    {
+        $rows = Db::getInstance()->executeS(
+            'SELECT domain, domain_ssl FROM `' . _DB_PREFIX_ . 'shop_url` WHERE active = 1'
+        ) ?: [];
+
+        $domains = [];
+        foreach ($rows as $row) {
+            foreach (['domain', 'domain_ssl'] as $col) {
+                $host = strtolower(trim((string) $row[$col]));
+                if ($host !== '') {
+                    $domains[$host] = true;
+                }
+            }
+        }
+        ksort($domains);
+
+        return array_keys($domains);
     }
 
     private function resolveDate(string $raw, bool $allowToday = false): string
@@ -994,6 +1355,7 @@ class ScAlwaysdataController extends FrameworkBundleAdminController
             'stat_date'                  => $stat->stat_date,
             'requests_total'             => (int) $stat->requests_total,
             'requests_human'             => (int) $stat->requests_human,
+            'requests_scrapers'          => (int) $stat->requests_scrapers,
             'mobile'                     => (int) $stat->mobile,
             'desktop'                    => (int) $stat->desktop,
             'views_product'              => (int) $stat->views_product,
@@ -1024,7 +1386,11 @@ class ScAlwaysdataController extends FrameworkBundleAdminController
 
         if (!$tableExists) {
             Db::getInstance()->execute(DailyStat::getCreateTableSql());
+
+            return;
         }
+
+        DailyStat::ensureScrapersColumn();
     }
 
     private function ensureResourcesTable(): void
@@ -1047,6 +1413,25 @@ class ScAlwaysdataController extends FrameworkBundleAdminController
 
         if (!$samplesExists) {
             Db::getInstance()->execute(ResourceSample::getCreateTableSql());
+
+            return;
+        }
+
+        // Defensive migration: a module deployed over FTP without the upgrade
+        // script running would keep a samples table missing the newer column,
+        // and every cron insert would fail.
+        $summaryColumnExists = (bool) Db::getInstance()->getValue(
+            'SELECT COUNT(*) FROM information_schema.COLUMNS
+             WHERE TABLE_SCHEMA = DATABASE()
+             AND TABLE_NAME = \'' . _DB_PREFIX_ . 'sc_alwaysdata_resources_samples\'
+             AND COLUMN_NAME = \'process_summary\''
+        );
+
+        if (!$summaryColumnExists) {
+            Db::getInstance()->execute(
+                'ALTER TABLE `' . _DB_PREFIX_ . 'sc_alwaysdata_resources_samples`
+                 ADD COLUMN `process_summary` text NULL AFTER `top_modules_opcache`'
+            );
         }
     }
 }

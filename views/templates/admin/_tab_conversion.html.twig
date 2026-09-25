@@ -18,6 +18,11 @@ function renderConversion(data, date, period) {
     var el = document.getElementById('tab-conversion-content');
     if (!el) return;
 
+    if (data.error) {
+        el.innerHTML = '<div class="alert alert-danger">' + esc(data.error) + '</div>';
+        return;
+    }
+
     if (!s) {
         el.innerHTML = '<div class="alert alert-info">Aucune donnée pour le ' + esc(date) + '. Le cron a-t-il tourné ?</div>';
         return;
@@ -108,6 +113,9 @@ function renderConversion(data, date, period) {
             + '<div class="alert alert-warning small mb-2">'
             + '<i class="material-icons align-middle mr-1" style="font-size:1rem">info</i>'
             + precisionNote + ' Pour retrouver la cause, regardez le tableau "Erreurs PHP enregistrées" ci-dessous au créneau indiqué.'
+            + (detail500.length < s.errors_500_checkout
+                ? ' Détail limité aux ' + esc(String(detail500.length)) + ' premières erreurs sur ' + esc(String(s.errors_500_checkout)) + '.'
+                : '')
             + '</div>'
             + '<div class="table-responsive"><table class="table table-sm table-hover mb-0">'
             + '<thead class="thead-light"><tr><th style="width:70px">Heure</th><th style="width:150px">IP</th><th>Page</th></tr></thead>'

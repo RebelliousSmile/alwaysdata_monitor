@@ -79,6 +79,7 @@ class Sc_alwaysdataCron_resources_sampleModuleFrontController extends ModuleFron
             $sample->opcache_used_mb     = (float) $metrics['opcache_used_mb'];
             $sample->top_processes       = (string) json_encode($metrics['top_processes']);
             $sample->top_modules_opcache = (string) json_encode($metrics['top_modules_opcache']);
+            $sample->process_summary     = (string) json_encode($metrics['process_summary']);
 
             try {
                 $sample->add();

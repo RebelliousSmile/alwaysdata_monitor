@@ -18,6 +18,11 @@ function renderTrafic(data, date, period) {
     var el = document.getElementById('tab-trafic-content');
     if (!el) return;
 
+    if (data.error) {
+        el.innerHTML = '<div class="alert alert-danger">' + esc(data.error) + '</div>';
+        return;
+    }
+
     if (!s) {
         el.innerHTML = '<div class="alert alert-info">Aucune donnée pour le ' + esc(date) + '. Le cron a-t-il tourné ?</div>'
             + renderCronConfig(data);
@@ -28,7 +33,8 @@ function renderTrafic(data, date, period) {
     var cards = [
         ['Requêtes totales', s.requests_total, 'secondary'],
         ['Requêtes humaines', s.requests_human, 'primary'],
-        ['Robots', s.requests_total - s.requests_human, 'secondary'],
+        ['Scrapers', s.requests_scrapers, s.requests_scrapers > 0 ? 'warning' : 'secondary', 'Pages refusées (403) ou venant d\'IP au profil de scraper : ≥ 20 pages sans aucune ressource statique, ou ≥ 80 % de facettes ?q=. Exclues des requêtes humaines, du top pages et des vues produit.'],
+        ['Robots et statiques', s.requests_total - s.requests_human - s.requests_scrapers, 'secondary', 'Bots déclarés et fichiers CSS/JS/images.'],
         ['Desktop', s.desktop, 'info'],
         ['Mobile', s.mobile, 'info'],
         ['500 front', s.errors_500_front + s.errors_500_checkout, (s.errors_500_front + s.errors_500_checkout) > 0 ? 'danger' : 'success'],
@@ -36,7 +42,7 @@ function renderTrafic(data, date, period) {
         ['— dont funnel', s.errors_500_checkout, s.errors_500_checkout > 0 ? 'warning' : 'success'],
     ].map(function(c) {
         return '<div class="col-6 col-md-3 col-lg-auto mb-2">'
-            + '<div class="card border-' + c[2] + ' text-center px-3 py-2" style="min-width:110px">'
+            + '<div class="card border-' + c[2] + ' text-center px-3 py-2" style="min-width:110px"' + (c[3] ? ' title="' + esc(c[3]) + '"' : '') + '>'
             + '<div class="small text-muted">' + esc(c[0]) + '</div>'
             + '<div class="h4 mb-0 text-' + c[2] + '">' + esc(String(c[1])) + '</div>'
             + '</div></div>';
@@ -67,9 +73,15 @@ function renderTrafic(data, date, period) {
     // Pages 500 — front inclut les pages funnel (/panier, /commande)
     var pages500 = s.errors_500_pages || {};
     var combinedFront = Object.assign({}, pages500.front || {});
-    (s.errors_500_checkout_detail || []).forEach(function(e) {
+    var checkoutDetail = s.errors_500_checkout_detail || [];
+    checkoutDetail.forEach(function(e) {
         combinedFront[e.path] = (combinedFront[e.path] || 0) + 1;
     });
+    // The parser caps the detail: say so rather than under-count silently
+    var detailTruncatedNote = checkoutDetail.length < s.errors_500_checkout
+        ? '<p class="small text-muted mb-1">Détail funnel limité aux ' + esc(String(checkoutDetail.length))
+            + ' premières erreurs sur ' + esc(String(s.errors_500_checkout)) + '.</p>'
+        : '';
     // Trier par count décroissant
     var combinedFrontSorted = {};
     Object.keys(combinedFront).sort(function(a, b) { return combinedFront[b] - combinedFront[a]; })
@@ -89,7 +101,7 @@ function renderTrafic(data, date, period) {
         + '<div class="col-md-6 mb-3"><h6>Top 10 pages</h6>'
         + '<table class="table table-sm"><thead class="thead-light"><tr><th>Page</th><th class="text-right">Vues</th></tr></thead><tbody>' + pagesRows + '</tbody></table></div>'
         + '<div class="col-md-6 mb-3"><h6>Pages en erreur 500</h6>'
-        + '<p class="small text-muted mb-1">Front (funnel inclus)</p>' + render500Pages(combinedFrontSorted)
+        + '<p class="small text-muted mb-1">Front (funnel inclus)</p>' + render500Pages(combinedFrontSorted) + detailTruncatedNote
         + '<p class="small text-muted mb-1 mt-2">BO</p>' + render500Pages(pages500.bo)
         + '</div>'
         + '</div>'
@@ -131,6 +143,8 @@ function runCron(cronUrl, clickedBtn) {
                 result.innerHTML = '<span class="text-danger">' + esc(d.error) + '</span>';
             } else if (d.warning) {
                 result.innerHTML = '<span class="text-warning">' + esc(d.warning) + ' (' + esc(d.date) + ')</span>';
+            } else if (d.running) {
+                result.innerHTML = '<span class="text-warning">Déjà en cours pour le ' + esc(d.date || '') + '</span>';
             } else if (d.skipped) {
                 result.innerHTML = '<span class="text-warning">Déjà traité (' + esc(d.date || '') + ')</span>';
             } else if (d.requests_total !== undefined) {

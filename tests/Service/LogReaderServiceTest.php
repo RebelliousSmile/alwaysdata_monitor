@@ -206,4 +206,92 @@ class LogReaderServiceTest extends TestCase
         // Must resolve to the 2024 path, not the 2025 decoy.
         $this->assertSame($logFile, $result);
     }
+
+    // -------------------------------------------------------------------------
+    // Case 7 — readTodayLogs() decompresses a gzipped log of the day
+    // -------------------------------------------------------------------------
+
+    public function testReadTodayLogsDecompressesGzippedSource(): void
+    {
+        $base = $this->createTmpBase();
+        $today = date('Y-m-d');
+
+        $this->mkdirUnder($base, 'http');
+        $lines = [];
+        for ($i = 1; $i <= 50; ++$i) {
+            $lines[] = 'line-' . $i;
+        }
+        $gzFile = $base . '/http/http-' . $today . '.log.gz';
+        file_put_contents($gzFile, gzencode(implode("\n", $lines) . "\n"));
+
+        $sources = $this->service()->readTodayLogs();
+        $http = $this->sourceNamed($sources, 'http');
+
+        $this->assertNull($http['error']);
+        $this->assertSame(50, count($http['lines']));
+        $this->assertSame('line-1', $http['lines'][0]);
+        $this->assertSame('line-50', $http['lines'][49]);
+    }
+
+    // -------------------------------------------------------------------------
+    // Case 8 — readTodayLogs() keeps only the last max_lines entries
+    // -------------------------------------------------------------------------
+
+    public function testReadTodayLogsKeepsOnlyTheLastLines(): void
+    {
+        $base = $this->createTmpBase();
+        $today = date('Y-m-d');
+        \Configuration::$testValues['SC_ALWAYSDATA_LINES_HTTP'] = 10;
+
+        $this->mkdirUnder($base, 'http');
+        $lines = [];
+        for ($i = 1; $i <= 100; ++$i) {
+            $lines[] = 'line-' . $i;
+        }
+        file_put_contents($base . '/http/http-' . $today . '.log', implode("\n", $lines) . "\n");
+
+        $sources = $this->service()->readTodayLogs();
+        $http = $this->sourceNamed($sources, 'http');
+
+        $this->assertSame(10, count($http['lines']));
+        $this->assertSame('line-91', $http['lines'][0]);
+        $this->assertSame('line-100', $http['lines'][9]);
+        $this->assertTrue($http['truncated']);
+    }
+
+    // -------------------------------------------------------------------------
+    // Case 9 — a file holding no newline at all must not be read wholesale
+    // -------------------------------------------------------------------------
+
+    public function testReadTodayLogsHandlesFileWithoutAnyNewline(): void
+    {
+        $base = $this->createTmpBase();
+        $today = date('Y-m-d');
+        \Configuration::$testValues['SC_ALWAYSDATA_LINES_HTTP'] = 10;
+
+        $this->mkdirUnder($base, 'http');
+        file_put_contents($base . '/http/http-' . $today . '.log', str_repeat('x', 200000));
+
+        $sources = $this->service()->readTodayLogs();
+        $http = $this->sourceNamed($sources, 'http');
+
+        $this->assertNull($http['error']);
+        $this->assertSame(1, count($http['lines']));
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $sources
+     *
+     * @return array<string, mixed>
+     */
+    private function sourceNamed(array $sources, string $name): array
+    {
+        foreach ($sources as $source) {
+            if ($source['source'] === $name) {
+                return $source;
+            }
+        }
+
+        $this->fail('No source named ' . $name . ' in the result.');
+    }
 }

@@ -23,5 +23,12 @@ if (!class_exists('Configuration')) {
         {
             static::$testValues[$key] = $value;
         }
+
+        public static function updateValue(string $key, mixed $value): bool
+        {
+            static::$testValues[$key] = $value;
+
+            return true;
+        }
     }
 }

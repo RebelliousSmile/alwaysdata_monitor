@@ -130,9 +130,59 @@ function renderResources(data, date, period) {
 
     topTables += '</div>';
 
+    var procSummary = renderProcessSummary((latest && latest.process_summary) || []);
+
     var reportHtml = renderReport(data.report);
 
-    container.innerHTML = periodCards + dailyTable + snapshotCards + sparkline + topTables + reportHtml;
+    container.innerHTML = periodCards + dailyTable + snapshotCards + sparkline + topTables + procSummary + reportHtml;
+}
+
+/**
+ * Per-process-name aggregate. Top processus only shows the ten heaviest
+ * individual processes, which cannot tell "many workers" from "few fat
+ * workers" — the distinction that matters on a permanently high memory
+ * plateau. This table answers it directly.
+ */
+function renderProcessSummary(summary) {
+    if (!summary || !summary.length) {
+        return '';
+    }
+
+    var totalRss = summary.reduce(function(acc, r) { return acc + (parseInt(r.rss_total_mb, 10) || 0); }, 0);
+
+    var rows = summary.map(function(r) {
+        var share = totalRss > 0 ? Math.round(r.rss_total_mb * 100 / totalRss) : 0;
+        return '<tr>'
+            + '<td><code class="small">' + esc(r.name) + '</code></td>'
+            + '<td class="text-right">' + r.count + '</td>'
+            + '<td class="text-right"><span class="badge badge-secondary">' + r.rss_total_mb + ' Mo</span></td>'
+            + '<td class="text-right text-muted small">' + r.rss_avg_mb + ' Mo</td>'
+            + '<td class="text-right text-muted small">' + r.rss_max_mb + ' Mo</td>'
+            + '<td class="text-right text-muted small">' + share + '%</td>'
+            + '</tr>';
+    }).join('');
+
+    return '<h6 class="mt-4 mb-2">'
+        + '<i class="material-icons align-middle" style="font-size:1rem">account_tree</i> '
+        + 'Répartition des process (dernier sample)</h6>'
+        + '<div class="card mb-3"><div class="card-body p-2">'
+        + '<table class="table table-sm table-hover mb-0">'
+        + '<thead><tr>'
+        + '<th>Process</th>'
+        + '<th class="text-right">Nb</th>'
+        + '<th class="text-right">RSS cumulée</th>'
+        + '<th class="text-right">Moy.</th>'
+        + '<th class="text-right">Max</th>'
+        + '<th class="text-right">Part</th>'
+        + '</tr></thead>'
+        + '<tbody>' + rows + '</tbody>'
+        + '</table>'
+        + '<p class="text-muted small mb-0 mt-2 px-2">'
+        + 'RSS cumulée totale : <strong>' + totalRss + ' Mo</strong>. '
+        + 'Beaucoup de process légers oriente vers <code>pm.max_children</code> ; '
+        + 'peu de process lourds vers <code>memory_limit</code> et <code>pm.max_requests</code> (recyclage des workers).'
+        + '</p>'
+        + '</div></div>';
 }
 
 function renderReport(report) {
