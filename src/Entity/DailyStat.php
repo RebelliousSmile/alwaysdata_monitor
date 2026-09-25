@@ -26,6 +26,9 @@ class DailyStat extends \ObjectModel
     /** @var int */
     public $requests_human = 0;
 
+    /** @var int Pages from IPs with a scraper profile, or refused (403) */
+    public $requests_scrapers = 0;
+
     /** @var int */
     public $mobile = 0;
 
@@ -87,6 +90,7 @@ class DailyStat extends \ObjectModel
             'stat_date' => ['type' => self::TYPE_DATE, 'validate' => 'isDate', 'required' => true],
             'requests_total' => ['type' => self::TYPE_INT, 'validate' => 'isUnsignedInt'],
             'requests_human' => ['type' => self::TYPE_INT, 'validate' => 'isUnsignedInt'],
+            'requests_scrapers' => ['type' => self::TYPE_INT, 'validate' => 'isUnsignedInt'],
             'mobile' => ['type' => self::TYPE_INT, 'validate' => 'isUnsignedInt'],
             'desktop' => ['type' => self::TYPE_INT, 'validate' => 'isUnsignedInt'],
             'views_product' => ['type' => self::TYPE_INT, 'validate' => 'isUnsignedInt'],
@@ -119,6 +123,7 @@ class DailyStat extends \ObjectModel
                 `stat_date` date NOT NULL,
                 `requests_total` int(11) UNSIGNED NOT NULL DEFAULT 0,
                 `requests_human` int(11) UNSIGNED NOT NULL DEFAULT 0,
+                `requests_scrapers` int(11) UNSIGNED NOT NULL DEFAULT 0,
                 `mobile` int(11) UNSIGNED NOT NULL DEFAULT 0,
                 `desktop` int(11) UNSIGNED NOT NULL DEFAULT 0,
                 `views_product` int(11) UNSIGNED NOT NULL DEFAULT 0,
@@ -144,13 +149,34 @@ class DailyStat extends \ObjectModel
     }
 
     /**
+     * Adds requests_scrapers (1.10.0) when missing. Also called by the cron: a
+     * module deployed over FTP without its upgrade script would otherwise fail
+     * every nightly insert.
+     */
+    public static function ensureScrapersColumn(): bool
+    {
+        $exists = (bool) \Db::getInstance()->getValue(
+            'SELECT COUNT(*) FROM information_schema.COLUMNS
+             WHERE TABLE_SCHEMA = DATABASE()
+             AND TABLE_NAME = \'' . _DB_PREFIX_ . 'sc_alwaysdata_stats_daily\'
+             AND COLUMN_NAME = \'requests_scrapers\''
+        );
+
+        return $exists || \Db::getInstance()->execute(
+            'ALTER TABLE `' . _DB_PREFIX_ . 'sc_alwaysdata_stats_daily`
+             ADD COLUMN `requests_scrapers` int(11) UNSIGNED NOT NULL DEFAULT 0 AFTER `requests_human`'
+        );
+    }
+
+    /**
      * Find a row by date. Returns null if not found.
      */
     public static function getByDate(string $date): ?self
     {
         $id = (int) \Db::getInstance()->getValue(
             'SELECT `id_stat` FROM `' . _DB_PREFIX_ . 'sc_alwaysdata_stats_daily`
-             WHERE `stat_date` = \'' . pSQL($date) . '\''
+             WHERE `stat_date` = \'' . pSQL($date) . '\'',
+            false // never cached: the cron re-checks it once its lock is taken
         );
 
         if (!$id) {

@@ -13,6 +13,20 @@ namespace ScAlwaysdata\Service;
 
 class HtaccessService
 {
+    public const FACET_MAX_FILTERS_LIMIT = 10;
+
+    private HtaccessDoctor $doctor;
+
+    private const PROTECTION_BEGIN = '# BEGIN sc_alwaysdata protection';
+    private const PROTECTION_END = '# END sc_alwaysdata protection';
+    private const PROTECTION_OPTIONS = '# sc_alwaysdata options:';
+    private const PROTECTION_PATTERN = '/^# BEGIN sc_alwaysdata protection\n.*?^# END sc_alwaysdata protection\n?/ms';
+
+    public function __construct(?HtaccessDoctor $doctor = null)
+    {
+        $this->doctor = $doctor ?? new HtaccessDoctor();
+    }
+
     public function readBlockedIps(): array
     {
         try {
@@ -104,45 +118,22 @@ class HtaccessService
 
     public function unblockUserAgent(string $ua): void
     {
-        $ua = str_replace(['"', '\\'], '', $ua);
-
         $htaccessPath = $this->getHtaccessPath();
         $current = @file_get_contents($htaccessPath);
         if ($current === false) {
             throw new \RuntimeException(sprintf('Cannot read .htaccess at %s', $htaccessPath));
         }
 
-        $q = preg_quote($ua, '/');
+        $current = str_replace("\r\n", "\n", $current);
+        $content = $this->doctor->removeUaRules($current, $ua);
+        if ($content === $current) {
+            throw new \RuntimeException(sprintf(
+                'Aucune règle simple ne bloque « %s » : règle combinée (OR) à retirer à la main.',
+                $ua
+            ));
+        }
 
-        // Remove module-written block (comment + RewriteCond + RewriteRule)
-        $content = preg_replace(
-            '/\n?# sc_alwaysdata block UA: ' . $q . '\nRewriteCond %\{HTTP_USER_AGENT\} "' . $q . '" \[NC\]\nRewriteRule \.\* - \[F,L\]\n?/',
-            "\n",
-            $current
-        );
-
-        // Remove loose RewriteCond (quoted) + following RewriteRule
-        $content = preg_replace(
-            '/\nRewriteCond %\{HTTP_USER_AGENT\} "' . $q . '" \[NC\]\nRewriteRule \.\* - \[F,L\]\n?/i',
-            "\n",
-            $content ?? $current
-        );
-
-        // Remove loose RewriteCond (unquoted) + following RewriteRule
-        $content = preg_replace(
-            '/\nRewriteCond %\{HTTP_USER_AGENT\} ' . $q . ' \[NC\]\nRewriteRule \.\* - \[F,L\]\n?/i',
-            "\n",
-            $content ?? $current
-        );
-
-        // Remove SetEnvIfNoCase lines (quoted or unquoted)
-        $content = preg_replace(
-            '/\nSetEnvIfNoCase User-Agent "?' . $q . '"?[^\n]*\n/i',
-            "\n",
-            $content ?? $current
-        );
-
-        $this->writeAtomic($content ?? $current);
+        $this->writeAtomic($content);
     }
 
     public function blockIp(string $ip): void
@@ -168,7 +159,10 @@ class HtaccessService
 
     public function blockUserAgent(string $ua): void
     {
-        $ua = str_replace(['"', '\\'], '', $ua);
+        $ua = trim(str_replace(['"', '\\', "\n", "\r"], '', $ua));
+        if ($ua === '') {
+            throw new \InvalidArgumentException('Empty user-agent');
+        }
 
         $htaccessPath = $this->getHtaccessPath();
         $current = @file_get_contents($htaccessPath);
@@ -176,26 +170,275 @@ class HtaccessService
             throw new \RuntimeException(sprintf('Cannot read .htaccess at %s', $htaccessPath));
         }
 
-        $rule = "\n# sc_alwaysdata block UA: {$ua}\n"
-            . "RewriteCond %{HTTP_USER_AGENT} \"{$ua}\" [NC]\n"
-            . "RewriteRule .* - [F,L]\n";
+        // Managed section before PrestaShop's rules: anything after its [L] rewrite is never read
+        $this->writeAtomic($this->doctor->addUaRules($current, [$ua]));
+    }
 
-        // Prefer inserting inside an existing <IfModule mod_rewrite.c> block so that
-        // RewriteEngine is guaranteed to be active for our rules.
-        $openPos = stripos($current, '<IfModule mod_rewrite.c>');
-        if ($openPos !== false) {
-            $closePos = stripos($current, '</IfModule>', $openPos);
-            if ($closePos !== false) {
-                $content = substr($current, 0, $closePos) . $rule . substr($current, $closePos);
-                $this->writeAtomic($content);
+    /**
+     * Blocks several user-agents in one write (one backup instead of one per bot).
+     * Already-blocked tokens are skipped by the doctor.
+     *
+     * @param string[] $uas
+     */
+    public function blockUserAgents(array $uas): void
+    {
+        $uas = array_values(array_filter(array_map(
+            static fn ($ua): string => trim(str_replace(['"', '\\', "\n", "\r"], '', (string) $ua)),
+            $uas
+        ), static fn (string $ua): bool => $ua !== ''));
+        if ($uas === []) {
+            return;
+        }
 
-                return;
+        $htaccessPath = $this->getHtaccessPath();
+        $current = @file_get_contents($htaccessPath);
+        if ($current === false) {
+            throw new \RuntimeException(sprintf('Cannot read .htaccess at %s', $htaccessPath));
+        }
+
+        $content = $this->doctor->addUaRules($current, $uas);
+        if ($content !== str_replace("\r\n", "\n", $current)) {
+            $this->writeAtomic($content);
+        }
+    }
+
+    /**
+     * @return array<int, array{code: string, severity: string, title: string, detail: string, lines: int[], items: string[], fixable: bool}>
+     */
+    public function diagnose(): array
+    {
+        $content = @file_get_contents($this->getHtaccessPath());
+        if ($content === false) {
+            return [];
+        }
+
+        return $this->doctor->analyse($content, $this->readProtection());
+    }
+
+    public function repair(string $code): void
+    {
+        $htaccessPath = $this->getHtaccessPath();
+        $current = @file_get_contents($htaccessPath);
+        if ($current === false) {
+            throw new \RuntimeException(sprintf('Cannot read .htaccess at %s', $htaccessPath));
+        }
+
+        $this->writeAtomic($this->doctor->repair($current, $code, $this->readProtection()));
+    }
+
+    /**
+     * Dated copies written before each modification, newest first, with what a restore would change.
+     *
+     * @return array<int, array{name: string, date: string, size: int, removed: string[], restored: string[]}>
+     */
+    public function listBackups(int $limit = 20): array
+    {
+        $htaccessPath = $this->getHtaccessPath();
+        $files = $this->backupFiles();
+
+        $currentLines = $this->significantLines((string) @file_get_contents($htaccessPath));
+        $result = [];
+        foreach (array_slice($files, 0, $limit) as $file) {
+            $lines = $this->significantLines((string) @file_get_contents($file));
+            preg_match('/\.(\d{4}-\d{2}-\d{2})_(\d{2})-(\d{2})-(\d{2})(?:-\d+)?\.bak$/', $file, $m);
+            $result[] = [
+                'name' => basename($file),
+                'date' => sprintf('%s %s:%s:%s', $m[1], $m[2], $m[3], $m[4]),
+                'size' => (int) filesize($file),
+                // Lines a restore would take out of the current file / put back
+                'removed' => array_values(array_diff($currentLines, $lines)),
+                'restored' => array_values(array_diff($lines, $currentLines)),
+            ];
+        }
+
+        return $result;
+    }
+
+    public function countBackups(): int
+    {
+        return count($this->backupFiles());
+    }
+
+    /**
+     * Deletes all backups but the $keep most recent ones.
+     *
+     * @return int number of deleted files
+     */
+    public function purgeBackups(int $keep): int
+    {
+        if ($keep < 1) {
+            throw new \InvalidArgumentException('At least one backup must be kept.');
+        }
+
+        $deleted = 0;
+        foreach (array_slice($this->backupFiles(), $keep) as $file) {
+            if (@unlink($file)) {
+                ++$deleted;
             }
         }
 
-        // Fallback: wrap in its own IfModule block and append
-        $wrapped = "\n<IfModule mod_rewrite.c>\nRewriteEngine On" . $rule . "</IfModule>\n";
-        $this->writeAtomic($current . $wrapped);
+        return $deleted;
+    }
+
+    /**
+     * Restores a backup. The current file is itself backed up first, so a restore can be undone.
+     */
+    public function restoreBackup(string $name): void
+    {
+        if (!$this->isBackupName($name)) {
+            throw new \InvalidArgumentException(sprintf('Invalid backup name: %s', $name));
+        }
+
+        $path = dirname($this->getHtaccessPath()) . '/' . $name;
+        $content = @file_get_contents($path);
+        if ($content === false) {
+            throw new \RuntimeException(sprintf('Backup not found: %s', $name));
+        }
+
+        $this->writeAtomic($content);
+    }
+
+    /**
+     * Reads the options of the managed protection block.
+     *
+     * @return array{installed: bool, facet_referer: bool, facet_max_filters: int}
+     */
+    public function readProtection(): array
+    {
+        $state = ['installed' => false, 'facet_referer' => false, 'facet_max_filters' => 0];
+
+        try {
+            $content = file_get_contents($this->getHtaccessPath());
+        } catch (\Throwable $e) {
+            return $state;
+        }
+
+        if ($content === false || !preg_match(self::PROTECTION_PATTERN, $content, $block)) {
+            return $state;
+        }
+
+        $state['installed'] = true;
+        if (preg_match('/^' . preg_quote(self::PROTECTION_OPTIONS, '/') . ' (\{.*\})$/m', $block[0], $m)) {
+            $options = json_decode($m[1], true);
+            if (is_array($options)) {
+                $state['facet_referer'] = (bool) ($options['facet_referer'] ?? false);
+                $state['facet_max_filters'] = (int) ($options['facet_max_filters'] ?? 0);
+            }
+        }
+
+        return $state;
+    }
+
+    /**
+     * Writes (or replaces) the managed protection block at the top of .htaccess.
+     *
+     * @param string[] $domains shop hostnames allowed as facet referers
+     * @param int $facetMaxFilters max filter groups in ?q= (0 = no limit)
+     */
+    public function applyProtection(array $domains, bool $facetReferer, int $facetMaxFilters): void
+    {
+        if (!$facetReferer && $facetMaxFilters === 0) {
+            $this->removeProtection();
+
+            return;
+        }
+
+        $block = $this->buildProtectionBlock($domains, $facetReferer, $facetMaxFilters);
+
+        $htaccessPath = $this->getHtaccessPath();
+        $current = @file_get_contents($htaccessPath);
+        if ($current === false) {
+            throw new \RuntimeException(sprintf('Cannot read .htaccess at %s', $htaccessPath));
+        }
+
+        if (preg_match(self::PROTECTION_PATTERN, $current)) {
+            $content = preg_replace_callback(self::PROTECTION_PATTERN, fn () => $block, $current, 1);
+        } else {
+            // Top of file: must run before PrestaShop's front-controller rewrite
+            $content = $block . "\n" . $current;
+        }
+
+        $this->writeAtomic((string) $content);
+    }
+
+    public function removeProtection(): void
+    {
+        $htaccessPath = $this->getHtaccessPath();
+        $current = @file_get_contents($htaccessPath);
+        if ($current === false) {
+            throw new \RuntimeException(sprintf('Cannot read .htaccess at %s', $htaccessPath));
+        }
+
+        if (!preg_match(self::PROTECTION_PATTERN, $current, $m, PREG_OFFSET_CAPTURE)) {
+            return;
+        }
+
+        $content = (string) preg_replace(self::PROTECTION_PATTERN, '', $current, 1);
+        // Drop the separator line added by applyProtection() when prepending
+        if ($m[0][1] === 0 && strpos($content, "\n") === 0) {
+            $content = substr($content, 1);
+        }
+
+        $this->writeAtomic($content);
+    }
+
+    /**
+     * @param string[] $domains
+     */
+    public function buildProtectionBlock(array $domains, bool $facetReferer, int $facetMaxFilters): string
+    {
+        if ($facetMaxFilters < 0 || $facetMaxFilters > self::FACET_MAX_FILTERS_LIMIT) {
+            throw new \InvalidArgumentException(sprintf(
+                'facet_max_filters must be between 0 and %d',
+                self::FACET_MAX_FILTERS_LIMIT
+            ));
+        }
+
+        $hosts = [];
+        foreach ($domains as $domain) {
+            $domain = strtolower(trim((string) $domain));
+            if ($domain === '') {
+                continue;
+            }
+            if (!preg_match('/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/', $domain)) {
+                throw new \InvalidArgumentException(sprintf('Invalid domain: %s', $domain));
+            }
+            $hosts[$domain] = str_replace('.', '\.', $domain);
+        }
+
+        if ($facetReferer && $hosts === []) {
+            // An empty whitelist would 403 every facet request, including real customers
+            throw new \InvalidArgumentException('No shop domain: refusing to restrict facet referers');
+        }
+
+        $options = json_encode(['facet_referer' => $facetReferer, 'facet_max_filters' => $facetMaxFilters]);
+
+        $lines = [
+            self::PROTECTION_BEGIN,
+            '# Managed by sc_alwaysdata (Back-office > Scriptami > Alwaysdata). Manual edits are overwritten.',
+            self::PROTECTION_OPTIONS . ' ' . $options,
+            '<IfModule mod_rewrite.c>',
+            'RewriteEngine on',
+        ];
+
+        if ($facetReferer) {
+            $lines[] = '# Facets (?q=) only when browsing from a shop page';
+            $lines[] = 'RewriteCond %{QUERY_STRING} (^|&)q= [NC]';
+            $lines[] = 'RewriteCond %{HTTP_REFERER} !^https?://(' . implode('|', $hosts) . ')(:\d+)?/ [NC]';
+            $lines[] = 'RewriteRule .* - [F,L]';
+        }
+
+        if ($facetMaxFilters > 0) {
+            // N groups are joined by N-1 slashes: N slashes means one group too many
+            $lines[] = sprintf('# Facets: more than %d filter groups = crawler exploring combinations', $facetMaxFilters);
+            $lines[] = 'RewriteCond %{QUERY_STRING} (^|&)q=[^&]*' . str_repeat('(/|%2F)[^&]*', $facetMaxFilters) . ' [NC]';
+            $lines[] = 'RewriteRule .* - [F,L]';
+        }
+
+        $lines[] = '</IfModule>';
+        $lines[] = self::PROTECTION_END;
+
+        return implode("\n", $lines) . "\n";
     }
 
     public function readSnippet(int $maxLength = 3000): string
@@ -207,6 +450,49 @@ class HtaccessService
         } catch (\Throwable $e) {
             return '';
         }
+    }
+
+    private function isBackupName(string $name): bool
+    {
+        $base = preg_quote(basename($this->getHtaccessPath()), '/');
+
+        return (bool) preg_match('/^' . $base . '\.\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}(-\d+)?\.bak$/', $name);
+    }
+
+    /**
+     * Backup files of the configured .htaccess, newest first.
+     *
+     * @return string[]
+     */
+    private function backupFiles(): array
+    {
+        $files = [];
+        foreach (glob($this->getHtaccessPath() . '.*.bak') ?: [] as $file) {
+            if ($this->isBackupName(basename($file))) {
+                $files[] = $file;
+            }
+        }
+        // Names sort chronologically (Y-m-d_H-i-s, then -N suffix for same-second writes)
+        usort($files, fn (string $a, string $b) => $this->backupSortKey($b) <=> $this->backupSortKey($a));
+
+        return $files;
+    }
+
+    private function backupSortKey(string $file): string
+    {
+        preg_match('/\.(\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2})(?:-(\d+))?\.bak$/', $file, $m);
+
+        return $m[1] . sprintf('%05d', (int) ($m[2] ?? 0));
+    }
+
+    /**
+     * @return string[]
+     */
+    private function significantLines(string $content): array
+    {
+        $lines = array_map('trim', explode("\n", str_replace("\r\n", "\n", $content)));
+
+        return array_values(array_filter($lines, static fn (string $l) => $l !== ''));
     }
 
     private function getHtaccessPath(): string
@@ -223,7 +509,12 @@ class HtaccessService
         try {
             // Archive the current version before overwriting
             if (file_exists($htaccessPath)) {
-                $backupPath = $htaccessPath . '.' . date('Y-m-d_H-i-s') . '.bak';
+                // Unique name: two writes in the same second must not overwrite the undo point
+                $stamp = $htaccessPath . '.' . date('Y-m-d_H-i-s');
+                $backupPath = $stamp . '.bak';
+                for ($n = 2; file_exists($backupPath); ++$n) {
+                    $backupPath = $stamp . '-' . $n . '.bak';
+                }
                 if (!copy($htaccessPath, $backupPath)) {
                     throw new \RuntimeException(sprintf('Failed to create backup: %s', $backupPath));
                 }

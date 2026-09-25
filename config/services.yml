@@ -17,8 +17,16 @@ services:
   ScAlwaysdata\Service\HtaccessService:
     class: ScAlwaysdata\Service\HtaccessService
 
+  ScAlwaysdata\Service\RobotsTxtService:
+    class: ScAlwaysdata\Service\RobotsTxtService
+
   ScAlwaysdata\Service\HttpLogParserService:
     class: ScAlwaysdata\Service\HttpLogParserService
+    arguments:
+      - '@ScAlwaysdata\Service\CrawlerAnalyserService'
+
+  ScAlwaysdata\Service\LoadDiagnosticService:
+    class: ScAlwaysdata\Service\LoadDiagnosticService
     arguments:
       - '@ScAlwaysdata\Service\CrawlerAnalyserService'
 
@@ -30,5 +38,7 @@ services:
       - '@ScAlwaysdata\Service\CrawlerAnalyserService'
       - '@ScAlwaysdata\Service\PhpErrorAnalyserService'
       - '@ScAlwaysdata\Service\HtaccessService'
+      - '@ScAlwaysdata\Service\RobotsTxtService'
+      - '@ScAlwaysdata\Service\LoadDiagnosticService'
     calls:
       - [setContainer, ['@service_container']]

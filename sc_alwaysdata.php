@@ -29,7 +29,7 @@ if (file_exists($autoloadPath)) {
 
 class sc_alwaysdata extends Module
 {
-    public const VERSION = '1.4.2';
+    public const VERSION = '1.10.0';
 
     public const CONFIG_LOGS_PATH = 'SC_ALWAYSDATA_LOGS_PATH';
     public const CONFIG_HTACCESS_PATH = 'SC_ALWAYSDATA_HTACCESS_PATH';
@@ -63,7 +63,7 @@ class sc_alwaysdata extends Module
 
     public function install(): bool
     {
-        if (!parent::install()) {
+        if (!parent::install() || !$this->registerHook('actionAdminMetaAfterWriteRobotsFile')) {
             return false;
         }
 
@@ -99,9 +99,25 @@ class sc_alwaysdata extends Module
             && Configuration::deleteByName(self::CONFIG_LINES_PHP)
             && Configuration::deleteByName(self::CONFIG_LINES_SITES)
             && Configuration::deleteByName(self::CONFIG_CRON_TOKEN)
+            && Configuration::deleteByName(\ScAlwaysdata\Service\RobotsTxtService::CONFIG_KEY)
             && $this->dropStatsTable()
             && $this->dropResourcesDailyTable()
             && $this->dropResourcesSamplesTable();
+    }
+
+    /**
+     * "Generate robots.txt" (SEO & URLs) truncates the file: re-append the managed block.
+     */
+    public function hookActionAdminMetaAfterWriteRobotsFile(array $params): void
+    {
+        if (!isset($params['write_fd']) || !is_resource($params['write_fd'])) {
+            return;
+        }
+
+        $block = (new \ScAlwaysdata\Service\RobotsTxtService())->buildConfiguredBlock();
+        if ($block !== '') {
+            fwrite($params['write_fd'], "\n" . $block);
+        }
     }
 
     public function getContent(): void

@@ -177,7 +177,6 @@
 
     </div>
 </div>
-
 {% if logsPath is empty %}
 <div class="alert alert-info">
     <i class="material-icons align-middle mr-1">info</i>
@@ -188,7 +187,7 @@
 <input type="hidden" id="csrf-apply-block" value="{{ csrf_token('sc_alwaysdata_apply_block') }}">
 
 {# ------------------------------------------------------------------ #}
-{# Main tabs — Statistiques trafic | Conversion | Logs du jour         #}
+{# Main tabs — Logs | Trafic | Conversion | Ressources | Diagnostic | .htaccess | robots.txt #}
 {# ------------------------------------------------------------------ #}
 <div id="main-tabs-section" class="mb-4">
     <div class="d-flex align-items-end flex-wrap mb-3" style="border-bottom:1px solid #dee2e6">
@@ -219,10 +218,36 @@
                     Ressources
                 </a>
             </li>
+            {% if logsPath is not empty %}
+            <li class="nav-item">
+                <a class="nav-link" id="tab-diagnostic-link" data-toggle="tab" href="#tab-diagnostic" role="tab">
+                    <i class="material-icons align-middle" style="font-size:1rem">troubleshoot</i>
+                    Diagnostic charge
+                </a>
+            </li>
+            {% endif %}
+            {% if protection is not null %}
+            <li class="nav-item">
+                <a class="nav-link" id="tab-htaccess-link" data-toggle="tab" href="#tab-htaccess" role="tab">
+                    <i class="material-icons align-middle" style="font-size:1rem">security</i>
+                    .htaccess
+                    {% set criticalCount = (htaccessHealth ?? [])|filter(f => f.severity == 'critical')|length %}
+                    {% if criticalCount > 0 %}<span class="badge badge-danger ml-1">{{ criticalCount }}</span>{% endif %}
+                </a>
+            </li>
+            {% endif %}
+            {% if robots is not null %}
+            <li class="nav-item">
+                <a class="nav-link" id="tab-robots-link" data-toggle="tab" href="#tab-robots" role="tab">
+                    <i class="material-icons align-middle" style="font-size:1rem">smart_toy</i>
+                    robots.txt
+                </a>
+            </li>
+            {% endif %}
         </ul>
         <div class="d-flex align-items-center d-none pb-2" id="stats-controls" style="gap:.5rem">
             <input type="date" id="stats-date-picker" class="form-control form-control-sm" style="width:auto">
-            <div class="btn-group btn-group-sm" role="group">
+            <div class="btn-group btn-group-sm" role="group" id="stats-period-group">
                 <button type="button" class="btn btn-outline-secondary stats-period" data-period="30">30j</button>
                 <button type="button" class="btn btn-outline-secondary stats-period active" data-period="7">7j</button>
             </div>
@@ -241,6 +266,21 @@
 
         {# --- Tab Ressources --- #}
         {{ include('@Modules/sc_alwaysdata/views/templates/admin/_tab_resources.html.twig') }}
+
+        {# --- Tab Diagnostic charge --- #}
+        {% if logsPath is not empty %}
+        {{ include('@Modules/sc_alwaysdata/views/templates/admin/_tab_diagnostic.html.twig') }}
+        {% endif %}
+
+        {# --- Tab .htaccess --- #}
+        {% if protection is not null %}
+        {{ include('@Modules/sc_alwaysdata/views/templates/admin/_tab_htaccess.html.twig') }}
+        {% endif %}
+
+        {# --- Tab robots.txt --- #}
+        {% if robots is not null %}
+        {{ include('@Modules/sc_alwaysdata/views/templates/admin/_tab_robots.html.twig') }}
+        {% endif %}
 
         {# --- Tab Logs du jour --- #}
         {% if logsPath is not empty %}
@@ -271,6 +311,7 @@ var applyUnblockUrl = '{{ path('sc_alwaysdata_apply_unblock') }}';
 var statsUrl = '{{ statsUrl }}';
 var conversionUrl = '{{ conversionUrl }}';
 var resourcesStatsUrl = '{{ resourcesStatsUrl }}';
+var diagnosticUrl = '{{ diagnosticUrl }}';
 var cronResourcesUrl = '{{ cronResourcesUrl }}';
 var cronResourcesSampleUrl = '{{ cronResourcesSampleUrl }}';
 window.cronResourcesSampleUrl = cronResourcesSampleUrl;
@@ -355,10 +396,23 @@ function pct(a, b) {
             .finally(function() { if (spinner) spinner.style.display = 'none'; });
     }
 
+    function fetchDiagnostic() {
+        var el = document.getElementById('tab-diagnostic-content');
+        if (!el) return;
+        if (spinner) spinner.style.display = 'inline-block';
+        el.innerHTML = '<div class="text-center text-muted py-4"><div class="spinner-border spinner-border-sm" role="status"></div> Lecture du log du ' + esc(currentDate) + '…</div>';
+        postJson(diagnosticUrl, { date: currentDate })
+            .then(function(r) { return r.json(); })
+            .then(function(d) { renderDiagnostic(d); })
+            .catch(function(e) { el.innerHTML = '<div class="alert alert-danger">Erreur: ' + esc(e.message) + '</div>'; })
+            .finally(function() { if (spinner) spinner.style.display = 'none'; });
+    }
+
     function fetchActive() {
         if (activeTab === 'trafic') fetchStats();
         else if (activeTab === 'conversion') fetchConversion();
         else if (activeTab === 'resources') fetchResources();
+        else if (activeTab === 'diagnostic') fetchDiagnostic();
     }
 
     // Exposés globalement pour runCron() dans _tab_trafic.html.twig
@@ -401,8 +455,15 @@ function pct(a, b) {
                 if (!window.analysisRan) {
                     window.runAnalysis && window.runAnalysis();
                 }
+            } else if (tabId === 'tab-htaccess-link' || tabId === 'tab-robots-link') {
+                // Rendered server-side: no date picker, nothing to fetch
+                if (statsControls) statsControls.classList.add('d-none');
+                updateTabActions(tabIdToName(tabId));
             } else {
                 if (statsControls) statsControls.classList.remove('d-none');
+                // Diagnostic analyses a single day: the period has no meaning there
+                var periodGroup = document.getElementById('stats-period-group');
+                if (periodGroup) periodGroup.style.display = tabId === 'tab-diagnostic-link' ? 'none' : '';
                 if (tabId === 'tab-trafic-link') {
                     activeTab = 'trafic';
                     // Ressources autorise aujourd'hui — rétablir hier pour les autres onglets
@@ -413,6 +474,10 @@ function pct(a, b) {
                 } else if (tabId === 'tab-resources-link') {
                     activeTab = 'resources';
                     // Ressources : autoriser aujourd'hui
+                    if (datePicker) { datePicker.max = today; if (currentDate === yesterday) { currentDate = today; datePicker.value = today; } }
+                } else if (tabId === 'tab-diagnostic-link') {
+                    activeTab = 'diagnostic';
+                    // Aujourd'hui autorisé : c'est le jour de l'incident qu'on veut voir
                     if (datePicker) { datePicker.max = today; if (currentDate === yesterday) { currentDate = today; datePicker.value = today; } }
                 }
                 updateTabActions(activeTab);
@@ -425,13 +490,16 @@ function pct(a, b) {
             if (tabId === 'tab-trafic-link')     return 'trafic';
             if (tabId === 'tab-conversion-link') return 'conversion';
             if (tabId === 'tab-resources-link')  return 'resources';
+            if (tabId === 'tab-diagnostic-link') return 'diagnostic';
+            if (tabId === 'tab-htaccess-link')   return 'htaccess';
+            if (tabId === 'tab-robots-link')     return 'robots';
             return null;
         }
 
         // --- Initial tab selection ---
         // Priorité : hash URL > onglet .active dans le DOM (défini côté template)
         var hashTab = (window.location.hash || '').replace(/^#/, '');
-        var validTabs = ['logs', 'trafic', 'conversion', 'resources'];
+        var validTabs = ['logs', 'trafic', 'conversion', 'resources', 'diagnostic', 'htaccess', 'robots'];
         var hashTarget = validTabs.indexOf(hashTab) !== -1
             ? document.getElementById('tab-' + hashTab + '-link')
             : null;
@@ -523,8 +591,11 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
-    // Auto-run on page load
-    runAnalysis();
+    // Auto-run on page load, unless the URL opens another tab (the logs tab runs it when first shown)
+    var initialHash = (window.location.hash || '').replace(/^#/, '');
+    if (['trafic', 'conversion', 'resources', 'diagnostic', 'htaccess', 'robots'].indexOf(initialHash) === -1) {
+        runAnalysis();
+    }
 
     function renderResults(data) {
         if (data.error) {

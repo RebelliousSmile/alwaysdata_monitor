@@ -43,9 +43,34 @@ class Sc_alwaysdataCronModuleFrontController extends ModuleFrontController
 
         $date = date('Y-m-d', strtotime('yesterday'));
 
+        // MySQL lock names are server-wide: prefix with the database, 64 chars max
+        $lockName = pSQL(substr(_DB_NAME_ . ':sc_alwaysdata_cron_stats', 0, 64));
+        $locked   = false;
+
         try {
             $existing = DailyStat::getByDate($date);
             if ($existing !== null) {
+                $this->responseData = ['skipped' => true, 'date' => $date];
+
+                return;
+            }
+
+            // Cron and BO button must never parse the same day twice in parallel
+            // GET_LOCK answers 1 (taken), 0 (held elsewhere) or NULL (MySQL error)
+            $lockAnswer = (string) Db::getInstance()->getValue('SELECT GET_LOCK(\'' . $lockName . '\', 0)', false);
+            if ($lockAnswer !== '0' && $lockAnswer !== '1') {
+                throw new \RuntimeException('Cannot acquire cron lock');
+            }
+            $locked = $lockAnswer === '1';
+            if (!$locked) {
+                $this->responseData     = ['running' => true, 'date' => $date];
+                $this->responseHttpCode = 409;
+
+                return;
+            }
+
+            // The call holding the lock may have finished in between
+            if (DailyStat::getByDate($date) !== null) {
                 $this->responseData = ['skipped' => true, 'date' => $date];
 
                 return;
@@ -67,6 +92,8 @@ class Sc_alwaysdataCronModuleFrontController extends ModuleFrontController
                 return;
             }
 
+            DailyStat::ensureScrapersColumn();
+
             $crawlerService = new CrawlerAnalyserService();
             $parserService  = new HttpLogParserService($crawlerService);
             $metrics        = $parserService->parse($logPath);
@@ -79,13 +106,16 @@ class Sc_alwaysdataCronModuleFrontController extends ModuleFrontController
             $ordersConfirmed = (int) Db::getInstance()->getValue(
                 'SELECT COUNT(*) FROM `' . _DB_PREFIX_ . 'orders` o
                  JOIN `' . _DB_PREFIX_ . 'order_state` os ON o.current_state = os.id_order_state
-                 WHERE DATE(o.date_add) = \'' . pSQL($date) . '\' AND os.paid = 1'
+                 WHERE o.date_add >= \'' . pSQL($date) . ' 00:00:00\'
+                   AND o.date_add < \'' . pSQL($date) . '\' + INTERVAL 1 DAY
+                   AND os.paid = 1'
             );
 
             $stat                               = new DailyStat();
             $stat->stat_date                    = $date;
             $stat->requests_total               = $metrics['requests_total'];
             $stat->requests_human               = $metrics['requests_human'];
+            $stat->requests_scrapers            = $metrics['requests_scrapers'];
             $stat->mobile                       = $metrics['mobile'];
             $stat->desktop                      = $metrics['desktop'];
             $stat->views_product                = $metrics['views_product'];
@@ -134,6 +164,7 @@ class Sc_alwaysdataCronModuleFrontController extends ModuleFrontController
                 'date'             => $date,
                 'requests_total'   => (int) $stat->requests_total,
                 'requests_human'   => (int) $stat->requests_human,
+                'requests_scrapers' => (int) $stat->requests_scrapers,
                 'views_product'    => (int) $stat->views_product,
                 'cart_adds'        => (int) $stat->cart_adds,
                 'orders_confirmed' => (int) $stat->orders_confirmed,
@@ -150,6 +181,14 @@ class Sc_alwaysdataCronModuleFrontController extends ModuleFrontController
             );
             $this->responseData     = ['error' => $e->getMessage(), 'date' => $date];
             $this->responseHttpCode = 500;
+        } finally {
+            if ($locked) {
+                // A failure here must not replace the response; MySQL frees the lock with the connection anyway
+                try {
+                    Db::getInstance()->getValue('SELECT RELEASE_LOCK(\'' . $lockName . '\')', false);
+                } catch (\Throwable $e) {
+                }
+            }
         }
     }
 

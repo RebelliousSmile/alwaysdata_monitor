@@ -21,6 +21,14 @@ class ResourceCollectorService
     private const RAM_TOTAL_MB_FALLBACK = 2048;
 
     /**
+     * Memoised result of the /proc walk, shared by collectTopProcesses() and
+     * collectProcessSummary().
+     *
+     * @var array<int, array{name: string, pid: int, rss_mb: int}>|null
+     */
+    private ?array $ownProcesses = null;
+
+    /**
      * Collecte RAM, CPU et disque depuis le système.
      *
      * @return array{ram_used_mb: int, ram_total_mb: int, cpu_load_1: float, cpu_load_5: float, cpu_load_15: float, disk_used_gb: float, disk_total_gb: float}
@@ -57,6 +65,7 @@ class ResourceCollectorService
         return array_merge($base, [
             'opcache_used_mb'     => $opcache['used_mb'],
             'top_processes'       => $this->collectTopProcesses(10),
+            'process_summary'     => $this->collectProcessSummary(),
             'top_modules_opcache' => $this->collectTopModulesOpcache(10),
         ]);
     }
@@ -89,6 +98,7 @@ class ResourceCollectorService
             'opcache_total_mb'   => $opcache['total_mb'],
             'opcache_strings_mb' => $opcache['strings_mb'],
             'top_processes'      => $topProcs,
+            'process_summary'    => $this->collectProcessSummary(),
             'cgroup_version'     => $cgroupInfo['version'],
             'cgroup_path'        => isset($cgroupInfo['path']) ? (string) $cgroupInfo['path'] : '',
             'collected_at'       => date('Y-m-d H:i:s'),
@@ -102,8 +112,75 @@ class ResourceCollectorService
      */
     private function collectTopProcesses(int $limit): array
     {
+        $processes = $this->collectOwnProcesses();
+
+        usort($processes, function (array $a, array $b): int {
+            return $b['rss_mb'] <=> $a['rss_mb'];
+        });
+
+        return array_slice($processes, 0, $limit);
+    }
+
+    /**
+     * Aggregate the current user's processes by name.
+     *
+     * top_processes only exposes the ten heaviest individual processes, which
+     * cannot tell "many workers" from "few but fat workers" — the distinction
+     * that matters when diagnosing a permanently high memory plateau. This
+     * summary answers it: per process name, how many are alive and how much
+     * resident memory they hold in total.
+     *
+     * @return array<int, array{name: string, count: int, rss_total_mb: int, rss_max_mb: int, rss_avg_mb: int}>
+     */
+    private function collectProcessSummary(): array
+    {
+        $byName = [];
+
+        foreach ($this->collectOwnProcesses() as $process) {
+            $name = $process['name'];
+            if (!isset($byName[$name])) {
+                $byName[$name] = [
+                    'name'         => $name,
+                    'count'        => 0,
+                    'rss_total_mb' => 0,
+                    'rss_max_mb'   => 0,
+                    'rss_avg_mb'   => 0,
+                ];
+            }
+
+            ++$byName[$name]['count'];
+            $byName[$name]['rss_total_mb'] += $process['rss_mb'];
+            $byName[$name]['rss_max_mb'] = max($byName[$name]['rss_max_mb'], $process['rss_mb']);
+        }
+
+        foreach ($byName as &$entry) {
+            $entry['rss_avg_mb'] = (int) round($entry['rss_total_mb'] / $entry['count']);
+        }
+        unset($entry);
+
+        $summary = array_values($byName);
+        usort($summary, function (array $a, array $b): int {
+            return $b['rss_total_mb'] <=> $a['rss_total_mb'];
+        });
+
+        return $summary;
+    }
+
+    /**
+     * Every process owned by the current user, with its resident memory.
+     *
+     * @return array<int, array{name: string, pid: int, rss_mb: int}>
+     */
+    private function collectOwnProcesses(): array
+    {
+        // top_processes and process_summary are two views of the same scan.
+        // Memoising keeps them consistent and avoids walking /proc twice.
+        if ($this->ownProcesses !== null) {
+            return $this->ownProcesses;
+        }
+
         if (!function_exists('posix_geteuid')) {
-            return [];
+            return $this->ownProcesses = [];
         }
 
         $myUid = posix_geteuid();
@@ -111,7 +188,7 @@ class ResourceCollectorService
 
         $statusFiles = glob('/proc/[0-9]*/status');
         if ($statusFiles === false) {
-            return [];
+            return $this->ownProcesses = [];
         }
 
         foreach ($statusFiles as $statusFile) {
@@ -142,11 +219,7 @@ class ResourceCollectorService
             ];
         }
 
-        usort($processes, function (array $a, array $b): int {
-            return $b['rss_mb'] <=> $a['rss_mb'];
-        });
-
-        return array_slice($processes, 0, $limit);
+        return $this->ownProcesses = $processes;
     }
 
     // -------------------------------------------------------------------------

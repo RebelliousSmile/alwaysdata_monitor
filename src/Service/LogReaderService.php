@@ -21,6 +21,13 @@ class LogReaderService
     ];
     private const LOG_DIRS = ['apache', 'http', 'php', 'sites'];
 
+    /**
+     * Hard cap on how many bytes tailFile() may walk back through, whatever the
+     * requested line count. Without it, a file containing no newline (a gzip
+     * archive opened as plain text) is read entirely into memory.
+     */
+    private const MAX_TAIL_BYTES = 33554432; // 32 MiB
+
     private function getLinesForDir(string $dir): int
     {
         $key = 'SC_ALWAYSDATA_LINES_' . strtoupper($dir);
@@ -116,13 +123,21 @@ class LogReaderService
         }
 
         try {
+            // Sliding window: never hold more than 2 * $maxLines lines in memory,
+            // whatever the uncompressed size of the archive. Compacting in batches
+            // avoids the O(n) cost of array_shift() on every single line.
             $lines = [];
             while (!gzeof($fh)) {
                 $line = gzgets($fh);
-                if ($line !== false) {
-                    $lines[] = rtrim($line, "\r\n");
+                if ($line === false) {
+                    continue;
+                }
+                $lines[] = rtrim($line, "\r\n");
+                if (count($lines) >= $maxLines * 2) {
+                    $lines = array_slice($lines, -$maxLines);
                 }
             }
+
             return array_slice($lines, -$maxLines);
         } finally {
             gzclose($fh);
@@ -209,14 +224,15 @@ class LogReaderService
                 ];
             }
 
-            $lines = $this->tailFile($file, $this->getLinesForDir($dir));
+            $maxLines = $this->getLinesForDir($dir);
+            $lines = $this->readLogLines($file, $maxLines);
 
             return [
                 'source' => $dir,
                 'lines' => $lines,
-                'truncated' => false,
+                'truncated' => count($lines) >= $maxLines,
                 'error' => null,
-                'max_lines' => $this->getLinesForDir($dir),
+                'max_lines' => $maxLines,
             ];
         } catch (\Throwable $e) {
             return [
@@ -294,19 +310,31 @@ class LogReaderService
         try {
             fseek($fh, 0, SEEK_END);
             $fileSize = ftell($fh);
-            $chunkSize = 8192;
-            $buffer = '';
+            $chunkSize = 65536;
             $pos = $fileSize;
-            $lines = [];
+            $chunks = [];
+            $newlines = 0;
+            $bytesRead = 0;
+            $maxBytes = self::MAX_TAIL_BYTES;
 
-            while (count($lines) <= $maxLines && $pos > 0) {
-                $readSize = min($chunkSize, $pos);
+            // Walk backwards, counting newlines per chunk instead of re-splitting a
+            // growing buffer on every iteration (which was quadratic). The byte cap
+            // guarantees we stop even on a file that holds no newline at all —
+            // a gzip archive read as plain text, for instance.
+            while ($newlines <= $maxLines && $pos > 0 && $bytesRead < $maxBytes) {
+                $readSize = (int) min($chunkSize, $pos, $maxBytes - $bytesRead);
                 $pos -= $readSize;
                 fseek($fh, $pos);
-                $buffer = fread($fh, $readSize) . $buffer;
-                $lines = explode("\n", $buffer);
+                $chunk = fread($fh, $readSize);
+                if ($chunk === false) {
+                    break;
+                }
+                array_unshift($chunks, $chunk);
+                $newlines += substr_count($chunk, "\n");
+                $bytesRead += $readSize;
             }
 
+            $lines = explode("\n", implode('', $chunks));
             $lines = array_filter($lines, fn ($l) => $l !== '');
 
             return array_slice(array_values($lines), -$maxLines);

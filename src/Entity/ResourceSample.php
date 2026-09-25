@@ -53,6 +53,9 @@ class ResourceSample extends \ObjectModel
     /** @var string JSON-encoded [{module, size_mb, script_count}] */
     public $top_modules_opcache = '[]';
 
+    /** @var string JSON-encoded [{name, count, rss_total_mb, rss_max_mb, rss_avg_mb}] */
+    public $process_summary = '[]';
+
     public static $definition = [
         'table'   => 'sc_alwaysdata_resources_samples',
         'primary' => 'id_sample',
@@ -69,6 +72,7 @@ class ResourceSample extends \ObjectModel
             'opcache_used_mb'     => ['type' => self::TYPE_FLOAT,  'validate' => 'isFloat'],
             'top_processes'       => ['type' => self::TYPE_HTML,   'allow_html' => true],
             'top_modules_opcache' => ['type' => self::TYPE_HTML,   'allow_html' => true],
+            'process_summary'     => ['type' => self::TYPE_HTML,   'allow_html' => true],
         ],
     ];
 
@@ -89,6 +93,7 @@ class ResourceSample extends \ObjectModel
                 `opcache_used_mb`     decimal(6,1) UNSIGNED NOT NULL DEFAULT 0.0,
                 `top_processes`       text NULL,
                 `top_modules_opcache` text NULL,
+                `process_summary`     text NULL,
                 PRIMARY KEY (`id_sample`),
                 UNIQUE KEY `idx_bucket_key` (`bucket_key`),
                 KEY `idx_sampled_at` (`sampled_at`)

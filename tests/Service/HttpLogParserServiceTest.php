@@ -65,20 +65,22 @@ class HttpLogParserServiceTest extends TestCase
 
     private function createLogFile(array $lines): string
     {
-        $path = tempnam(sys_get_temp_dir(), 'httplog_test_') . '.log';
+        $base = tempnam(sys_get_temp_dir(), 'httplog_test_');
+        $path = $base . '.log';
         file_put_contents($path, implode("\n", $lines) . "\n");
-        $this->tmpFiles[] = $path;
+        array_push($this->tmpFiles, $base, $path);
 
         return $path;
     }
 
     private function createGzLogFile(array $lines): string
     {
-        $path = tempnam(sys_get_temp_dir(), 'httplog_test_') . '.gz';
+        $base = tempnam(sys_get_temp_dir(), 'httplog_test_');
+        $path = $base . '.gz';
         $handle = gzopen($path, 'wb');
         gzwrite($handle, implode("\n", $lines) . "\n");
         gzclose($handle);
-        $this->tmpFiles[] = $path;
+        array_push($this->tmpFiles, $base, $path);
 
         return $path;
     }
@@ -101,6 +103,7 @@ class HttpLogParserServiceTest extends TestCase
 
         $this->assertSame(0, $result['requests_total']);
         $this->assertSame(0, $result['requests_human']);
+        $this->assertSame(0, $result['requests_scrapers']);
         $this->assertSame(0, $result['mobile']);
         $this->assertSame(0, $result['desktop']);
         $this->assertSame(0, $result['views_product']);
@@ -444,5 +447,184 @@ class HttpLogParserServiceTest extends TestCase
         $this->assertSame(2, $result['hourly_product_views'][8]);
         $this->assertSame(1, $result['hourly_product_views'][20]);
         $this->assertSame(0, $result['hourly_product_views'][12]);
+    }
+
+    // -----------------------------------------------------------------
+    // Scrapers — exclus des métriques humaines
+    // -----------------------------------------------------------------
+
+    /**
+     * @return string[]
+     */
+    private function pages(int $n, string $ip, string $query = ''): array
+    {
+        $lines = [];
+        for ($i = 0; $i < $n; $i++) {
+            $lines[] = $this->makeLine(['ip' => $ip, 'path' => '/cat-' . $i . '.html' . $query]);
+        }
+
+        return $lines;
+    }
+
+    public function testIpWithManyPagesAndNoStaticIsCountedAsScraper(): void
+    {
+        $result = $this->service->parse($this->createLogFile($this->pages(25, '9.9.9.9')));
+
+        $this->assertSame(25, $result['requests_scrapers']);
+        $this->assertSame(0, $result['requests_human']);
+        $this->assertSame(0, $result['views_product']);
+        $this->assertSame([], $result['page_counts']);
+        $this->assertSame([], $result['ip_counts']);
+    }
+
+    public function testIpLoadingStaticsStaysHuman(): void
+    {
+        $lines = $this->pages(25, '9.9.9.9');
+        $lines[] = $this->makeLine(['ip' => '9.9.9.9', 'path' => '/themes/theme.css']);
+
+        $result = $this->service->parse($this->createLogFile($lines));
+
+        $this->assertSame(0, $result['requests_scrapers']);
+        $this->assertSame(25, $result['requests_human']);
+    }
+
+    public function testIpBelowPageThresholdStaysHuman(): void
+    {
+        // A returning visitor with a warm cache loads no static at all
+        $result = $this->service->parse($this->createLogFile($this->pages(19, '9.9.9.9', '?q=Couleur-Rouge')));
+
+        $this->assertSame(0, $result['requests_scrapers']);
+        $this->assertSame(19, $result['requests_human']);
+    }
+
+    public function testIpMostlyOnFacetsIsCountedAsScraperEvenWithStatics(): void
+    {
+        $lines = $this->pages(25, '9.9.9.9', '?q=Couleur-Rouge');
+        for ($i = 0; $i < 3; $i++) {
+            $lines[] = $this->makeLine(['ip' => '9.9.9.9', 'path' => '/img/' . $i . '.jpg']);
+        }
+
+        $result = $this->service->parse($this->createLogFile($lines));
+
+        $this->assertSame(25, $result['requests_scrapers']);
+        $this->assertSame(0, $result['requests_human']);
+    }
+
+    public function testFacetInSecondParameterIsDetected(): void
+    {
+        $lines = $this->pages(25, '9.9.9.9', '?page=2&q=Taille-M');
+        $lines[] = $this->makeLine(['ip' => '9.9.9.9', 'path' => '/themes/theme.css']);
+
+        $result = $this->service->parse($this->createLogFile($lines));
+
+        $this->assertSame(25, $result['requests_scrapers']);
+    }
+
+    public function testQueryStringIsStrippedFromTopPages(): void
+    {
+        $result = $this->service->parse($this->createLogFile([
+            $this->makeLine(['path' => '/robes?q=Couleur-Rouge']),
+        ]));
+
+        $this->assertSame(['/robes' => 1], $result['page_counts']);
+    }
+
+    public function testRefusedRequestIsCountedAsScraperNotHuman(): void
+    {
+        $result = $this->service->parse($this->createLogFile([
+            $this->makeLine(['path' => '/produit.html', 'status' => '403']),
+        ]));
+
+        $this->assertSame(1, $result['requests_scrapers']);
+        $this->assertSame(0, $result['requests_human']);
+        $this->assertSame(0, $result['desktop']);
+    }
+
+    public function testDeclaredBotIsNotCountedAsScraper(): void
+    {
+        $lines = [];
+        for ($i = 0; $i < 25; $i++) {
+            $lines[] = $this->makeLine(['path' => '/p-' . $i . '.html', 'ua' => 'Mozilla/5.0 (compatible; Googlebot/2.1)']);
+        }
+
+        $result = $this->service->parse($this->createLogFile($lines));
+
+        $this->assertSame(0, $result['requests_scrapers']);
+        $this->assertSame(0, $result['requests_human']);
+    }
+
+    public function testSearchEngineMissingFromBlockListIsStillABot(): void
+    {
+        $result = $this->service->parse($this->createLogFile([
+            $this->makeLine(['ip' => '40.77.167.1', 'ua' => 'Mozilla/5.0 (compatible; bingbot/2.0; +http://www.bing.com/bingbot.htm)']),
+        ]));
+
+        $this->assertSame(0, $result['requests_human']);
+        $this->assertSame(0, $result['requests_scrapers']);
+    }
+
+    public function testScraperDoesNotHideOtherVisitors(): void
+    {
+        $lines = $this->pages(25, '9.9.9.9');
+        $lines[] = $this->makeLine(['ip' => '5.5.5.5', 'path' => '/cat-0.html']);
+
+        $result = $this->service->parse($this->createLogFile($lines));
+
+        $this->assertSame(25, $result['requests_scrapers']);
+        $this->assertSame(1, $result['requests_human']);
+        $this->assertSame(['/cat-0.html' => 1], $result['page_counts']);
+        $this->assertSame(['5.5.5.5' => 1], $result['ip_counts']);
+    }
+
+    // -----------------------------------------------------------------
+    // Non-régression de la détection de bots et plafond du détail 500
+    // -----------------------------------------------------------------
+
+    public function testReferenceLogCountersAreFrozen(): void
+    {
+        $browser = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)';
+        $lines = [
+            $this->makeLine(['ip' => '51.1.1.1', 'path' => '/a.html', 'ua' => 'Mozilla/5.0 (compatible; AhrefsBot/7.0)']),
+            $this->makeLine(['ip' => '51.1.1.1', 'path' => '/b.html', 'ua' => 'Mozilla/5.0 (compatible; AhrefsBot/7.0)']),
+            $this->makeLine(['ip' => '40.77.1.1', 'path' => '/a.html', 'ua' => 'Mozilla/5.0 (compatible; bingbot/2.0)']),
+            $this->makeLine(['ip' => '66.249.1.1', 'path' => '/a.html', 'ua' => 'Mozilla/5.0 (compatible; Googlebot/2.1)']),
+            $this->makeLine(['ip' => '74.125.1.1', 'path' => '/a.html', 'ua' => $browser]),
+            $this->makeLine(['ip' => '6.6.6.6', 'path' => '/x.html', 'status' => '403', 'ua' => $browser]),
+            $this->makeLine(['ip' => '7.7.7.7', 'path' => '/themes/t.css', 'ua' => $browser]),
+            $this->makeLine(['ip' => '1.1.1.1', 'path' => '/home.html', 'ua' => $browser]),
+            $this->makeLine(['ip' => '1.1.1.1', 'path' => '/home.html', 'ua' => $browser]),
+            $this->makeLine(['ip' => '2.2.2.2', 'path' => '/home.html', 'ua' => $browser]),
+            $this->makeLine(['ip' => '3.3.3.3', 'path' => '/robes', 'ua' => $browser]),
+        ];
+        $lines = array_merge($lines, $this->pages(22, '9.9.9.9'));
+
+        $result = $this->service->parse($this->createLogFile($lines));
+
+        $this->assertSame(33, $result['requests_total']);
+        $this->assertSame(4, $result['requests_human']);
+        $this->assertSame(23, $result['requests_scrapers']);
+        $this->assertSame(['/home.html' => 3, '/robes' => 1], $result['page_counts']);
+    }
+
+    public function testLowercaseBotUaIsStillABot(): void
+    {
+        $result = $this->service->parse($this->createLogFile([
+            $this->makeLine(['ua' => 'ahrefsbot/7.0']),
+        ]));
+
+        $this->assertSame(0, $result['requests_human']);
+    }
+
+    public function testCheckout500DetailIsCappedButCounterStaysExact(): void
+    {
+        $lines = [];
+        for ($i = 0; $i < 250; $i++) {
+            $lines[] = $this->makeLine(['path' => '/commande', 'status' => '500']);
+        }
+
+        $result = $this->service->parse($this->createLogFile($lines));
+
+        $this->assertSame(250, $result['errors_500_checkout']);
+        $this->assertCount(200, $result['errors_500_checkout_detail']);
     }
 }

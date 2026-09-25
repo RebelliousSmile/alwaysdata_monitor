@@ -34,6 +34,13 @@ sc_alwaysdata_resources_stats:
     _controller: sc_alwaysdata.controller.sc_alwaysdata::resourcesStatsAction
     _legacy_controller: AdminScAlwaysdata
 
+sc_alwaysdata_diagnostic:
+  path: /sc-alwaysdata/diagnostic
+  methods: [POST]
+  defaults:
+    _controller: sc_alwaysdata.controller.sc_alwaysdata::diagnosticAction
+    _legacy_controller: AdminScAlwaysdata
+
 sc_alwaysdata_apply_block:
   path: /sc-alwaysdata/apply-block
   methods: [POST]
@@ -46,4 +53,46 @@ sc_alwaysdata_apply_unblock:
   methods: [POST]
   defaults:
     _controller: sc_alwaysdata.controller.sc_alwaysdata::applyUnblockAction
+    _legacy_controller: AdminScAlwaysdata
+
+sc_alwaysdata_protection:
+  path: /sc-alwaysdata/protection
+  methods: [POST]
+  defaults:
+    _controller: sc_alwaysdata.controller.sc_alwaysdata::protectionAction
+    _legacy_controller: AdminScAlwaysdata
+
+sc_alwaysdata_robots:
+  path: /sc-alwaysdata/robots
+  methods: [POST]
+  defaults:
+    _controller: sc_alwaysdata.controller.sc_alwaysdata::robotsAction
+    _legacy_controller: AdminScAlwaysdata
+
+sc_alwaysdata_ai_bots:
+  path: /sc-alwaysdata/ai-bots
+  methods: [POST]
+  defaults:
+    _controller: sc_alwaysdata.controller.sc_alwaysdata::aiBotsAction
+    _legacy_controller: AdminScAlwaysdata
+
+sc_alwaysdata_htaccess_repair:
+  path: /sc-alwaysdata/htaccess/repair
+  methods: [POST]
+  defaults:
+    _controller: sc_alwaysdata.controller.sc_alwaysdata::htaccessRepairAction
+    _legacy_controller: AdminScAlwaysdata
+
+sc_alwaysdata_htaccess_restore:
+  path: /sc-alwaysdata/htaccess/restore
+  methods: [POST]
+  defaults:
+    _controller: sc_alwaysdata.controller.sc_alwaysdata::htaccessRestoreAction
+    _legacy_controller: AdminScAlwaysdata
+
+sc_alwaysdata_htaccess_purge:
+  path: /sc-alwaysdata/htaccess/purge
+  methods: [POST]
+  defaults:
+    _controller: sc_alwaysdata.controller.sc_alwaysdata::htaccessPurgeAction
     _legacy_controller: AdminScAlwaysdata
