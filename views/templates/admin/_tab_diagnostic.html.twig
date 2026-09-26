@@ -1,0 +1,296 @@
+{#
+ * SC Alwaysdata — Tab partial: Diagnostic charge
+ * Port of diag-site-a.sh: one pass over the day's HTTP log, rendered by renderDiagnostic()
+ #}
+
+<div class="tab-pane fade p-3" id="tab-diagnostic" role="tabpanel">
+    <div id="tab-diagnostic-content">
+        <div class="text-muted small">Choisissez une date pour analyser son log HTTP.</div>
+    </div>
+</div>
+
+<script>
+function renderDiagnostic(data) {
+    var el = document.getElementById('tab-diagnostic-content');
+    if (!el) return;
+    if (data.error) {
+        el.innerHTML = '<div class="alert alert-warning">' + esc(data.error) + '</div>';
+        return;
+    }
+
+    var d = data.diagnostic;
+    var f = d.facets;
+    var blockedIps = data.blocked_ips || [];
+    var blockedUas = (data.blocked_uas || []).map(function(u) { return u.toLowerCase(); });
+    // Search engines bring customers: never offer to block them from here
+    var searchEngines = ['googlebot', 'bingbot', 'applebot', 'duckduckbot'];
+
+    function num(n) { return Number(n).toLocaleString('fr-FR'); }
+    function hours(s) { return (s / 3600).toLocaleString('fr-FR', { maximumFractionDigits: 1 }) + ' h'; }
+    function share(a, b) { return b ? Math.round(a * 100 / b) : 0; }
+
+    var profiles = {};
+    (d.ip_profiles || []).forEach(function(p) { profiles[p.ip] = p; });
+    var levelTone = { eleve: 'danger', moyen: 'warning', faible: 'success', moteur: 'info' };
+    var networkLabel = { hebergeur: 'hébergeur', fai: 'FAI', inconnu: '' };
+
+    // Suspicion index: score badge, details (reverse DNS + weighted reasons) in the tooltip
+    function suspicion(p) {
+        var lines = [p.rdns ? 'Reverse DNS : ' + p.rdns : 'Pas de reverse DNS',
+            num(p.requests) + ' req. · ' + p.static_pct + ' % statiques · ' + p.facet_pct + ' % facettes · '
+            + p.refused_pct + ' % refusées · ' + p.ua_count + ' UA · pic ' + p.peak_minute + '/min', ''];
+        p.reasons.forEach(function(r) { lines.push((r.points > 0 ? '+' : '') + r.points + '  ' + r.label); });
+        var label = p.level === 'moteur' ? 'moteur' : p.score;
+        return '<span class="badge badge-' + levelTone[p.level] + ' mr-1" style="min-width:2.6em;cursor:help" title="' + esc(lines.join('\n')) + '">' + label + '</span>'
+            + (networkLabel[p.network] ? '<span class="small text-muted mr-2">' + networkLabel[p.network] + '</span>' : '');
+    }
+
+    function ipCell(ip) {
+        var p = profiles[ip];
+        var html = p ? suspicion(p) : '';
+        if (blockedIps.indexOf(ip) !== -1) return html + '<span class="badge badge-secondary">Bloquée</span>';
+        if (p && p.level === 'moteur') return html;
+        // Already turned away by the facet/UA rules: an IP block would add nothing
+        var neutralised = p && p.refused_pct >= 90;
+        if (neutralised) html += '<span class="badge border border-secondary text-secondary mr-1" title="' + p.refused_pct + ' % de ses requêtes reçoivent déjà un 403 : elle ne coûte presque rien">déjà 403</span>';
+        var risky = p && p.score < 40;
+        var title = risky ? 'Indice faible : risque de bloquer de vrais visiteurs'
+            : (neutralised ? 'Déjà refusée par les règles existantes : blocage IP sans gain' : '');
+        return html + '<button type="button" class="btn ' + (risky || neutralised ? 'btn-outline-secondary' : 'btn-outline-danger') + ' btn-sm py-0 diag-block"'
+            + (title ? ' title="' + title + '"' : '')
+            + ' data-type="ip" data-value="' + esc(ip) + '">Bloquer</button>';
+    }
+    function botCell(bot) {
+        var lower = bot.toLowerCase();
+        if (searchEngines.indexOf(lower) !== -1) return '<span class="badge badge-light">Moteur</span>';
+        var blocked = blockedUas.some(function(u) { return lower.indexOf(u) !== -1 || u.indexOf(lower) !== -1; });
+        if (blocked) return '<span class="badge badge-secondary">Bloqué</span>';
+        return '<button type="button" class="btn btn-outline-danger btn-sm py-0 diag-block" data-type="ua" data-value="' + esc(bot) + '">Bloquer</button>';
+    }
+
+    // list: [{value, count}], action: optional function(value) -> html
+    function table(title, list, total, action, mono) {
+        if (!list.length) {
+            return '<div class="card mb-3"><div class="card-header py-2 small font-weight-bold">' + esc(title) + '</div>'
+                + '<div class="card-body py-2 small text-muted">Aucune</div></div>';
+        }
+        var rows = list.map(function(r) {
+            return '<tr><td class="text-right text-nowrap" style="width:1%">' + num(r.count) + '</td>'
+                + (total ? '<td class="text-right text-muted text-nowrap" style="width:1%">' + share(r.count, total) + ' %</td>' : '')
+                + '<td class="' + (mono ? 'font-monospace ' : '') + 'text-break">' + esc(r.value === '' ? '(vide)' : r.value) + '</td>'
+                + (action ? '<td class="text-right text-nowrap" style="width:1%">' + action(r.value) + '</td>' : '')
+                + '</tr>';
+        }).join('');
+        return '<div class="card mb-3"><div class="card-header py-2 small font-weight-bold">' + esc(title) + '</div>'
+            + '<div class="table-responsive"><table class="table table-sm table-hover small mb-0"><tbody>' + rows + '</tbody></table></div></div>';
+    }
+
+    function card(label, value, sub, tone) {
+        return '<div class="col-6 col-md-3 col-lg-auto mb-2"><div class="card border-' + tone + ' text-center px-3 py-2" style="min-width:130px">'
+            + '<div class="small text-muted">' + esc(label) + '</div>'
+            + '<div class="h5 mb-0">' + value + '</div>'
+            + (sub ? '<div class="small text-muted">' + sub + '</div>' : '')
+            + '</div></div>';
+    }
+
+    var facetReqShare = share(f.count, d.total);
+    var facetTimeShare = share(f.time, d.time_total);
+    var outsideFacets = f.origin.vide + f.origin.externe;
+    var status403 = 0;
+    f.statuses.forEach(function(s) { if (s.value === '403') status403 = s.count; });
+
+    var html = '<div class="small text-muted mb-2">Fichier : <code>' + esc(d.file || '') + '</code>'
+        + (d.unparsed ? ' — ' + num(d.unparsed) + ' ligne(s) illisible(s) ignorée(s)' : '') + '</div>';
+
+    // Verdict: facets hit without shop referer and not rejected = protection missing or bypassed
+    if (facetTimeShare >= 30) {
+        html += '<div class="alert alert-danger py-2">Les facettes (<code>?q=</code>) consomment <strong>' + facetTimeShare
+            + ' %</strong> du temps serveur pour ' + facetReqShare + ' % des requêtes.</div>';
+    }
+    if (outsideFacets > 0 && status403 < outsideFacets / 2) {
+        html += '<div class="alert alert-warning py-2">' + num(outsideFacets) + ' requêtes de facettes sans referer de la boutique, dont seulement '
+            + num(status403) + ' refusées (403) : vérifiez la protection Referer dans l\'onglet .htaccess.</div>';
+    }
+
+    html += '<div class="row mb-2">'
+        + card('Requêtes', num(d.total), num(d.static) + ' statiques', 'secondary')
+        + card('Temps serveur', hours(d.time_total), 'cumulé', 'secondary')
+        + card('Facettes ?q=', num(f.count), facetReqShare + ' % req. · ' + facetTimeShare + ' % temps', facetTimeShare >= 30 ? 'danger' : 'info')
+        + card('IPs facettes', num(f.distinct_ips), 'distinctes', 'info')
+        + card('Recherche', num(d.search), '', 'info')
+        + card('/connexion', num(d.login.GET) + ' / ' + num(d.login.POST), 'GET / POST', d.login.POST > 500 ? 'warning' : 'secondary')
+        + '</div>';
+
+    // Hourly histogram: served (blue) stacked on refused 403 (grey). Request count alone cannot tell
+    // whether blocking works — scrapers keep coming, they just get a cheap 403.
+    var refused = d.hourly_refused || d.hourly.map(function() { return 0; });
+    var hourTime = d.hourly_time || d.hourly.map(function() { return 0; });
+    var maxHour = Math.max.apply(null, d.hourly.concat([1]));
+    var maxTime = Math.max.apply(null, hourTime.concat([0.1]));
+    var nowHour = data.date === new Date().toISOString().slice(0, 10) ? new Date().getHours() : -1;
+    function bars(values, tone, label) {
+        return '<div class="d-flex align-items-end" style="height:90px;gap:2px">'
+            + values.map(function(v, h) {
+                return '<div class="flex-fill d-flex flex-column justify-content-end" style="height:100%' + (h === nowHour ? ';outline:1px dashed #adb5bd' : '') + '" title="' + esc(label(h)) + '">'
+                    + v.map(function(part, i) {
+                        return '<div class="' + tone[i] + '" style="height:' + part + '%;opacity:.8"></div>';
+                    }).join('')
+                    + '</div>';
+            }).join('')
+            + '</div><div class="d-flex small text-muted" style="gap:2px">'
+            + values.map(function(v, h) { return '<div class="flex-fill text-center">' + (h % 3 === 0 ? h : '') + '</div>'; }).join('')
+            + '</div>';
+    }
+    function hourLabel(h) {
+        var served = d.hourly[h] - refused[h];
+        return h + 'h' + (h === nowHour ? ' (heure en cours, incomplète)' : '') + ' : ' + num(d.hourly[h]) + ' requêtes, '
+            + num(served) + ' servies, ' + num(refused[h]) + ' refusées (403), '
+            + Math.round(hourTime[h] / 60) + ' min de temps serveur';
+    }
+    html += '<div class="row">'
+        + '<div class="col-lg-6"><div class="card mb-3"><div class="card-header py-2 small font-weight-bold">Requêtes par heure '
+        + '<span class="font-weight-normal text-muted">— <span class="d-inline-block bg-primary" style="width:.7em;height:.7em;opacity:.8"></span> servies '
+        + '<span class="d-inline-block bg-secondary ml-1" style="width:.7em;height:.7em;opacity:.8"></span> refusées (403)</span></div><div class="card-body py-2">'
+        + bars(d.hourly.map(function(n, h) {
+            return [(n - refused[h]) * 100 / maxHour, refused[h] * 100 / maxHour];
+        }), ['bg-primary', 'bg-secondary'], hourLabel)
+        + '</div></div></div>'
+        + '<div class="col-lg-6"><div class="card mb-3"><div class="card-header py-2 small font-weight-bold">Temps serveur par heure '
+        + '<span class="font-weight-normal text-muted">— la vraie charge</span></div><div class="card-body py-2">'
+        + bars(hourTime.map(function(t) { return [t * 100 / maxTime]; }), ['bg-warning'], hourLabel)
+        + '</div></div></div>'
+        + '</div>';
+
+    html += blockedAuditCard(data.blocked_audit, num);
+
+    html += '<div class="small text-muted mb-2"><strong>Indice de défiance</strong> (0-100, survol pour le détail) : '
+        + '<span class="badge badge-danger">≥ 70</span> robot quasi certain, blocage sans risque · '
+        + '<span class="badge badge-warning">40-69</span> à examiner · '
+        + '<span class="badge badge-success">&lt; 40</span> probablement des humains (FAI, IP partagée) : ne pas bloquer. '
+        + 'Critères : part de facettes, absence de CSS/JS/images, referer vide, UA d\'outil ou rotation d\'UA, pic par minute, reverse DNS hébergeur (+) ou FAI (−), faux Googlebot.</div>';
+
+    // Facets
+    var origin = [
+        { value: 'Interne (navigation boutique)', count: f.origin.interne },
+        { value: 'Referer vide', count: f.origin.vide },
+        { value: 'Referer externe', count: f.origin.externe }
+    ];
+    html += '<h6 class="mt-3">Facettes <code>?q=</code></h6><div class="row">'
+        + '<div class="col-lg-6">' + table('Origine du referer', origin, f.count) + table('Statuts HTTP', f.statuses, f.count) + '</div>'
+        + '<div class="col-lg-6">' + table('Top IPs sur les facettes', f.top_ips, f.count, ipCell, true) + '</div>'
+        + '<div class="col-lg-6">' + table('Top referers externes', f.top_referers, 0, null, true) + '</div>'
+        + '<div class="col-lg-6">' + table('User-agents des facettes à referer externe', f.external_uas, 0, null, true) + '</div>'
+        + '</div>';
+
+    // Global traffic
+    html += '<h6 class="mt-3">Trafic global</h6><div class="row">'
+        + '<div class="col-lg-6">' + table('Bots déclarés', d.bots, d.total, botCell) + table('Top IPs', d.top_ips, d.total, ipCell, true) + '</div>'
+        + '<div class="col-lg-6">' + table('Top URLs (sans query string)', d.top_urls, d.total, null, true) + '</div>'
+        + '<div class="col-12">' + table('Top user-agents', d.top_uas, d.total, null, true) + '</div>'
+        + '</div>';
+
+    el.innerHTML = html;
+}
+
+// Blocked IPs that behave like humans: external referer (search, social) or homepage, few requests
+function blockedAuditCard(audit, num) {
+    if (!audit || (!audit.seen.length && !audit.absent.length)) return '';
+    var verdicts = {
+        humain: ['danger', 'humain probable', 'Arrive par un lien externe ou la page d\'accueil et abandonne après quelques 403 : un visiteur bloqué à tort.'],
+        a_verifier: ['warning', 'à vérifier', 'Signaux humains mais beaucoup de requêtes : scraper qui forge son referer, ou IP partagée (vrais clients + robot).'],
+        robot: ['secondary', 'robot', 'Aucun referer externe ni page d\'accueil : le blocage ne gêne personne.']
+    };
+    var flagged = audit.seen.filter(function(s) { return s.verdict !== 'robot'; });
+    var robots = audit.seen.length - flagged.length;
+
+    var rows = flagged.map(function(s) {
+        var v = verdicts[s.verdict];
+        var refs = s.referers.map(function(r) { return esc(r.value) + ' (' + num(r.count) + ')'; }).join(', ');
+        return '<tr>'
+            + '<td class="font-monospace text-nowrap">' + esc(s.ip) + (s.rule !== s.ip ? '<div class="small text-muted">règle ' + esc(s.rule) + '</div>' : '') + '</td>'
+            + '<td><span class="badge badge-' + v[0] + '" title="' + esc(v[2]) + '" style="cursor:help">' + v[1] + '</span></td>'
+            + '<td class="text-right text-nowrap">' + num(s.pages) + ' pages<div class="small text-muted">' + esc(s.first) + ' → ' + esc(s.last) + '</div></td>'
+            + '<td class="text-right">' + num(s.homepage) + '</td>'
+            + '<td class="text-right">' + num(s.external) + '</td>'
+            + '<td class="small text-break">' + (refs || '—') + '<div class="text-muted" title="' + esc(s.ua) + '">' + s.facet_pct + ' % facettes · ' + s.ua_count + ' UA</div></td>'
+            + '<td class="text-right text-nowrap"><button type="button" class="btn btn-sm py-0 ' + (s.verdict === 'humain' ? 'btn-outline-warning' : 'btn-outline-secondary') + ' diag-unblock"'
+            + ' data-value="' + esc(s.rule) + '">Débloquer</button></td>'
+            + '</tr>';
+    }).join('');
+
+    var summary = num(audit.seen.length) + ' IP(s) bloquée(s) vue(s) dans ce log, dont ' + num(robots) + ' sans aucun signe humain'
+        + (audit.absent.length ? ' · <span title="' + esc(audit.absent.join('\n')) + '" style="cursor:help;text-decoration:underline dotted">'
+            + num(audit.absent.length) + ' règle(s) absente(s) du log</span> ce jour-là (candidates à la purge si ça dure)' : '');
+
+    return '<div class="card mb-3 ' + (flagged.length ? 'border-warning' : '') + '"><div class="card-header py-2 small font-weight-bold">IPs bloquées : des visiteurs refusés à tort ? '
+        + '<span class="font-weight-normal text-muted">— signal humain = referer externe (moteur, réseau social) ou page d\'accueil</span></div>'
+        + '<div class="card-body py-2 small">' + summary + '</div>'
+        + (flagged.length
+            ? '<div class="table-responsive"><table class="table table-sm table-hover small mb-0"><thead><tr>'
+                + '<th>IP</th><th>Verdict</th><th class="text-right">Volume</th><th class="text-right">Accueil</th><th class="text-right">Ref. externe</th><th>Referers</th><th></th>'
+                + '</tr></thead><tbody>' + rows + '</tbody></table></div>'
+                + '<div class="card-body py-2 small text-muted">Un referer se forge facilement : un « à vérifier » avec des centaines de pages est presque toujours un robot.</div>'
+            : '<div class="card-body pt-0 pb-2 small text-success">Aucune IP bloquée ne ressemble à un visiteur.</div>')
+        + '</div>';
+}
+
+document.addEventListener('click', function(e) {
+    var btn = e.target.closest && e.target.closest('#tab-diagnostic-content .diag-unblock');
+    if (!btn) return;
+    btn.disabled = true;
+    var body = new URLSearchParams();
+    body.append('_token', (document.getElementById('csrf-apply-block') || {}).value || '');
+    body.append('type', 'ip');
+    body.append('value', btn.dataset.value);
+    fetch(applyUnblockUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-Requested-With': 'XMLHttpRequest' },
+        body: body.toString()
+    })
+        .then(function(r) { return r.json(); })
+        .then(function(res) {
+            if (res.success) {
+                // A CIDR rule covers several rows
+                document.querySelectorAll('#tab-diagnostic-content .diag-unblock').forEach(function(b) {
+                    if (b.dataset.value === btn.dataset.value) b.outerHTML = '<span class="badge badge-success">Débloquée</span>';
+                });
+            } else {
+                btn.disabled = false;
+                btn.title = res.message || 'Erreur';
+                btn.classList.add('btn-danger');
+            }
+        })
+        .catch(function() { btn.disabled = false; });
+});
+
+document.addEventListener('click', function(e) {
+    var btn = e.target.closest && e.target.closest('#tab-diagnostic-content .diag-block');
+    if (!btn) return;
+    btn.disabled = true;
+    var body = new URLSearchParams();
+    body.append('_token', (document.getElementById('csrf-apply-block') || {}).value || '');
+    body.append('type', btn.dataset.type);
+    body.append('value', btn.dataset.value);
+    fetch(applyBlockUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-Requested-With': 'XMLHttpRequest' },
+        body: body.toString()
+    })
+        .then(function(r) { return r.json(); })
+        .then(function(res) {
+            if (res.success) {
+                // Same value may appear in several tables (global and facet top IPs)
+                document.querySelectorAll('#tab-diagnostic-content .diag-block').forEach(function(b) {
+                    if (b.dataset.type === btn.dataset.type && b.dataset.value === btn.dataset.value) {
+                        b.outerHTML = '<span class="badge badge-secondary">Bloqué</span>';
+                    }
+                });
+            } else {
+                btn.disabled = false;
+                btn.title = res.message || 'Erreur';
+                btn.classList.replace('btn-outline-danger', 'btn-danger');
+            }
+        })
+        .catch(function() { btn.disabled = false; });
+});
+</script>

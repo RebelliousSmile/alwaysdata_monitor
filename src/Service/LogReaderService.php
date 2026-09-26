@@ -21,11 +21,127 @@ class LogReaderService
     ];
     private const LOG_DIRS = ['apache', 'http', 'php', 'sites'];
 
+    /**
+     * Hard cap on how many bytes tailFile() may walk back through, whatever the
+     * requested line count. Without it, a file containing no newline (a gzip
+     * archive opened as plain text) is read entirely into memory.
+     */
+    private const MAX_TAIL_BYTES = 33554432; // 32 MiB
+
     private function getLinesForDir(string $dir): int
     {
         $key = 'SC_ALWAYSDATA_LINES_' . strtoupper($dir);
         $v = (int) \Configuration::get($key);
         return $v > 0 ? $v : (self::DEFAULT_LINES[$dir] ?? 5000);
+    }
+
+    /**
+     * Resolve the absolute path of the HTTP log file for a given date (J-1 typically).
+     * Tries plain .log first, then .log.gz. Returns null if not found.
+     */
+    public function findHttpLogPath(string $date): ?string
+    {
+        $basePath = $this->resolveBasePath();
+        if ($basePath === null) {
+            return null;
+        }
+
+        $year = substr($date, 0, 4);
+        $base = $basePath . 'http/' . $year . '/http-' . $date;
+
+        if (is_readable($base . '.log')) {
+            return $base . '.log';
+        }
+
+        if (is_readable($base . '.log.gz')) {
+            return $base . '.log.gz';
+        }
+
+        return null;
+    }
+
+    /**
+     * Lit le fichier de log PHP d'une date donnée et retourne un "source"
+     * exploitable par PhpErrorAnalyserService::analyse().
+     *
+     * @return array{source: string, lines: array<int, string>, truncated: bool, error: string|null}
+     */
+    public function readPhpLogForDate(string $date): array
+    {
+        $basePath = $this->resolveBasePath();
+        if ($basePath === null) {
+            return ['source' => 'php', 'lines' => [], 'truncated' => false, 'error' => 'No readable log base path'];
+        }
+
+        $phpDir = $basePath . 'php/';
+        if (!is_readable($phpDir)) {
+            return ['source' => 'php', 'lines' => [], 'truncated' => false, 'error' => 'PHP log directory not readable: ' . $phpDir];
+        }
+
+        $file = $this->findTodayFile($phpDir, $date);
+        if ($file === null) {
+            return ['source' => 'php', 'lines' => [], 'truncated' => false, 'error' => 'No PHP log file found for ' . $date];
+        }
+
+        try {
+            $maxLines = $this->getLinesForDir('php');
+            $lines = $this->readLogLines($file, $maxLines);
+
+            return [
+                'source'    => 'php',
+                'lines'     => $lines,
+                'truncated' => false,
+                'error'     => null,
+                'max_lines' => $maxLines,
+            ];
+        } catch (\Throwable $e) {
+            return ['source' => 'php', 'lines' => [], 'truncated' => false, 'error' => $e->getMessage()];
+        }
+    }
+
+    /**
+     * Lit un fichier texte ou gzip (dernier maxLines) et retourne les lignes.
+     *
+     * @return array<int, string>
+     */
+    private function readLogLines(string $filePath, int $maxLines): array
+    {
+        if (substr($filePath, -3) === '.gz') {
+            return $this->tailFileGz($filePath, $maxLines);
+        }
+        return $this->tailFile($filePath, $maxLines);
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function tailFileGz(string $filePath, int $maxLines): array
+    {
+        $fh = gzopen($filePath, 'rb');
+        if ($fh === false) {
+            return [];
+        }
+
+        try {
+            // Sliding window: never hold more than 2 * $maxLines lines in memory,
+            // whatever the uncompressed size of the archive. Compacting in batches
+            // avoids the O(n) cost of array_shift() on every single line.
+            $lines = [];
+            while (!gzeof($fh)) {
+                $line = gzgets($fh);
+                if ($line === false) {
+                    continue;
+                }
+                $lines[] = rtrim($line, "\r\n");
+                if (count($lines) >= $maxLines * 2) {
+                    $lines = array_slice($lines, -$maxLines);
+                }
+            }
+
+            return array_slice($lines, -$maxLines);
+        } finally {
+            gzclose($fh);
+        }
     }
 
     public function readTodayLogs(): array
@@ -108,14 +224,15 @@ class LogReaderService
                 ];
             }
 
-            $lines = $this->tailFile($file, $this->getLinesForDir($dir));
+            $maxLines = $this->getLinesForDir($dir);
+            $lines = $this->readLogLines($file, $maxLines);
 
             return [
                 'source' => $dir,
                 'lines' => $lines,
-                'truncated' => false,
+                'truncated' => count($lines) >= $maxLines,
                 'error' => null,
-                'max_lines' => $this->getLinesForDir($dir),
+                'max_lines' => $maxLines,
             ];
         } catch (\Throwable $e) {
             return [
@@ -193,19 +310,31 @@ class LogReaderService
         try {
             fseek($fh, 0, SEEK_END);
             $fileSize = ftell($fh);
-            $chunkSize = 8192;
-            $buffer = '';
+            $chunkSize = 65536;
             $pos = $fileSize;
-            $lines = [];
+            $chunks = [];
+            $newlines = 0;
+            $bytesRead = 0;
+            $maxBytes = self::MAX_TAIL_BYTES;
 
-            while (count($lines) <= $maxLines && $pos > 0) {
-                $readSize = min($chunkSize, $pos);
+            // Walk backwards, counting newlines per chunk instead of re-splitting a
+            // growing buffer on every iteration (which was quadratic). The byte cap
+            // guarantees we stop even on a file that holds no newline at all —
+            // a gzip archive read as plain text, for instance.
+            while ($newlines <= $maxLines && $pos > 0 && $bytesRead < $maxBytes) {
+                $readSize = (int) min($chunkSize, $pos, $maxBytes - $bytesRead);
                 $pos -= $readSize;
                 fseek($fh, $pos);
-                $buffer = fread($fh, $readSize) . $buffer;
-                $lines = explode("\n", $buffer);
+                $chunk = fread($fh, $readSize);
+                if ($chunk === false) {
+                    break;
+                }
+                array_unshift($chunks, $chunk);
+                $newlines += substr_count($chunk, "\n");
+                $bytesRead += $readSize;
             }
 
+            $lines = explode("\n", implode('', $chunks));
             $lines = array_filter($lines, fn ($l) => $l !== '');
 
             return array_slice(array_values($lines), -$maxLines);
