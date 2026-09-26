@@ -19,22 +19,40 @@
 {# ------------------------------------------------------------------ #}
 {# Top action bar                                                       #}
 {# ------------------------------------------------------------------ #}
-<div class="d-flex align-items-center mb-3">
-    <button type="button" class="btn btn-outline-secondary btn-sm mr-2" id="btn-toggle-config">
+<div class="d-flex align-items-center mb-3" style="gap:.5rem">
+    <button type="button" class="btn btn-outline-secondary btn-sm" id="btn-toggle-config">
         <i class="material-icons" style="font-size:1rem;vertical-align:middle">settings</i>
         Paramètres
     </button>
     {% if logsPath is not empty %}
-    <button type="button" class="btn btn-primary btn-sm" id="btn-analyse">
+    <button type="button" class="btn btn-primary btn-sm tab-action tab-action-logs" id="btn-analyse">
         <i class="material-icons" style="font-size:1rem;vertical-align:middle">refresh</i>
         Actualiser
     </button>
-    <div id="analyse-spinner" class="ml-2" style="display:none">
+    <div id="analyse-spinner" class="tab-action tab-action-logs" style="display:none">
         <div class="spinner-border spinner-border-sm text-primary" role="status">
             <span class="sr-only">Analyse en cours...</span>
         </div>
         <span class="ml-1 text-muted small">Analyse en cours...</span>
     </div>
+    {% endif %}
+    {% if cronUrl is not empty %}
+    <button type="button" class="btn btn-outline-primary btn-sm tab-action tab-action-trafic tab-action-conversion" id="btn-run-cron"
+            onclick="runCron('{{ cronUrl|e('js') }}', this)">
+        <i class="material-icons" style="font-size:1rem;vertical-align:middle">play_arrow</i>
+        Cron J-1
+    </button>
+    <button type="button" class="btn btn-outline-primary btn-sm tab-action tab-action-resources" id="btn-sample-now"
+            onclick="sampleNow(this)">
+        <i class="material-icons" style="font-size:1rem;vertical-align:middle">timer</i>
+        Sample now
+    </button>
+    <button type="button" class="btn btn-outline-secondary btn-sm tab-action tab-action-resources" id="btn-run-cron-resources"
+            onclick="runCron('{{ cronResourcesUrl|e('js') }}', this)">
+        <i class="material-icons" style="font-size:1rem;vertical-align:middle">memory</i>
+        Rollup J-1
+    </button>
+    <span id="cron-run-result" class="ml-2 small tab-action tab-action-trafic tab-action-conversion tab-action-resources"></span>
     {% endif %}
 </div>
 
@@ -111,9 +129,54 @@
                 Sauvegarder
             </button>
         </form>
+
+        {% if cronUrl is not empty %}
+        <div class="mt-4 border-top pt-3">
+          <h6><i class="material-icons align-middle" style="font-size:1rem">schedule</i> Configuration crons Alwaysdata</h6>
+          <p class="text-muted small mb-2">
+            Dans le panneau Alwaysdata → <strong>Tâches planifiées</strong>, créer <strong>3 tâches</strong> de type URL :
+          </p>
+
+          <div class="card card-body bg-light mb-2 p-2">
+            <div class="small font-weight-bold mb-1">1. Cron Stats (logs HTTP J-1)</div>
+            <div class="small text-muted mb-1">Fréquence recommandée : <strong>tous les jours à 02:00</strong></div>
+            <div class="input-group input-group-sm">
+              <input type="text" class="form-control font-monospace" id="cron-url-config" value="{{ cronUrl }}" readonly>
+              <div class="input-group-append">
+                <button class="btn btn-outline-secondary" type="button"
+                        onclick="var i=document.getElementById('cron-url-config');i.select();document.execCommand('copy')">Copier</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="card card-body bg-light mb-2 p-2">
+            <div class="small font-weight-bold mb-1">2. Cron Sample Ressources (haute fréquence)</div>
+            <div class="small text-muted mb-1">Fréquence recommandée : <strong>toutes les 15 minutes</strong> — collecte RAM / CPU / OPcache / top processes</div>
+            <div class="input-group input-group-sm">
+              <input type="text" class="form-control font-monospace" id="cron-sample-url-config" value="{{ cronResourcesSampleUrl }}" readonly>
+              <div class="input-group-append">
+                <button class="btn btn-outline-secondary" type="button"
+                        onclick="var i=document.getElementById('cron-sample-url-config');i.select();document.execCommand('copy')">Copier</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="card card-body bg-light mb-2 p-2">
+            <div class="small font-weight-bold mb-1">3. Cron Rollup Ressources (agrégation J-1)</div>
+            <div class="small text-muted mb-1">Fréquence recommandée : <strong>tous les jours à 02:15</strong> — consolide les samples de la veille en historique long (90j)</div>
+            <div class="input-group input-group-sm">
+              <input type="text" class="form-control font-monospace" id="cron-resources-url-config" value="{{ cronResourcesUrl }}" readonly>
+              <div class="input-group-append">
+                <button class="btn btn-outline-secondary" type="button"
+                        onclick="var i=document.getElementById('cron-resources-url-config');i.select();document.execCommand('copy')">Copier</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        {% endif %}
+
     </div>
 </div>
-
 {% if logsPath is empty %}
 <div class="alert alert-info">
     <i class="material-icons align-middle mr-1">info</i>
@@ -124,27 +187,118 @@
 <input type="hidden" id="csrf-apply-block" value="{{ csrf_token('sc_alwaysdata_apply_block') }}">
 
 {# ------------------------------------------------------------------ #}
-{# Results (populated by JS)                                           #}
+{# Main tabs — Logs | Trafic | Conversion | Ressources | Diagnostic | .htaccess | robots.txt #}
 {# ------------------------------------------------------------------ #}
-<div id="results-section" style="display:none">
-
-    {# Source status badges #}
-    <div id="sources-status" class="mb-3"></div>
-
-    {# Log viewer — tabs built by JS #}
-    <div class="card mb-4" id="logs-viewer-section">
-        <div class="card-header">
-            <h3 class="card-header-title">
-                <i class="material-icons">list_alt</i>
-                Logs du jour
-            </h3>
-        </div>
-        <div class="card-body p-0">
-            <ul class="nav nav-tabs px-3 pt-2" id="logs-tabs" role="tablist"></ul>
-            <div class="tab-content" id="logs-tab-content"></div>
+<div id="main-tabs-section" class="mb-4">
+    <div class="d-flex align-items-end flex-wrap mb-3" style="border-bottom:1px solid #dee2e6">
+        <ul class="nav nav-tabs flex-grow-1" id="main-nav-tabs" role="tablist" style="border-bottom:0;margin-bottom:-1px">
+            {% if logsPath is not empty %}
+            <li class="nav-item">
+                <a class="nav-link active" id="tab-logs-link" data-toggle="tab" href="#tab-logs" role="tab">
+                    <i class="material-icons align-middle" style="font-size:1rem">list_alt</i>
+                    Logs du jour
+                </a>
+            </li>
+            {% endif %}
+            <li class="nav-item">
+                <a class="nav-link {% if logsPath is empty %}active{% endif %}" id="tab-trafic-link" data-toggle="tab" href="#tab-trafic" role="tab">
+                    <i class="material-icons align-middle" style="font-size:1rem">bar_chart</i>
+                    Statistiques trafic
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link" id="tab-conversion-link" data-toggle="tab" href="#tab-conversion" role="tab">
+                    <i class="material-icons align-middle" style="font-size:1rem">trending_up</i>
+                    Conversion
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link" id="tab-resources-link" data-toggle="tab" href="#tab-resources" role="tab">
+                    <i class="material-icons align-middle" style="font-size:1rem">memory</i>
+                    Ressources
+                </a>
+            </li>
+            {% if logsPath is not empty %}
+            <li class="nav-item">
+                <a class="nav-link" id="tab-diagnostic-link" data-toggle="tab" href="#tab-diagnostic" role="tab">
+                    <i class="material-icons align-middle" style="font-size:1rem">troubleshoot</i>
+                    Diagnostic charge
+                </a>
+            </li>
+            {% endif %}
+            {% if protection is not null %}
+            <li class="nav-item">
+                <a class="nav-link" id="tab-htaccess-link" data-toggle="tab" href="#tab-htaccess" role="tab">
+                    <i class="material-icons align-middle" style="font-size:1rem">security</i>
+                    .htaccess
+                    {% set criticalCount = (htaccessHealth ?? [])|filter(f => f.severity == 'critical')|length %}
+                    {% if criticalCount > 0 %}<span class="badge badge-danger ml-1">{{ criticalCount }}</span>{% endif %}
+                </a>
+            </li>
+            {% endif %}
+            {% if robots is not null %}
+            <li class="nav-item">
+                <a class="nav-link" id="tab-robots-link" data-toggle="tab" href="#tab-robots" role="tab">
+                    <i class="material-icons align-middle" style="font-size:1rem">smart_toy</i>
+                    robots.txt
+                </a>
+            </li>
+            {% endif %}
+        </ul>
+        <div class="d-flex align-items-center d-none pb-2" id="stats-controls" style="gap:.5rem">
+            <input type="date" id="stats-date-picker" class="form-control form-control-sm" style="width:auto">
+            <div class="btn-group btn-group-sm" role="group" id="stats-period-group">
+                <button type="button" class="btn btn-outline-secondary stats-period" data-period="30">30j</button>
+                <button type="button" class="btn btn-outline-secondary stats-period active" data-period="7">7j</button>
+            </div>
+            <div id="stats-spinner" style="display:none">
+                <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
+            </div>
         </div>
     </div>
+    <div class="tab-content" id="main-tab-content">
 
+        {# --- Tab Trafic --- #}
+        {{ include('@Modules/sc_alwaysdata/views/templates/admin/_tab_trafic.html.twig', {'isActiveTab': logsPath is empty}) }}
+
+        {# --- Tab Conversion --- #}
+        {{ include('@Modules/sc_alwaysdata/views/templates/admin/_tab_conversion.html.twig') }}
+
+        {# --- Tab Ressources --- #}
+        {{ include('@Modules/sc_alwaysdata/views/templates/admin/_tab_resources.html.twig') }}
+
+        {# --- Tab Diagnostic charge --- #}
+        {% if logsPath is not empty %}
+        {{ include('@Modules/sc_alwaysdata/views/templates/admin/_tab_diagnostic.html.twig') }}
+        {% endif %}
+
+        {# --- Tab .htaccess --- #}
+        {% if protection is not null %}
+        {{ include('@Modules/sc_alwaysdata/views/templates/admin/_tab_htaccess.html.twig') }}
+        {% endif %}
+
+        {# --- Tab robots.txt --- #}
+        {% if robots is not null %}
+        {{ include('@Modules/sc_alwaysdata/views/templates/admin/_tab_robots.html.twig') }}
+        {% endif %}
+
+        {# --- Tab Logs du jour --- #}
+        {% if logsPath is not empty %}
+        <div class="tab-pane fade show active" id="tab-logs" role="tabpanel">
+            {# Source status badges #}
+            <div id="sources-status" class="pt-3"></div>
+
+            {# Log viewer — tabs built by JS #}
+            <div id="logs-viewer-section">
+                <div class="pt-2">
+                    <ul class="nav nav-tabs" id="logs-tabs" role="tablist"></ul>
+                </div>
+                <div class="tab-content" id="logs-tab-content"></div>
+            </div>
+        </div>
+        {% endif %}
+
+    </div>
 </div>
 
 {# ------------------------------------------------------------------ #}
@@ -154,15 +308,234 @@
 var analyseUrl = '{{ path('sc_alwaysdata_analyse') }}';
 var applyBlockUrl = '{{ path('sc_alwaysdata_apply_block') }}';
 var applyUnblockUrl = '{{ path('sc_alwaysdata_apply_unblock') }}';
+var statsUrl = '{{ statsUrl }}';
+var conversionUrl = '{{ conversionUrl }}';
+var resourcesStatsUrl = '{{ resourcesStatsUrl }}';
+var diagnosticUrl = '{{ diagnosticUrl }}';
+var cronResourcesUrl = '{{ cronResourcesUrl }}';
+var cronResourcesSampleUrl = '{{ cronResourcesSampleUrl }}';
+window.cronResourcesSampleUrl = cronResourcesSampleUrl;
+</script>
+
+<script>
+// Helpers globaux utilisés par les partiels _tab_trafic et _tab_conversion
+function esc(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function pct(a, b) {
+    if (!b || b === 0) return '-';
+    return Math.round(a / b * 100) + '%';
+}
+</script>
+
+<script>
+(function() {
+    var yesterday = (function() {
+        var d = new Date(); d.setDate(d.getDate() - 1);
+        var mm = String(d.getMonth() + 1).padStart(2, '0');
+        var dd = String(d.getDate()).padStart(2, '0');
+        return d.getFullYear() + '-' + mm + '-' + dd;
+    })();
+
+    var today = (function() {
+        var d = new Date();
+        var mm = String(d.getMonth() + 1).padStart(2, '0');
+        var dd = String(d.getDate()).padStart(2, '0');
+        return d.getFullYear() + '-' + mm + '-' + dd;
+    })();
+
+    var currentPeriod = 7;
+    var currentDate = yesterday;
+    var activeTab = 'trafic';
+
+    var datePicker = document.getElementById('stats-date-picker');
+    var spinner = document.getElementById('stats-spinner');
+    if (datePicker) { datePicker.value = yesterday; datePicker.max = yesterday; }
+
+    function updateTabActions(tabName) {
+        document.querySelectorAll('.tab-action').forEach(function(el) {
+            var show = el.classList.contains('tab-action-' + tabName);
+            el.style.display = show ? '' : 'none';
+        });
+    }
+    window.updateTabActions = updateTabActions;
+
+    function postJson(url, params) {
+        var body = new URLSearchParams(params);
+        return fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-Requested-With': 'XMLHttpRequest' },
+            body: body.toString()
+        });
+    }
+
+    function fetchStats() {
+        if (spinner) spinner.style.display = 'inline-block';
+        postJson(statsUrl, { date: currentDate, period: String(currentPeriod) })
+            .then(function(r) { return r.json(); })
+            .then(function(d) { renderTrafic(d, currentDate, currentPeriod); })
+            .catch(function(e) { document.getElementById('tab-trafic-content').innerHTML = '<div class="alert alert-danger">Erreur: ' + esc(e.message) + '</div>'; })
+            .finally(function() { if (spinner) spinner.style.display = 'none'; });
+    }
+
+    function fetchConversion() {
+        if (spinner) spinner.style.display = 'inline-block';
+        postJson(conversionUrl, { date: currentDate, period: String(currentPeriod) })
+            .then(function(r) { return r.json(); })
+            .then(function(d) { renderConversion(d, currentDate, currentPeriod); })
+            .catch(function(e) { document.getElementById('tab-conversion-content').innerHTML = '<div class="alert alert-danger">Erreur: ' + esc(e.message) + '</div>'; })
+            .finally(function() { if (spinner) spinner.style.display = 'none'; });
+    }
+
+    function fetchResources() {
+        if (spinner) spinner.style.display = 'inline-block';
+        postJson(resourcesStatsUrl, { date: currentDate, period: String(currentPeriod) })
+            .then(function(r) { return r.json(); })
+            .then(function(d) { renderResources(d, currentDate, currentPeriod); })
+            .catch(function(e) { document.getElementById('tab-resources-content').innerHTML = '<div class="alert alert-danger">Erreur: ' + esc(e.message) + '</div>'; })
+            .finally(function() { if (spinner) spinner.style.display = 'none'; });
+    }
+
+    function fetchDiagnostic() {
+        var el = document.getElementById('tab-diagnostic-content');
+        if (!el) return;
+        if (spinner) spinner.style.display = 'inline-block';
+        el.innerHTML = '<div class="text-center text-muted py-4"><div class="spinner-border spinner-border-sm" role="status"></div> Lecture du log du ' + esc(currentDate) + '…</div>';
+        postJson(diagnosticUrl, { date: currentDate })
+            .then(function(r) { return r.json(); })
+            .then(function(d) { renderDiagnostic(d); })
+            .catch(function(e) { el.innerHTML = '<div class="alert alert-danger">Erreur: ' + esc(e.message) + '</div>'; })
+            .finally(function() { if (spinner) spinner.style.display = 'none'; });
+    }
+
+    function fetchActive() {
+        if (activeTab === 'trafic') fetchStats();
+        else if (activeTab === 'conversion') fetchConversion();
+        else if (activeTab === 'resources') fetchResources();
+        else if (activeTab === 'diagnostic') fetchDiagnostic();
+    }
+
+    // Exposés globalement pour runCron() dans _tab_trafic.html.twig
+    window.fetchStats = fetchStats;
+    window.fetchResources = fetchResources;
+
+    document.addEventListener('DOMContentLoaded', function() {
+        // Date picker
+        if (datePicker) {
+            datePicker.addEventListener('change', function() {
+                currentDate = this.value || yesterday;
+                fetchActive();
+            });
+        }
+
+        // Period buttons
+        document.querySelectorAll('.stats-period').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                document.querySelectorAll('.stats-period').forEach(function(b) { b.classList.remove('active'); });
+                this.classList.add('active');
+                currentPeriod = parseInt(this.dataset.period, 10);
+                fetchActive();
+            });
+        });
+
+        // Tab switch — Bootstrap 4 utilise jQuery, il faut .on() et non addEventListener
+        $('#main-nav-tabs a[data-toggle="tab"]').on('shown.bs.tab', function(e) {
+            var tabId = $(e.target).attr('id');
+            var statsControls = document.getElementById('stats-controls');
+            var tabName = tabIdToName(tabId);
+
+            // Persist active tab in URL hash (sans scroll jump grâce à replaceState)
+            if (tabName) {
+                history.replaceState(null, '', '#' + tabName);
+            }
+
+            if (tabId === 'tab-logs-link') {
+                if (statsControls) statsControls.classList.add('d-none');
+                updateTabActions('logs');
+                if (!window.analysisRan) {
+                    window.runAnalysis && window.runAnalysis();
+                }
+            } else if (tabId === 'tab-htaccess-link' || tabId === 'tab-robots-link') {
+                // Rendered server-side: no date picker, nothing to fetch
+                if (statsControls) statsControls.classList.add('d-none');
+                updateTabActions(tabIdToName(tabId));
+            } else {
+                if (statsControls) statsControls.classList.remove('d-none');
+                // Diagnostic analyses a single day: the period has no meaning there
+                var periodGroup = document.getElementById('stats-period-group');
+                if (periodGroup) periodGroup.style.display = tabId === 'tab-diagnostic-link' ? 'none' : '';
+                if (tabId === 'tab-trafic-link') {
+                    activeTab = 'trafic';
+                    // Ressources autorise aujourd'hui — rétablir hier pour les autres onglets
+                    if (datePicker) { datePicker.max = yesterday; if (currentDate > yesterday) { currentDate = yesterday; datePicker.value = yesterday; } }
+                } else if (tabId === 'tab-conversion-link') {
+                    activeTab = 'conversion';
+                    if (datePicker) { datePicker.max = yesterday; if (currentDate > yesterday) { currentDate = yesterday; datePicker.value = yesterday; } }
+                } else if (tabId === 'tab-resources-link') {
+                    activeTab = 'resources';
+                    // Ressources : autoriser aujourd'hui
+                    if (datePicker) { datePicker.max = today; if (currentDate === yesterday) { currentDate = today; datePicker.value = today; } }
+                } else if (tabId === 'tab-diagnostic-link') {
+                    activeTab = 'diagnostic';
+                    // Aujourd'hui autorisé : c'est le jour de l'incident qu'on veut voir
+                    if (datePicker) { datePicker.max = today; if (currentDate === yesterday) { currentDate = today; datePicker.value = today; } }
+                }
+                updateTabActions(activeTab);
+                fetchActive();
+            }
+        });
+
+        function tabIdToName(tabId) {
+            if (tabId === 'tab-logs-link')       return 'logs';
+            if (tabId === 'tab-trafic-link')     return 'trafic';
+            if (tabId === 'tab-conversion-link') return 'conversion';
+            if (tabId === 'tab-resources-link')  return 'resources';
+            if (tabId === 'tab-diagnostic-link') return 'diagnostic';
+            if (tabId === 'tab-htaccess-link')   return 'htaccess';
+            if (tabId === 'tab-robots-link')     return 'robots';
+            return null;
+        }
+
+        // --- Initial tab selection ---
+        // Priorité : hash URL > onglet .active dans le DOM (défini côté template)
+        var hashTab = (window.location.hash || '').replace(/^#/, '');
+        var validTabs = ['logs', 'trafic', 'conversion', 'resources', 'diagnostic', 'htaccess', 'robots'];
+        var hashTarget = validTabs.indexOf(hashTab) !== -1
+            ? document.getElementById('tab-' + hashTab + '-link')
+            : null;
+
+        if (hashTarget) {
+            // Basculer vers l'onglet demandé — shown.bs.tab se chargera du reste (fetchActive etc.)
+            $(hashTarget).tab('show');
+        } else {
+            // Défaut : lire l'onglet .active posé par le template, initialiser en conséquence
+            var initialActiveTabLink = document.querySelector('#main-nav-tabs .nav-link.active');
+            var initialTabName = 'trafic';
+            if (initialActiveTabLink) {
+                initialTabName = tabIdToName(initialActiveTabLink.id) || 'trafic';
+            }
+            updateTabActions(initialTabName);
+            if (initialTabName !== 'logs' && statsControls) {
+                statsControls.classList.remove('d-none');
+            }
+            if (initialTabName === 'trafic')          fetchStats();
+            else if (initialTabName === 'conversion') { activeTab = 'conversion'; fetchConversion(); }
+            else if (initialTabName === 'resources')  { activeTab = 'resources';  fetchResources(); }
+            // logs : pas de fetch, runAnalysis tourne déjà via son propre script
+        }
+    });
+})();
 </script>
 
 <script>
 document.addEventListener('DOMContentLoaded', function() {
     var btn = document.getElementById('btn-analyse');
     var spinner = document.getElementById('analyse-spinner');
-    var results = document.getElementById('results-section');
     var configSection = document.getElementById('config-section');
     var btnToggleConfig = document.getElementById('btn-toggle-config');
+
+    // Flag pour savoir si l'analyse a déjà été lancée
+    window.analysisRan = false;
 
     // Toggle config form
     btnToggleConfig.addEventListener('click', function() {
@@ -175,7 +548,6 @@ document.addEventListener('DOMContentLoaded', function() {
     function runAnalysis() {
         btn.disabled = true;
         spinner.style.display = 'inline-flex';
-        results.style.display = 'none';
 
         fetch(analyseUrl, {
             method: 'POST',
@@ -194,7 +566,10 @@ document.addEventListener('DOMContentLoaded', function() {
             }
             return r.json();
         })
-        .then(function(data) { renderResults(data); })
+        .then(function(data) {
+            window.analysisRan = true;
+            renderResults(data);
+        })
         .catch(function(err) { showError(err.message); })
         .finally(function() {
             btn.disabled = false;
@@ -202,17 +577,31 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    btn.addEventListener('click', runAnalysis);
+    // Exposé globalement pour le tab switch
+    window.runAnalysis = runAnalysis;
 
-    // Auto-run on page load
-    runAnalysis();
+    btn.addEventListener('click', function() {
+        // Forcer re-run et switcher sur l'onglet Logs
+        window.analysisRan = false;
+        var logsTabLink = document.getElementById('tab-logs-link');
+        if (logsTabLink) {
+            $(logsTabLink).tab('show');
+        } else {
+            runAnalysis();
+        }
+    });
+
+    // Auto-run on page load, unless the URL opens another tab (the logs tab runs it when first shown)
+    var initialHash = (window.location.hash || '').replace(/^#/, '');
+    if (['trafic', 'conversion', 'resources', 'diagnostic', 'htaccess', 'robots'].indexOf(initialHash) === -1) {
+        runAnalysis();
+    }
 
     function renderResults(data) {
         if (data.error) {
             showError(data.error);
             return;
         }
-        results.style.display = 'block';
         renderSources(data.sources || []);
         renderLogViewer(data.sources || [], data.crawlers || [], data.php_errors || [], data.blocked_ips || [], data.blocked_uas || []);
     }
@@ -523,11 +912,13 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     function showError(msg) {
-        results.style.display = 'block';
-        results.innerHTML = '<div class="alert alert-danger">'
-            + '<i class="material-icons align-middle mr-1">error</i>'
-            + escapeHtml(msg)
-            + '</div>';
+        var sourcesStatus = document.getElementById('sources-status');
+        if (sourcesStatus) {
+            sourcesStatus.innerHTML = '<div class="alert alert-danger m-0">'
+                + '<i class="material-icons align-middle mr-1">error</i>'
+                + escapeHtml(msg)
+                + '</div>';
+        }
     }
 });
 </script>
