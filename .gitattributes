@@ -1,0 +1,4 @@
+# Le veilleur n'entre jamais dans une archive du module PrestaShop.
+/monitor export-ignore
+# Le veilleur se compile et se déploie sous Linux : fins de ligne LF.
+/monitor/** text=auto eol=lf

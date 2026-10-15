@@ -13,7 +13,7 @@ status: pending
 ```txt
 monitor/
 ├── Cargo.toml                         ✏️ ureq (rustls), rustls, x509-parser, lettre (smtp, rustls), regex
-├── config.example.toml                ✏️ section [[site]] (id, url, kind, keyword_url, keyword, interval), [alert]
+├── config.example.toml                ✏️ section [[site]] (id, url, kind, keyword_url, keyword, interval), [alerts] (to, from, smtp_host, smtp_port, smtp_user, password_file)
 └── src/
     ├── main.rs                        ✏️ sous-commandes check <site> --once, status, ack <incident>
     ├── tick.rs                        ✏️ planifie les contrôles dus, limite le passage à 50 s
@@ -25,7 +25,7 @@ monitor/
     ├── checks/exposed.rs              ✅ .env, .git/HEAD, sauvegardes de config, dumps SQL, avec un témoin contre les faux 404
     ├── checks/tls.rs                  ✅ expiration du certificat, nom couvert
     ├── checks/headers.rs              ✅ HSTS, X-Content-Type-Options, X-Frame-Options ou frame-ancestors (information seulement)
-    ├── alert.rs                       ✅ trait Notifier, envoi SMTP via lettre, notifier en mémoire pour les tests
+    ├── alert.rs                       ✅ trait Notifier, envoi SMTP authentifié via lettre (587, STARTTLS), notifier en mémoire pour les tests
     └── http.rs                        ✅ agent ureq partagé : délais, User-Agent identifiable, aucune redirection hors domaine
 └── tests/
     ├── external_checks.rs             ✅ serveur local de fixtures, état sain et état « incident »
@@ -36,15 +36,15 @@ monitor/
 
 ```mermaid
 flowchart TD
-  A[Tâche planifiée : monitor tick] --> B[Contrôles dus, selon leur intervalle]
+  A[Timer systemd : monitor tick] --> B[Contrôles dus, selon leur intervalle]
   B --> C[Finding par contrôle]
   C --> D{Nouveau par rapport aux incidents ouverts ?}
   D -->|oui| E[Incident ouvert + e-mail immédiat]
   D -->|déjà ouvert| F[Rappel quotidien sauf si acquitté]
   C --> G{Incident ouvert sans finding ?}
   G -->|oui| H[Incident clos + e-mail de retour à la normale]
-  I[ssh compte ~/monitor/bin/monitor status] --> J[Sites, incidents ouverts, dernier passage]
-  K[ssh compte ~/monitor/bin/monitor ack id] --> L[Rappels arrêtés pour cet incident]
+  I[ssh monitor@vps ~/monitor/bin/monitor status] --> J[Sites, incidents ouverts, dernier passage]
+  K[ssh monitor@vps ~/monitor/bin/monitor ack id] --> L[Rappels arrêtés pour cet incident]
 ```
 
 ## Test Scope
@@ -113,7 +113,7 @@ journey
 
 > Un e-mail par incident, lisible sur un téléphone, et jamais vers un client.
 
-1. Envoyer via `lettre` sur `smtp-[compte].alwaysdata.net`, sans authentification. Le destinataire unique est pris dans `[alert]`.
+1. Envoyer via `lettre` par la boîte Alwaysdata servant de relais (`smtp-[compte].alwaysdata.net`), port 587 en STARTTLS obligatoire, en s'authentifiant avec l'adresse de la boîte. Le mot de passe est lu au moment de l'envoi dans le fichier de `password_file`. Ce fichier est refusé s'il est lisible par le groupe ou par les autres, ou s'il appartient à un autre utilisateur. Le mot de passe n'apparaît jamais dans un log ni dans une erreur. L'expéditeur est l'adresse de la boîte, et le destinataire unique est pris dans `[alerts]`.
 2. Objet `[monitor] <site> : <constat>`, corps avec l'URL, l'heure du premier signal et la commande `ack`.
 3. Envoyer un e-mail de retour à la normale, plus un rappel quotidien des incidents ouverts non acquittés.
 4. En cas d'échec d'envoi, garder l'incident « à notifier » et réessayer au passage suivant.
@@ -134,5 +134,5 @@ journey
 | 2    | Un site qui ne répond pas produit un seul constat « injoignable », dans un passage d'au plus 50 s |
 | 3    | Sur les fixtures de l'incident, `installer` et `content` émettent chacun un constat critique. Sur un site qui renvoie 200 partout, `exposed` n'émet rien |
 | 4    | Un contrôle n'est jamais lancé avant la fin de son intervalle. `check --once` n'écrit rien dans la base |
-| 5    | Le notifier en mémoire reçoit exactement un e-mail d'ouverture et un de clôture par incident. Un échec SMTP est retenté au passage suivant |
-| 6    | En production, `ssh <compte> ~/monitor/bin/monitor status` liste le site A sans incident, avec un dernier passage de moins de 2 min. `git ls-files monitor/` ne contient aucun `config.toml` |
+| 5    | Le notifier en mémoire reçoit exactement un e-mail d'ouverture et un de clôture par incident. Un échec SMTP est retenté au passage suivant. Un `password_file` en 0644 est refusé sans qu'aucun envoi soit tenté, et le mot de passe n'apparaît dans aucune sortie |
+| 6    | En production, `ssh monitor@<vps> ~/monitor/bin/monitor status` liste le site A sans incident, avec un dernier passage de moins de 2 min, et un premier e-mail de test est arrivé par le relais. `git ls-files monitor/` ne contient ni `config.toml` ni `smtp-password` |
