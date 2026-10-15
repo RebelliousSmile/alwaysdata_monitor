@@ -15,8 +15,9 @@ fn write_config(dir: &Path, extra: &str) -> std::path::PathBuf {
     let db = dir.join("monitor.db");
     // TOML : chemin Windows en chaîne littérale.
     let raw = format!(
-        "database = '{}'\n{extra}\n[alerts]\nto = \"alertes@example.org\"\nfrom = \"monitor@example.org\"\n",
-        db.display()
+        "database = '{}'\n{extra}\n[alerts]\nto = \"alertes@example.org\"\nfrom = \"monitor@example.org\"\nsmtp_host = \"smtp.example.org\"\npassword_file = '{}'\n",
+        db.display(),
+        dir.join("smtp-password").display()
     );
     let path = dir.join("config.toml");
     std::fs::write(&path, raw).expect("écriture");
@@ -52,6 +53,29 @@ fn tick_then_status_succeeds_and_migrations_rerun_cleanly() {
     let after = monitor(&config, &["status"]);
     assert!(after.status.success(), "{after:?}");
     let stdout = String::from_utf8_lossy(&after.stdout);
-    assert!(stdout.contains("schéma v1"), "{stdout}");
+    assert!(stdout.contains("schéma v2"), "{stdout}");
     assert!(stdout.contains("→ ok"), "{stdout}");
+    assert!(stdout.contains("incidents ouverts : aucun"), "{stdout}");
+    assert!(stdout.contains("notifications en attente : 0"), "{stdout}");
+}
+
+#[test]
+fn check_requires_once_and_a_known_site() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let config = write_config(dir.path(), "");
+    let out = monitor(&config, &["check", "absent"]);
+    assert!(!out.status.success(), "{out:?}");
+    assert!(String::from_utf8_lossy(&out.stderr).contains("--once"));
+    let out = monitor(&config, &["check", "absent", "--once"]);
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    assert!(!dir.path().join("monitor.db").exists());
+}
+
+#[test]
+fn ack_of_an_unknown_incident_fails() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let config = write_config(dir.path(), "");
+    let out = monitor(&config, &["ack", "42"]);
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    assert!(String::from_utf8_lossy(&out.stderr).contains("aucun incident 42"));
 }

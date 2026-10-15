@@ -1,5 +1,5 @@
 ---
-status: pending
+status: in-progress
 ---
 
 <!-- Fill or omit these sections; never add, rename, or reorder one. -->
@@ -15,11 +15,11 @@ monitor/
 ├── Cargo.toml                         ✏️ ureq (rustls), rustls, x509-parser, lettre (smtp, rustls), regex
 ├── config.example.toml                ✏️ section [[site]] (id, url, kind, keyword_url, keyword, interval), [alerts] (to, from, smtp_host, smtp_port, smtp_user, password_file)
 └── src/
-    ├── main.rs                        ✏️ sous-commandes check <site> --once, status, ack <incident>
+    ├── main.rs                        ✏️ sous-commandes check <site> --once, status, ack <incident>, test-alert
     ├── tick.rs                        ✏️ planifie les contrôles dus, limite le passage à 50 s
-    ├── store.rs                       ✏️ migrations : check_runs, incidents (ouvert, clos, acquitté, dernier rappel)
+    ├── store.rs                       ✏️ migrations : check_runs, incidents (ouvert, clos, acquitté, dernier rappel) ; Store::open réessaie 5 s sur SQLITE_BUSY (défaut de la phase 1 : deux premières ouvertures simultanées)
     ├── finding.rs                     ✅ Finding { site, check, severity, key, detail }, cycle de vie des incidents
-    ├── checks/mod.rs                  ✅ trait Check, registre par type de site
+    ├── checks/mod.rs                  ✅ enum CheckKind (au lieu d'un trait : cinq contrôles fixes, pas d'extension prévue), contrôles applicables par type de site
     ├── checks/content.rs              ✅ statut 200 et mot-clé attendu sur une URL donnée
     ├── checks/installer.rs            ✅ install.php et setup-config.php (WordPress), /install/ (PrestaShop) servis
     ├── checks/exposed.rs              ✅ .env, .git/HEAD, sauvegardes de config, dumps SQL, avec un témoin contre les faux 404

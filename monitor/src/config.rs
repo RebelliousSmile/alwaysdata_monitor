@@ -40,18 +40,78 @@ pub struct Config {
     pub sites: Vec<Site>,
 }
 
+/// Envoi par un relais SMTP authentifié, en STARTTLS obligatoire.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Alerts {
+    /// Destinataire unique.
     pub to: String,
+    /// Adresse de la boîte qui sert de relais.
     pub from: String,
+    pub smtp_host: String,
+    #[serde(default = "default_smtp_port")]
+    pub smtp_port: u16,
+    /// Identifiant SMTP, `from` par défaut.
+    pub smtp_user: Option<String>,
+    /// Fichier du mot de passe, en 0600 et au même propriétaire que le
+    /// processus. Lu au moment de l'envoi, jamais copié ailleurs.
+    pub password_file: PathBuf,
 }
+
+impl Alerts {
+    pub fn smtp_user(&self) -> &str {
+        self.smtp_user.as_deref().unwrap_or(&self.from)
+    }
+}
+
+fn default_smtp_port() -> u16 {
+    587
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SiteKind {
+    #[default]
+    Generic,
+    Wordpress,
+    Prestashop,
+}
+
+/// Intervalle par défaut des contrôles d'un site, en secondes.
+pub const DEFAULT_INTERVAL: u64 = 300;
+/// En dessous, le site serait sondé à chaque passage du timer.
+pub const MIN_INTERVAL: u64 = 60;
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Site {
     pub id: String,
     pub url: String,
+    #[serde(default)]
+    pub kind: SiteKind,
+    /// Page du contrôle `content`, `url` par défaut.
+    pub keyword_url: Option<String>,
+    /// Texte attendu dans cette page.
+    pub keyword: Option<String>,
+    /// Secondes entre deux passages des contrôles du site.
+    #[serde(default = "default_interval")]
+    pub interval: u64,
+}
+
+fn default_interval() -> u64 {
+    DEFAULT_INTERVAL
+}
+
+impl Site {
+    pub fn content_url(&self) -> &str {
+        self.keyword_url.as_deref().unwrap_or(&self.url)
+    }
+
+    /// Les chemins sondés (`.env`, `wp-admin/…`) sont joints à cette URL :
+    /// elle doit finir par `/` quand le site vit dans un sous-dossier.
+    pub fn base_url(&self) -> Result<url::Url, url::ParseError> {
+        url::Url::parse(&self.url)
+    }
 }
 
 /// `--config`, sinon `MONITOR_CONFIG`, sinon `~/monitor/config.toml`.
@@ -109,8 +169,7 @@ fn is_plausible_email(value: &str) -> bool {
 }
 
 /// `https://`, un hôte non vide jusqu'au premier `/`, `?` ou `#`, aucun espace
-/// ni caractère de contrôle. Sans dépendance : l'analyse complète viendra avec
-/// le client HTTP des contrôles (phase 2).
+/// ni caractère de contrôle, et une URL que le client HTTP sait analyser.
 fn is_plausible_https_url(value: &str) -> bool {
     let Some(rest) = value.strip_prefix("https://") else {
         return false;
@@ -120,6 +179,14 @@ fn is_plausible_https_url(value: &str) -> bool {
         && !host.starts_with(':')
         && !host.contains('@')
         && !value.chars().any(|c| c.is_whitespace() || c.is_control())
+        && url::Url::parse(value).is_ok_and(|u| u.host_str().is_some())
+}
+
+fn is_plausible_host(value: &str) -> bool {
+    !value.is_empty()
+        && value
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-')
 }
 
 impl Config {
@@ -140,6 +207,26 @@ impl Config {
                 ));
             }
         }
+        if let Some(user) = &self.alerts.smtp_user
+            && (user.is_empty() || user.chars().any(char::is_whitespace))
+        {
+            return Err(format!("alerts.smtp_user invalide (reçu : {user})"));
+        }
+        if !is_plausible_host(&self.alerts.smtp_host) {
+            return Err(format!(
+                "alerts.smtp_host doit être un nom d'hôte (reçu : {})",
+                self.alerts.smtp_host
+            ));
+        }
+        if self.alerts.smtp_port == 0 {
+            return Err("alerts.smtp_port ne peut pas valoir 0".into());
+        }
+        let pw = self.alerts.password_file.to_string_lossy();
+        if !(self.alerts.password_file.is_absolute() || pw.starts_with('/')) {
+            return Err(format!(
+                "alerts.password_file doit être un chemin absolu (reçu : {pw})"
+            ));
+        }
         let mut seen = HashSet::new();
         for site in &self.sites {
             if !is_valid_id(&site.id) {
@@ -157,6 +244,23 @@ impl Config {
                     site.id, site.url
                 ));
             }
+            if let Some(keyword_url) = &site.keyword_url
+                && !is_plausible_https_url(keyword_url)
+            {
+                return Err(format!(
+                    "keyword_url du site « {} » doit être https://hôte/… sans espace (reçu : {keyword_url})",
+                    site.id
+                ));
+            }
+            if site.keyword.as_deref().is_some_and(|k| k.trim().is_empty()) {
+                return Err(format!("keyword du site « {} » est vide", site.id));
+            }
+            if site.interval < MIN_INTERVAL {
+                return Err(format!(
+                    "interval du site « {} » : {MIN_INTERVAL} s au moins (reçu : {})",
+                    site.id, site.interval
+                ));
+            }
         }
         Ok(())
     }
@@ -172,6 +276,8 @@ database = "/home/veilleur/monitor/monitor.db"
 [alerts]
 to = "alertes@example.org"
 from = "monitor@example.org"
+smtp_host = "smtp.example.org"
+password_file = "/home/veilleur/monitor/smtp-password"
 
 [[sites]]
 id = "exemple"
@@ -186,7 +292,54 @@ url = "https://www.example.org/"
     fn accepts_the_example() {
         let config = parse_str(VALID).expect("valide");
         assert_eq!(config.sites.len(), 1);
-        assert_eq!(config.sites[0].id, "exemple");
+        let site = &config.sites[0];
+        assert_eq!(site.id, "exemple");
+        assert_eq!(site.kind, SiteKind::Generic);
+        assert_eq!(site.interval, DEFAULT_INTERVAL);
+        assert_eq!(site.content_url(), "https://www.example.org/");
+        assert_eq!(config.alerts.smtp_port, 587);
+        assert_eq!(config.alerts.smtp_user(), "monitor@example.org");
+    }
+
+    #[test]
+    fn reads_site_kind_keyword_and_interval() {
+        let raw = format!(
+            "{VALID}kind = \"wordpress\"\nkeyword_url = \"https://www.example.org/kb/\"\nkeyword = \"/problemes/\"\ninterval = 600\n"
+        );
+        let config = parse_str(&raw).expect("valide");
+        let site = &config.sites[0];
+        assert_eq!(site.kind, SiteKind::Wordpress);
+        assert_eq!(site.content_url(), "https://www.example.org/kb/");
+        assert_eq!(site.keyword.as_deref(), Some("/problemes/"));
+        assert_eq!(site.interval, 600);
+    }
+
+    #[test]
+    fn refuses_bad_site_options() {
+        for extra in [
+            "kind = \"joomla\"",
+            "interval = 30",
+            "keyword = \"  \"",
+            "keyword_url = \"http://www.example.org/kb/\"",
+        ] {
+            assert!(parse_str(&format!("{VALID}{extra}\n")).is_err(), "{extra}");
+        }
+    }
+
+    #[test]
+    fn refuses_bad_smtp_settings() {
+        assert!(parse_str(&VALID.replace("smtp.example.org", "smtp example")).is_err());
+        assert!(
+            parse_str(&VALID.replace("/home/veilleur/monitor/smtp-password", "smtp-password"))
+                .is_err()
+        );
+        let missing = VALID.replace("smtp_host = \"smtp.example.org\"\n", "");
+        assert!(parse_str(&missing).is_err());
+        let port = VALID.replace(
+            "smtp_host = \"smtp.example.org\"",
+            "smtp_host = \"smtp.example.org\"\nsmtp_port = 0",
+        );
+        assert!(parse_str(&port).is_err());
     }
 
     #[test]

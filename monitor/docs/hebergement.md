@@ -13,6 +13,7 @@ est public.
 | Relevé système du VPS | **À mesurer** après l'installation |
 | SMTP authentifié sur 587 vers le relais Alwaysdata | **Fait** le 2026-10-15 depuis le VPS : STARTTLS exigé (`--ssl-reqd`), authentification par la boîte d'alerte, code SMTP 250, message reçu par le destinataire ; les relais `smtp-<compte>.alwaysdata.net` de deux comptes résolvent vers la même adresse (relais communs, l'authentification se fait par la boîte et non par le compte) |
 | Premier déploiement | **Fait** le 2026-10-15 : `monitor 0.1.0`, `/health` en 200 avec un tick postérieur à la bascule, route inconnue en 404 sans corps, HTTP redirigé en 308 vers HTTPS, `serve` sur `127.0.0.1:8080` seulement (8080 injoignable de l'extérieur), timer à la minute, base en 0600 dans `data/` |
+| Contrôles externes et alertes (phase 2) | **À mesurer** au déploiement : `status` sur le site A, `test-alert` reçu |
 | Relance de `serve` après kill | **Fait** : `kill -9` du PID 3259, relancé en PID 3336 en moins de 8 s |
 | Relance après reboot | **Fait** le 2026-10-15 (extinction puis rallumage depuis la console Hetzner) : démarrage à 15:52:12 UTC, `serve` actif à 15:52:11 en PID 1048, `caddy`, `ufw`, `ssh.socket` et le timer actifs, premier tick à 15:53:00, `/health` en 200, `status` en code 0, 8080 toujours injoignable de l'extérieur |
 | Cloisonnement | **À mesurer** (tâche 5, une fois Hermes installé) |
@@ -77,8 +78,28 @@ boîte dédiée aux alertes est préférable : son mot de passe ne donne accès 
 elle.
 
 Le mot de passe vit dans `~monitor/monitor/smtp-password` (0600, propriétaire
-`monitor`), référencé par `password_file` (phase 2), jamais dans `config.toml`
-ni dans le dépôt.
+`monitor`), jamais dans `config.toml` ni dans le dépôt. `config.toml` le
+désigne :
+
+```toml
+[alerts]
+to = "<destinataire>"
+from = "<adresse de la boîte d'alerte>"   # aussi l'identifiant SMTP
+smtp_host = "smtp-<compte>.alwaysdata.net"
+password_file = "/home/monitor/monitor/smtp-password"
+```
+
+`monitor` relit ce fichier à chaque envoi. Il refuse d'envoyer, sans ouvrir de
+connexion, si le fichier est lisible par le groupe ou par les autres, ou s'il
+n'appartient pas à `monitor`. STARTTLS est obligatoire : un relais qui ne le
+propose pas fait échouer l'envoi. Les unités systemd montent `~/monitor` en
+lecture seule, ce qui suffit puisque le fichier n'est que lu.
+
+Après un changement de mot de passe ou de relais :
+
+```console
+$ ssh monitor@<vps> ~/monitor/bin/monitor test-alert
+```
 
 Envoi de test depuis le VPS (2026-10-15, code SMTP 250), sans mot de passe sur
 la ligne de commande : le `netrc` est généré en 0600 dans un dossier temporaire
