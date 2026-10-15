@@ -14,6 +14,7 @@ use crate::store::AGENT_PREFIX;
 pub const VERSION: u64 = 1;
 pub const MAX_FINDINGS: usize = 100;
 pub const MAX_FACTS: usize = 50;
+pub const MAX_FILES: usize = 100;
 /// Écart toléré entre `sent_at` et l'horloge du veilleur, en secondes.
 pub const MAX_CLOCK_SKEW: i64 = 300;
 
@@ -27,6 +28,10 @@ pub struct Report {
     pub agent: String,
     pub findings: Vec<ReportFinding>,
     pub facts: BTreeMap<String, serde_json::Value>,
+    /// Empreintes SHA-256 des fichiers critiques, `null` pour un fichier
+    /// absent. Facultatif : un agent qui ne l'envoie pas n'a pas de référence.
+    #[serde(default)]
+    pub files: Option<BTreeMap<String, Option<String>>>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -49,6 +54,8 @@ pub struct Valid {
     pub findings: Vec<Finding>,
     /// Relevé, réencodé en JSON compact.
     pub facts: String,
+    /// Empreintes des fichiers critiques, en JSON compact (`{}` si absentes).
+    pub files: String,
 }
 
 /// Raison d'un refus de schéma, sans aucune valeur reçue.
@@ -71,6 +78,14 @@ fn is_check_name(value: &str) -> bool {
         && value
             .bytes()
             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+}
+
+/// SHA-256 en 64 caractères hexadécimaux minuscules.
+fn is_sha256(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
 fn is_fact_key(value: &str) -> bool {
@@ -129,11 +144,26 @@ impl Report {
                 return Err(err(format!("facts : valeur n° {} invalide", i + 1)));
             }
         }
+        let files = self.files.unwrap_or_default();
+        if files.len() > MAX_FILES {
+            return Err(err(format!("plus de {MAX_FILES} entrées dans files")));
+        }
+        for (i, (path, hash)) in files.iter().enumerate() {
+            if !is_printable(path, 200) {
+                return Err(err(format!("files : chemin n° {} invalide", i + 1)));
+            }
+            if hash.as_deref().is_some_and(|h| !is_sha256(h)) {
+                return Err(err(format!("files : empreinte n° {} invalide", i + 1)));
+            }
+        }
         let mut findings = Vec::with_capacity(self.findings.len());
         for (i, f) in self.findings.iter().enumerate() {
             let n = i + 1;
             if !is_check_name(&f.check) {
                 return Err(err(format!("constat n° {n} : check invalide")));
+            }
+            if f.check == crate::facts::INTEGRITY {
+                return Err(err(format!("constat n° {n} : check réservé au veilleur")));
             }
             let Some(severity) = Severity::parse(&f.severity) else {
                 return Err(err(format!("constat n° {n} : severity invalide")));
@@ -153,6 +183,7 @@ impl Report {
             ));
         }
         let facts = serde_json::to_string(&self.facts).map_err(|_| err("facts illisible"))?;
+        let files = serde_json::to_string(&files).map_err(|_| err("files illisible"))?;
         Ok(Valid {
             site: self.site,
             seq,
@@ -160,6 +191,7 @@ impl Report {
             agent: self.agent,
             findings,
             facts,
+            files,
         })
     }
 }
@@ -168,6 +200,8 @@ impl Report {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    const HASH: &str = "33bf0cf98fa40b5f4c44e053816b75487245c5fc01e66dd65470e2e70cbee0d8";
 
     fn body(value: serde_json::Value) -> Vec<u8> {
         serde_json::to_vec(&value).expect("json")
@@ -183,7 +217,8 @@ mod tests {
             "findings": [
                 {"check": "php", "severity": "warning", "key": "display_errors", "detail": "activé"}
             ],
-            "facts": {"php_version": "8.3.12", "wp_plugins": 12, "debug": false, "cms": null}
+            "facts": {"php_version": "8.3.12", "wp_plugins": 12, "debug": false, "cms": null},
+            "files": {".htaccess": HASH, "wp-config.php": null}
         })
     }
 
@@ -199,6 +234,18 @@ mod tests {
             "site-a/agent:php/display_errors"
         );
         assert!(valid.facts.contains("\"php_version\":\"8.3.12\""));
+        assert_eq!(
+            valid.files,
+            format!(r#"{{".htaccess":"{HASH}","wp-config.php":null}}"#)
+        );
+    }
+
+    #[test]
+    fn files_is_optional() {
+        let mut value = base();
+        value.as_object_mut().expect("objet").remove("files");
+        let valid = parse(&body(value), "site-a").expect("valide");
+        assert_eq!(valid.files, "{}");
     }
 
     fn refused(mutate: impl FnOnce(&mut serde_json::Value)) -> SchemaError {
@@ -242,6 +289,24 @@ mod tests {
         refused(|v| {
             v.as_object_mut().expect("objet").remove("facts");
         });
+        refused(|v| v["findings"][0]["check"] = json!("integrity"));
+        refused(|v| v["files"] = json!([HASH]));
+        refused(|v| v["files"] = json!({"": HASH}));
+        refused(|v| {
+            v["files"] = json!({"a
+b": HASH})
+        });
+        refused(|v| v["files"] = json!({"p".repeat(201): HASH}));
+        refused(|v| v["files"] = json!({".htaccess": HASH.to_uppercase()}));
+        refused(|v| v["files"] = json!({".htaccess": &HASH[1..]}));
+        refused(|v| v["files"] = json!({".htaccess": format!("{}g", &HASH[1..])}));
+        refused(|v| v["files"] = json!({".htaccess": 1}));
+        refused(|v| {
+            let files: serde_json::Map<_, _> = (0..=MAX_FILES)
+                .map(|i| (format!("f{i}"), json!(HASH)))
+                .collect();
+            v["files"] = serde_json::Value::Object(files);
+        });
     }
 
     #[test]
@@ -253,6 +318,7 @@ mod tests {
         value["findings"][0]["check"] = json!("a".repeat(32));
         value["facts"] = json!({"a": "x".repeat(256)});
         value["seq"] = json!(i64::MAX);
+        value["files"] = json!({"p".repeat(200): HASH});
         parse(&body(value), "site-a").expect("limites acceptées");
     }
 

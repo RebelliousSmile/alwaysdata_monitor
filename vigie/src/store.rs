@@ -11,6 +11,7 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result};
 use rusqlite::{Connection, ErrorCode, OpenFlags, OptionalExtension, TransactionBehavior, params};
 
+use crate::facts;
 use crate::finding::{Finding, Severity};
 
 /// Une entrée par version de schéma, jouée dans l'ordre. Ne jamais modifier une
@@ -61,12 +62,22 @@ const MIGRATIONS: &[&str] = &[
         agent TEXT NOT NULL,
         facts TEXT NOT NULL
     );",
+    // 4 : empreintes des fichiers critiques du dernier rapport, et référence
+    // à laquelle elles sont comparées (`facts.rs`), en JSON.
+    "ALTER TABLE reports ADD COLUMN files TEXT NOT NULL DEFAULT '{}';
+    CREATE TABLE baselines (
+        site TEXT PRIMARY KEY,
+        files TEXT NOT NULL,
+        set_at INTEGER NOT NULL
+    );",
 ];
 
 /// Version de schéma à partir de laquelle les incidents existent.
 pub const SCHEMA_INCIDENTS: usize = 2;
 /// Version de schéma à partir de laquelle les clés d'agent existent.
 pub const SCHEMA_AGENTS: usize = 3;
+/// Version de schéma à partir de laquelle les références d'empreintes existent.
+pub const SCHEMA_BASELINE: usize = 4;
 
 /// Au plus un rapport accepté par site pendant cette durée, en secondes.
 pub const REPORT_MIN_GAP: i64 = 60;
@@ -127,6 +138,8 @@ pub struct AcceptedReport<'a> {
     pub agent: &'a str,
     /// Relevé, en JSON.
     pub facts: &'a str,
+    /// Empreintes des fichiers critiques, en JSON (`{}` si l'agent n'en envoie pas).
+    pub files: &'a str,
     /// Contrôles déjà préfixés par `agent:`.
     pub findings: &'a [Finding],
 }
@@ -560,8 +573,45 @@ impl Store {
         let tx = self.conn.transaction()?;
         let removed = tx.execute("DELETE FROM site_keys WHERE site = ?1", [site])?;
         tx.execute("DELETE FROM reports WHERE site = ?1", [site])?;
+        tx.execute("DELETE FROM baselines WHERE site = ?1", [site])?;
         tx.commit()?;
         Ok(removed == 1)
+    }
+
+    /// Prend les empreintes du dernier rapport comme référence et clôt les
+    /// incidents d'intégrité. `false` si le site n'a encore aucun rapport.
+    pub fn accept_baseline(&mut self, site: &str, now: i64) -> Result<bool> {
+        let tx = self
+            .conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let files: Option<String> = tx
+            .query_row("SELECT files FROM reports WHERE site = ?1", [site], |row| {
+                row.get(0)
+            })
+            .optional()?;
+        let Some(files) = files else {
+            return Ok(false);
+        };
+        tx.execute(
+            "INSERT INTO baselines (site, files, set_at) VALUES (?1, ?2, ?3)
+             ON CONFLICT (site) DO UPDATE SET files = excluded.files, set_at = excluded.set_at",
+            params![site, files, now],
+        )?;
+        reconcile_in(&tx, site, &facts::check_name(), &[], now)?;
+        tx.commit()?;
+        Ok(true)
+    }
+
+    /// Référence d'empreintes d'un site, en JSON, et sa date.
+    pub fn baseline(&self, site: &str) -> Result<Option<(String, i64)>> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT files, set_at FROM baselines WHERE site = ?1",
+                [site],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?)
     }
 
     /// Enregistre un rapport authentifié et à l'heure : vérifie la séquence
@@ -585,8 +635,11 @@ impl Store {
             seq,
             agent,
             facts,
+            files,
             findings,
         } = *report;
+        let reported: facts::Files =
+            serde_json::from_str(files).context("empreintes du rapport illisibles")?;
         let tx = self
             .conn
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -616,13 +669,43 @@ impl Store {
             }
         }
         tx.execute(
-            "INSERT INTO reports (site, last_seq, last_valid_at, agent, facts)
-             VALUES (?1, ?2, ?3, ?4, ?5)
+            "INSERT INTO reports (site, last_seq, last_valid_at, agent, facts, files)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
              ON CONFLICT (site) DO UPDATE SET last_seq = excluded.last_seq,
                last_valid_at = excluded.last_valid_at, agent = excluded.agent,
-               facts = excluded.facts",
-            params![site, seq, now, agent, facts],
+               facts = excluded.facts, files = excluded.files",
+            params![site, seq, now, agent, facts, files],
         )?;
+        let mut findings = findings.to_vec();
+        let baseline: Option<String> = tx
+            .query_row(
+                "SELECT files FROM baselines WHERE site = ?1",
+                [site],
+                |row| row.get(0),
+            )
+            .optional()?;
+        match baseline {
+            // Le premier rapport qui porte des empreintes pose la référence.
+            None if !reported.is_empty() => {
+                tx.execute(
+                    "INSERT INTO baselines (site, files, set_at) VALUES (?1, ?2, ?3)",
+                    params![site, files, now],
+                )?;
+            }
+            None => {}
+            Some(baseline) => {
+                let baseline: facts::Files =
+                    serde_json::from_str(&baseline).context("référence d'empreintes illisible")?;
+                let (drift, next) = facts::compare(site, &baseline, &reported);
+                findings.extend(drift);
+                if next != baseline {
+                    tx.execute(
+                        "UPDATE baselines SET files = ?2 WHERE site = ?1",
+                        params![site, serde_json::to_string(&next)?],
+                    )?;
+                }
+            }
+        }
         let mut checks: Vec<String> = {
             let mut stmt = tx.prepare(
                 "SELECT DISTINCT check_name FROM incidents
@@ -1001,9 +1084,109 @@ mod tests {
             seq,
             agent,
             facts,
+            files: "{}",
             findings,
         };
         store.accept_report(&report, now).expect("accept_report")
+    }
+
+    /// Rapport sans constat de l'agent, avec ces empreintes.
+    fn send_files(store: &mut Store, seq: i64, files: &str, now: i64) -> ReportOutcome {
+        let report = AcceptedReport {
+            site: "site-a",
+            pubkey: &KEY_A,
+            seq,
+            agent: "a/1",
+            facts: "{}",
+            files,
+            findings: &[],
+        };
+        store.accept_report(&report, now).expect("accept_report")
+    }
+
+    const H1: &str = "33bf0cf98fa40b5f4c44e053816b75487245c5fc01e66dd65470e2e70cbee0d8";
+    const H2: &str = "8978bc0aa6aece0fc74de901712dd160c804917cda1ade8afb59f29f526ff94a";
+
+    fn htaccess(hash: &str) -> String {
+        format!(r#"{{".htaccess":"{hash}"}}"#)
+    }
+
+    fn integrity_incidents(store: &Store) -> Vec<Incident> {
+        store
+            .open_incidents()
+            .expect("open")
+            .into_iter()
+            .filter(|i| i.check_name == "agent:integrity")
+            .collect()
+    }
+
+    #[test]
+    fn the_first_report_sets_the_baseline_and_a_change_opens_a_warning() {
+        let (_dir, mut store) = temp_store();
+        store.add_key("site-a", &KEY_A, 0).expect("add");
+        // Sans empreintes : pas de référence.
+        assert_eq!(
+            send_files(&mut store, 1, "{}", 100),
+            ReportOutcome::Accepted
+        );
+        assert_eq!(store.baseline("site-a").expect("baseline"), None);
+
+        assert_eq!(
+            send_files(&mut store, 2, &htaccess(H1), 200),
+            ReportOutcome::Accepted
+        );
+        assert_eq!(
+            store.baseline("site-a").expect("baseline"),
+            Some((htaccess(H1), 200))
+        );
+        assert!(integrity_incidents(&store).is_empty());
+
+        send_files(&mut store, 3, &htaccess(H2), 300);
+        let open = integrity_incidents(&store);
+        assert_eq!(open.len(), 1);
+        assert_eq!(open[0].severity, Severity::Warning);
+        assert_eq!(open[0].key, "site-a/agent:integrity/modified:.htaccess");
+        // Toujours différent : le même incident reste ouvert.
+        send_files(&mut store, 4, &htaccess(H2), 400);
+        assert_eq!(integrity_incidents(&store), open);
+        // Restauré : clos.
+        send_files(&mut store, 5, &htaccess(H1), 500);
+        assert!(integrity_incidents(&store).is_empty());
+    }
+
+    #[test]
+    fn accepting_the_baseline_closes_the_drift() {
+        let (_dir, mut store) = temp_store();
+        store.add_key("site-a", &KEY_A, 0).expect("add");
+        assert!(!store.accept_baseline("site-a", 50).expect("no report"));
+        send_files(&mut store, 1, &htaccess(H1), 100);
+        send_files(&mut store, 2, &htaccess(H2), 200);
+        assert_eq!(integrity_incidents(&store).len(), 1);
+
+        assert!(store.accept_baseline("site-a", 250).expect("accept"));
+        assert!(integrity_incidents(&store).is_empty());
+        assert_eq!(
+            store.baseline("site-a").expect("baseline"),
+            Some((htaccess(H2), 250))
+        );
+        send_files(&mut store, 3, &htaccess(H2), 300);
+        assert!(integrity_incidents(&store).is_empty());
+    }
+
+    #[test]
+    fn new_paths_join_the_baseline_and_removing_the_key_drops_it() {
+        let (_dir, mut store) = temp_store();
+        store.add_key("site-a", &KEY_A, 0).expect("add");
+        send_files(&mut store, 1, &htaccess(H1), 100);
+        let both = format!(r#"{{".htaccess":"{H1}","index.php":"{H2}"}}"#);
+        send_files(&mut store, 2, &both, 200);
+        assert!(integrity_incidents(&store).is_empty());
+        assert_eq!(
+            store.baseline("site-a").expect("baseline"),
+            Some((both, 100))
+        );
+        assert!(store.remove_key("site-a").expect("remove"));
+        assert_eq!(store.baseline("site-a").expect("baseline"), None);
     }
 
     #[test]
