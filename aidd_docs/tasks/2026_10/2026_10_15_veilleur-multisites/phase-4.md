@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: done
 ---
 
 <!-- Fill or omit these sections; never add, rename, or reorder one. -->
@@ -129,7 +129,7 @@ journey
 
 1. `deploy-agent.mjs` : envoyer vers `~/vigie-agent/` en reprenant les garde-fous de déploiement (prévisualisation par défaut, refus si la destination est sous `~/www/`).
 2. Lancer `--init` en SSH, puis enregistrer la clé publique sur le veilleur avec `~/vigie/bin/vigie site add site-a --pubkey`.
-3. Faire créer par l'utilisateur la tâche planifiée `*/5 * * * * php ~/vigie-agent/vigie-agent.php` dans le panneau du compte `<compte-site-a>`.
+3. Faire créer par l'utilisateur la tâche planifiée `*/5 * * * * php /home/<compte-site-a>/vigie-agent/vigie-agent.php` dans le panneau du compte `<compte-site-a>`.
 4. Documenter la pose, la rotation de clé et le retrait dans `docs/agent-php.md`.
 
 ## Test acceptance criteria
