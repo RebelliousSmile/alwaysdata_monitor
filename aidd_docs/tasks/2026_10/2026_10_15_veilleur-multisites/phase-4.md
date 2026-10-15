@@ -1,5 +1,5 @@
 ---
-status: pending
+status: in-progress
 ---
 
 <!-- Fill or omit these sections; never add, rename, or reorder one. -->
@@ -13,7 +13,7 @@ status: pending
 ```txt
 vigie/
 ├── agent/php/
-│   ├── vigie-agent.php              ✅ fichier unique : refus hors CLI, --init, contrôles en lecture seule, rapport signé
+│   ├── vigie-agent.php                ✅ fichier unique : refus hors CLI, --init, contrôles en lecture seule, rapport signé
 │   ├── config.example.json            ✅ site, endpoint, root, kind, critical[], must_contain[], uploads
 │   └── tests/
 │       ├── run.php                    ✅ exécuteur minimal, sans Composer, code 1 en cas d'échec
@@ -23,10 +23,18 @@ vigie/
 │   ├── fixtures/php-signed-report.json ✅ rapport signé par PHP avec une graine fixe, vérifié côté Rust
 │   └── interop.rs                     ✅ ed25519-dalek vérifie la signature produite par sodium
 ├── src/
-│   ├── report.rs                      ✏️ faits v1 : empreintes des fichiers critiques, PHP dans uploads, versions
-│   └── facts.rs                       ✅ comparaison avec le rapport précédent : fichier modifié, nouveau PHP dans uploads
-├── scripts/deploy-agent.mjs           ✅ envoie l'agent hors du webroot, prévisualisation par défaut, --apply
-└── docs/agent-php.md                  ✅ pose, enregistrement de la clé, tâche planifiée, retrait
+│   ├── report.rs                      ✏️ champ `files` (empreintes des fichiers critiques), check `integrity` réservé au veilleur
+│   ├── facts.rs                       ✅ comparaison avec la référence du site : fichier modifié (le PHP dans uploads est signalé par l'agent à chaque rapport)
+│   ├── store.rs                       ✏️ migration 4 : `reports.files`, table `baselines` ; `accept_baseline`
+│   ├── ingest.rs                      ✏️ transmet les empreintes au store
+│   └── main.rs                        ✏️ `vigie site accept <site>`
+├── deploy/targets.example.json        ✏️ cible `site-a-agent`
+├── scripts/deploy-agent.mjs           ✅ envoie l'agent hors du webroot, prévisualisation par défaut, --apply, php -l distant
+├── docs/protocole-agent.md            ✏️ champ `files`, intégrité, `site accept`
+├── docs/agent-php.md                  ✅ pose, enregistrement de la clé, tâche planifiée, rotation, retrait
+└── README.md                          ✏️ commandes, intégrité, tests PHP, déploiement de l'agent
+scripts/deploy-lib.mjs                 ✏️ validateAgentTarget, assertOutsideWebroot, extractAgentVersion (+ tests)
+.github/workflows/vigie.yml            ✏️ tests de l'agent sous php:8.1-cli épinglé par digest
 ```
 
 ## User Journey

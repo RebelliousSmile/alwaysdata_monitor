@@ -170,6 +170,7 @@ pub fn ingest(
                 seq: valid.seq,
                 agent: &valid.agent,
                 facts: &valid.facts,
+                files: &valid.files,
                 findings: &valid.findings,
             },
             now,

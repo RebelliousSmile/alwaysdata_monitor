@@ -225,6 +225,59 @@ async fn an_accepted_report_opens_incidents_that_only_tick_announces() {
 }
 
 #[tokio::test]
+async fn a_critical_file_that_changes_opens_a_warning_until_accepted() {
+    let key = signing_key(7);
+    let h = Harness::new(&key);
+    let with_htaccess = |seq: u64, at: i64, hash: &str| {
+        let mut value = report(seq, at, json!([]));
+        value["files"] = json!({".htaccess": hash, "wp-config.php": null});
+        value
+    };
+    let before = "33bf0cf98fa40b5f4c44e053816b75487245c5fc01e66dd65470e2e70cbee0d8";
+    let after = "8978bc0aa6aece0fc74de901712dd160c804917cda1ade8afb59f29f526ff94a";
+
+    h.set_now(T0 + 60);
+    let first = with_htaccess(1, T0 + 60, before);
+    assert_eq!(h.send(&key, &first).await.0, StatusCode::NO_CONTENT);
+    assert!(h.open_keys().is_empty());
+
+    h.set_now(T0 + 400);
+    let second = with_htaccess(2, T0 + 400, after);
+    assert_eq!(h.send(&key, &second).await.0, StatusCode::NO_CONTENT);
+    assert_eq!(h.open_keys(), ["site-a/agent:integrity/modified:.htaccess"]);
+    let open = h.store().open_incidents().expect("incidents");
+    assert_eq!(open[0].severity, vigie::finding::Severity::Warning);
+    assert_eq!(h.tick().emails_sent, 1);
+    let sent = h.mail.take();
+    assert!(sent[0].body.contains(".htaccess"), "{}", sent[0].body);
+
+    // Modification voulue : acceptée, l'incident est clos et ne revient pas.
+    assert!(
+        h.store()
+            .accept_baseline("site-a", T0 + 500)
+            .expect("accept")
+    );
+    assert!(h.open_keys().is_empty());
+    h.set_now(T0 + 700);
+    let third = with_htaccess(3, T0 + 700, after);
+    assert_eq!(h.send(&key, &third).await.0, StatusCode::NO_CONTENT);
+    assert!(h.open_keys().is_empty());
+}
+
+#[tokio::test]
+async fn an_agent_cannot_report_the_integrity_check_itself() {
+    let key = signing_key(7);
+    let h = Harness::new(&key);
+    h.set_now(T0 + 60);
+    let forged = report(
+        1,
+        T0 + 60,
+        json!([{"check": "integrity", "severity": "info", "key": "x", "detail": "x"}]),
+    );
+    assert_silent_404(h.send(&key, &forged).await, "contrôle réservé");
+}
+
+#[tokio::test]
 async fn every_refusal_is_the_same_silent_404_and_stores_nothing() {
     let key = signing_key(7);
     let h = Harness::new(&key);

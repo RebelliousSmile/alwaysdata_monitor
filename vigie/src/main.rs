@@ -93,6 +93,12 @@ enum SiteAction {
         #[arg(long)]
         pubkey: String,
     },
+    /// Prend les empreintes du dernier rapport comme référence : à lancer
+    /// après une modification voulue d'un fichier critique
+    Accept {
+        /// Identifiant du site
+        id: String,
+    },
     /// Retire la clé de l'agent et l'état de ses rapports
     Remove {
         /// Identifiant du site
@@ -257,6 +263,16 @@ fn site(config: &config::Config, action: SiteAction) -> anyhow::Result<()> {
                 KeyOutcome::Unchanged => bail!("{id} : cette clé est déjà la clé actuelle"),
                 other => bail!("issue inattendue : {other:?}"),
             }
+        }
+        SiteAction::Accept { id } => {
+            require_site(config, &id)?;
+            let mut store = Store::open(&config.database)?;
+            if !store.accept_baseline(&id, now)? {
+                bail!("{id} n'a encore envoyé aucun rapport : rien à accepter");
+            }
+            println!(
+                "empreintes actuelles de {id} prises comme référence : incidents d'intégrité clos"
+            );
         }
         SiteAction::Remove { id, yes } => {
             if !config.database.is_file() {
