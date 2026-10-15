@@ -19,8 +19,9 @@ est public.
 | Relance de `serve` après kill | **Fait** : `kill -9` du PID 3259, relancé en PID 3336 en moins de 8 s |
 | Relance après reboot | **Fait** le 2026-10-15 (extinction puis rallumage depuis la console Hetzner) : démarrage à 15:52:12 UTC, `serve` actif à 15:52:11 en PID 1048, `caddy`, `ufw`, `ssh.socket` et le timer actifs, premier tick à 15:53:00, `/health` en 200, `status` en code 0, 8080 toujours injoignable de l'extérieur |
 | Cloisonnement | **À mesurer** (tâche 5, une fois Hermes installé) |
-| sodium sur le site A | **À mesurer** (pas d'accès SSH au compte du site A depuis le poste) |
-| Sortie IPv4 et IPv6 du site A | **À mesurer** |
+| sodium sur le site A | **Fait** le 2026-10-15 : PHP 8.3.35 en ligne de commande (`php -r 'echo PHP_VERSION;'`), `sodium` dans `php -m` ; le CLI affiche aussi `Warning: Module "intl" is already loaded` à chaque lancement |
+| Sortie IPv4 et IPv6 du site A | **Fait** le 2026-10-15 : `curl -4` et `curl -6` vers un site externe en 200 depuis le compte du site A |
+| `/health` en IPv4 et IPv6 depuis le poste | **Fait** le 2026-10-15 : `curl -4` et `curl -6` en 200 |
 
 ## Installation
 

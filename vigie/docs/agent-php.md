@@ -48,6 +48,10 @@ Les exemples visent le site A et le compte `<compte-site-a>`. Les commandes
    wsl ssh-copy-id -i ~/.ssh/vigie_agent.pub <compte-site-a>@<hote-ssh-alwaysdata>
    ```
 
+   Une clé WSL déjà autorisée sur le compte, celle d'un déploiement du site par
+   exemple, peut servir à la place : indiquer son chemin dans `sshKey`. Noter
+   ce choix, car au retrait cette clé reste en place (voir [Retrait](#retrait)).
+
 2. **Envoi de l'agent** dans `~/vigie-agent/vigie-agent.php` :
 
    ```powershell
@@ -92,16 +96,54 @@ Les exemples visent le site A et le compte `<compte-site-a>`. Les commandes
    php ~/vigie-agent/vigie-agent.php --dry-run
    ```
 
-7. **Tâche planifiée**, à créer dans le panneau du compte `<compte-site-a>` :
+   Attendu : `findings: []` et le code 0. Un constat à ce stade existe déjà en
+   production : le traiter avant la tâche planifiée, sinon le premier rapport
+   ouvre un incident (voir [Extension qui range du PHP dans uploads](#extension-qui-range-du-php-dans-uploads)).
+
+7. **Tâche planifiée**, à créer dans le panneau du compte `<compte-site-a>`
+   (Avancé → Tâches planifiées, type commande, toutes les 5 minutes) :
 
    ```txt
-   */5 * * * * php ~/vigie-agent/vigie-agent.php
+   php /home/<compte-site-a>/vigie-agent/vigie-agent.php
    ```
+
+   Chemin absolu : rien ne garantit que la tâche démarre dans le dossier
+   personnel. Chaque passage est journalisé, avec son code de retour, dans
+   `~/admin/logs/jobs/<année>/<id-de-tâche>-<date>.log`. Si le PHP du compte
+   affiche un avertissement au démarrage (`Module "intl" is already loaded`
+   par exemple), il part dans la sortie de chaque passage sans changer le
+   code de retour.
 
    Le premier rapport accepté pose la référence des empreintes. Vérifier sur
    le veilleur que `~/vigie/bin/vigie status` montre un rapport de moins de
    6 minutes pour le site. Au-delà de `agent_silence` (900 s par défaut) sans
    rapport accepté, le veilleur ouvre un incident `heartbeat`.
+
+## Extension qui range du PHP dans uploads
+
+Certaines extensions écrivent leurs propres fichiers `.php` sous `uploads`.
+C'est le cas de Sucuri Scanner : ses fichiers de données sont du PHP, dans
+`wp-content/uploads/sucuri/`. L'agent les signale comme `uploads-php`
+critiques, à raison : un dossier où PHP peut écrire et que le web sert est
+exactement l'endroit où l'on cherche un webshell. Ne pas les exempter dans
+l'agent, sortir les données du webroot :
+
+1. Sauvegarder `wp-config.php` (copie en 0600 hors du webroot).
+2. Copier le dossier hors du webroot, par exemple `~/sucuri-data` (0700).
+3. Déclarer ce dossier dans `wp-config.php`, avant la ligne
+   `/* That's all, stop editing! */` :
+
+   ```php
+   define( 'SUCURI_DATA_STORAGE', '/home/<compte-site-a>/sucuri-data' );
+   ```
+
+4. Vérifier `php -l wp-config.php` et que le site répond, puis supprimer
+   `wp-content/uploads/sucuri/`.
+5. Relancer `--dry-run` : les constats `uploads-php` ont disparu.
+
+La constante vit dans `wp-config.php` : un `wp-config.php` réécrit (nouvelles
+clés et salts, restauration) doit la reprendre, sinon Sucuri recrée ses
+fichiers dans `uploads` et l'agent ouvre un incident critique.
 
 ## Modification voulue d'un fichier critique
 
@@ -151,8 +193,9 @@ dès maintenant.
    rapports et la référence des empreintes sont effacés ; les incidents
    `agent:` ouverts sont clos au `tick` suivant.
 3. Sur le compte du site : `rm -r ~/vigie-agent ~/.vigie-agent`.
-4. Retirer la cible de `vigie/deploy/targets.json` et la clé publique
-   `vigie_agent` de `~/.ssh/authorized_keys` du compte.
+4. Retirer la cible de `vigie/deploy/targets.json` et, si la clé SSH était
+   dédiée à l'agent, la clé publique `vigie_agent` de `~/.ssh/authorized_keys`
+   du compte. Une clé partagée avec le déploiement du site reste en place.
 
 ## Tests en local
 
