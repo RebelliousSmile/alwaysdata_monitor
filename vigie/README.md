@@ -115,6 +115,12 @@ php -d extension=sodium vigie/agent/php/tests/run.php
 php -d extension=sodium vigie/agent/php/tests/make-interop-fixture.php
 ```
 
+La reprise de l'incident du 2026-09-07 (promesse : alerte sous 10 min) se
+rejoue en heure logique par `tests/replay_2026_09_07.rs`, et en processus réels
+(`vigie serve`, agent PHP, `tick` chaque minute) par
+`node vigie/scripts/replay-incident.mjs`, en 12 à 15 min. Procédure et
+résultats datés : [`docs/reception.md`](./docs/reception.md).
+
 Sous Windows, l'antivirus peut mettre en quarantaine un fichier de test qui
 ressemble à un webshell (« Failed to open stream: Invalid argument ») : les
 fixtures ne contiennent que du PHP anodin.
