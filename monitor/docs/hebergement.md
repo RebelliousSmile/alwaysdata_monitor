@@ -11,8 +11,11 @@ est public.
 | VPS du veilleur | Hetzner CX23, Ubuntu 26.04.1 LTS, x86_64, Helsinki : **créé** le 2026-10-15, pare-feu Hetzner (22, 80, 443, ICMP) attaché |
 | Installation | `deploy/provision.sh` **lancé** le 2026-10-15 : sshd par clé seulement (`sshd -T`), mot de passe refusé (`Permission denied (publickey)`), `ufw` actif sur 22, 80 et 443, `monitor` en 0700 hors sudo sauf `systemctl restart monitor-serve.service` (`stop caddy` refusé), certificat Let's Encrypt obtenu par Caddy, `serve` ignoré faute de binaire (`/health` en 502) |
 | Relevé système du VPS | **À mesurer** après l'installation |
-| SMTP authentifié sur 587 vers le relais Alwaysdata | **À mesurer** depuis le VPS |
-| Relance de `serve` après kill et reboot, cloisonnement | **À mesurer** (tâche 5) |
+| SMTP authentifié sur 587 vers le relais Alwaysdata | **Fait** le 2026-10-15 depuis le VPS : STARTTLS exigé (`--ssl-reqd`), authentification par la boîte d'alerte, code SMTP 250, message reçu par le destinataire ; les relais `smtp-<compte>.alwaysdata.net` de deux comptes résolvent vers la même adresse (relais communs, l'authentification se fait par la boîte et non par le compte) |
+| Premier déploiement | **Fait** le 2026-10-15 : `monitor 0.1.0`, `/health` en 200 avec un tick postérieur à la bascule, route inconnue en 404 sans corps, HTTP redirigé en 308 vers HTTPS, `serve` sur `127.0.0.1:8080` seulement (8080 injoignable de l'extérieur), timer à la minute, base en 0600 dans `data/` |
+| Relance de `serve` après kill | **Fait** : `kill -9` du PID 3259, relancé en PID 3336 en moins de 8 s |
+| Relance après reboot | **Fait** le 2026-10-15 (extinction puis rallumage depuis la console Hetzner) : démarrage à 15:52:12 UTC, `serve` actif à 15:52:11 en PID 1048, `caddy`, `ufw`, `ssh.socket` et le timer actifs, premier tick à 15:53:00, `/health` en 200, `status` en code 0, 8080 toujours injoignable de l'extérieur |
+| Cloisonnement | **À mesurer** (tâche 5, une fois Hermes installé) |
 | sodium sur le site A | **À mesurer** (pas d'accès SSH au compte du site A depuis le poste) |
 | Sortie IPv4 et IPv6 du site A | **À mesurer** |
 
@@ -77,8 +80,10 @@ Le mot de passe vit dans `~monitor/monitor/smtp-password` (0600, propriétaire
 `monitor`), référencé par `password_file` (phase 2), jamais dans `config.toml`
 ni dans le dépôt.
 
-À compléter : envoi de test depuis le VPS, sans mot de passe sur la ligne de
-commande :
+Envoi de test depuis le VPS (2026-10-15, code SMTP 250), sans mot de passe sur
+la ligne de commande : le `netrc` est généré en 0600 dans un dossier temporaire
+de `~/monitor`, à partir de `smtp-password`, puis supprimé ; pas de `-v`, qui
+afficherait l'échange `AUTH` :
 
 ```console
 $ curl --url smtp://smtp-<compte>.alwaysdata.net:587 --ssl-reqd \
