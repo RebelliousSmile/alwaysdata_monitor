@@ -178,8 +178,16 @@ async function healthAfter(url, since) {
   return { ok: false, last }
 }
 
+// Un arrêt silencieux a déjà laissé le verrou en place (2026-10-15, cause non
+// établie) : au moins nommer l'étape et le code de sortie.
+let step = 'envoi'
+let finished = false
+process.on('exit', (code) => {
+  if (!finished && code !== 1) console.error(`✖ Arrêt inattendu pendant « ${step} » (code ${code})`)
+})
+
 let failed = false
-await withRemoteLock(ssh, target, async () => {
+const swapAt = await withRemoteLock(ssh, target, async () => {
   const staged = `${target.binary}.new`
   wsl(['scp', '-q', ...sshOpts, localBinary, `${target.remote}:${staged}`])
   const stagedVersion = ssh(`chmod 755 ${staged} && sha256sum ${staged} | cut -d' ' -f1 && ${staged} --version`).trim().split('\n')
@@ -197,7 +205,7 @@ await withRemoteLock(ssh, target, async () => {
 
   // Le timer lance déjà le nouveau binaire pour tick ; serve garde l'ancien en
   // mémoire tant qu'il n'est pas redémarré.
-  const rollback = `mv -f ${target.binary}.prev ${target.binary} && ${RESTART_SERVE}`
+  step = 'redémarrage de serve'
   try {
     ssh(RESTART_SERVE)
     console.log('serve redémarré.')
@@ -206,29 +214,32 @@ await withRemoteLock(ssh, target, async () => {
     // Sans redémarrage, /health rapporterait l'ancien serve : pas de preuve à chercher.
     failed = true
     console.error(`✖ Redémarrage de serve refusé ou en échec : ${String(error.stderr ?? error.message).trim()}`)
-  }
-
-  if (failed) {
     console.error(`Relancer à la main : wsl ssh -i ${target.sshKey} ${target.remote} "${RESTART_SERVE}"`)
   }
-  else if (target.healthUrl) {
-    console.log(`Preuve HTTP : ${target.healthUrl} (jusqu'à 3 min, le temps d'un tick du nouveau binaire)`)
-    const proof = await healthAfter(target.healthUrl, swapAt)
-    if (proof.ok) {
-      console.log(`/health : ${proof.last}`)
-    }
-    else {
-      failed = true
-      console.error(`✖ ${target.healthUrl} : aucun tick postérieur à la bascule en 3 min (dernière réponse : ${proof.last})`)
-    }
-  }
-  else {
-    console.warn('⚠ healthUrl absent de la cible : /health non vérifié.')
-  }
-  if (remoteSha) {
-    console.log(`\nRetour arrière :\n  wsl ssh -i ${target.sshKey} ${target.remote} "${rollback}"`)
-  }
+  return swapAt
 })
 
+// Hors du verrou : la preuve n'écrit rien sur le veilleur, et un arrêt pendant
+// ces 3 minutes ne doit pas bloquer le déploiement suivant.
+if (!failed && target.healthUrl) {
+  step = 'preuve HTTP'
+  console.log(`Preuve HTTP : ${target.healthUrl} (jusqu'à 3 min, le temps d'un tick du nouveau binaire)`)
+  const proof = await healthAfter(target.healthUrl, swapAt)
+  if (proof.ok) {
+    console.log(`/health : ${proof.last}`)
+  }
+  else {
+    failed = true
+    console.error(`✖ ${target.healthUrl} : aucun tick postérieur à la bascule en 3 min (dernière réponse : ${proof.last})`)
+  }
+}
+else if (!failed) {
+  console.warn('⚠ healthUrl absent de la cible : /health non vérifié.')
+}
+if (remoteSha) {
+  console.log(`\nRetour arrière :\n  wsl ssh -i ${target.sshKey} ${target.remote} "mv -f ${target.binary}.prev ${target.binary} && ${RESTART_SERVE}"`)
+}
+
+finished = true
 if (failed) process.exit(1)
 console.log(`\nDéployé : ${localVersion} (${shortCommit}) sur ${target.name}.`)
