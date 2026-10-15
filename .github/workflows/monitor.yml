@@ -21,8 +21,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Windows dès la phase 1 : la reprise locale (phase 5) et le poste de
-        # pilotage (phase 6) utilisent le build Windows.
+        # Windows dès la phase 1 : la reprise locale (phase 5) utilise le build Windows.
         os: [ubuntu-24.04, windows-latest]
     runs-on: ${{ matrix.os }}
     defaults:
