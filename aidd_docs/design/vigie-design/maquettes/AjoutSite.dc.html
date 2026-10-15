@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Vigie — ajouter un site</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0F1214}
+a{color:#7FC4F5}a:hover{color:#B5DDFA}
+:focus-visible{outline:2px solid #5FD3BE;outline-offset:2px}
+</style>
+</helmet>
+<div style="position: relative; width: 390px; min-height: 844px; box-sizing: border-box; background: #0F1214; color: #E6E8EA; font-family: 'IBM Plex Sans', system-ui, sans-serif; font-size: 15px; line-height: 1.45; display: flex; flex-direction: column">
+
+  <header style="display: flex; align-items: center; gap: 4px; padding: 8px; background: #13171A; border-bottom: 1px solid #262C32">
+    <a href="Main.dc.html" aria-label="Fermer" style="width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; color: #B8C0C7"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"></path></svg></a>
+    <div style="flex: 1"><div style="font-weight: 600">Ajouter un site</div><div style="font-size: 12px; color: #9AA3AB">étape {{step}} sur 4 · {{stepName}}</div></div>
+  </header>
+  <div role="progressbar" aria-valuemin="1" aria-valuemax="4" aria-valuenow="{{step}}" aria-label="Progression" style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; padding: 10px 16px 0">
+    <sc-for list="{{dots}}" as="d" hint-placeholder-count="4"><span style="height: 4px; border-radius: 2px; {{d.style}}"></span></sc-for>
+  </div>
+
+  <main style="flex: 1; padding: 20px 16px 24px; display: flex; flex-direction: column; gap: 14px">
+    <sc-if value="{{s1}}" hint-placeholder-val="{{true}}">
+      <h1 style="margin: 0; font-size: 22px; font-weight: 600">Quel site ?</h1>
+      <div style="display: flex; flex-direction: column; gap: 6px">
+        <label for="u" style="font-size: 13px; color: #B8C0C7">Adresse</label>
+        <input id="u" type="url" value="https://www.[client-4].fr" style="height: 48px; padding: 0 12px; background: #171B1F; border: 1px solid #626C76; border-radius: 10px; color: #E6E8EA; font-family: 'IBM Plex Mono', monospace; font-size: 15px">
+      </div>
+      <div style="font-size: 13px; color: #9AA3AB">Vigie commence par une sonde HTTP : le site doit répondre.</div>
+    </sc-if>
+
+    <sc-if value="{{s2}}" hint-placeholder-val="{{false}}">
+      <h1 style="margin: 0; font-size: 22px; font-weight: 600">Accès SSH</h1>
+      <div style="display: flex; flex-direction: column; gap: 6px"><label for="h" style="font-size: 13px; color: #B8C0C7">Hôte</label><input id="h" type="text" value="ssh-[compte].alwaysdata.net" style="height: 48px; padding: 0 12px; background: #171B1F; border: 1px solid #626C76; border-radius: 10px; color: #E6E8EA; font-family: 'IBM Plex Mono', monospace; font-size: 13px"></div>
+      <div style="display: flex; flex-direction: column; gap: 6px"><label for="us" style="font-size: 13px; color: #B8C0C7">Utilisateur</label><input id="us" type="text" value="[compte]" style="height: 48px; padding: 0 12px; background: #171B1F; border: 1px solid #626C76; border-radius: 10px; color: #E6E8EA; font-family: 'IBM Plex Mono', monospace; font-size: 13px"></div>
+      <div style="display: flex; flex-direction: column; gap: 6px"><label for="k" style="font-size: 13px; color: #B8C0C7">Clé</label><select id="k" style="height: 48px; padding: 0 10px; background: #171B1F; border: 1px solid #626C76; border-radius: 10px; color: #E6E8EA; font: inherit"><option>vigie_ed25519</option><option>Créer une nouvelle clé</option></select></div>
+      <div style="font-size: 13px; color: #9AA3AB">La clé publique doit être ajoutée dans Alwaysdata › Accès distant › SSH. Vigie n'a besoin d'écrire que dans .htaccess et robots.txt.</div>
+    </sc-if>
+
+    <sc-if value="{{s3}}" hint-placeholder-val="{{false}}">
+      <h1 style="margin: 0; font-size: 22px; font-weight: 600">Ce que Vigie a trouvé</h1>
+      <div style="background: #171B1F; border: 1px solid #262C32; border-radius: 12px">
+        <sc-for list="{{found}}" as="f" hint-placeholder-count="6">
+          <div style="display: flex; gap: 10px; padding: 10px 14px; border-top: {{f.sep}}">
+            <span style="{{f.badge}}" aria-hidden="true">{{f.sym}}</span>
+            <div style="flex: 1; min-width: 0"><div style="font-size: 15px">{{f.k}}</div><div style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #9AA3AB; word-break: break-all">{{f.v}}</div></div>
+          </div>
+        </sc-for>
+      </div>
+      <div style="font-size: 13px; color: #9AA3AB">Un chemin faux se corrige ensuite dans les paramètres du site.</div>
+    </sc-if>
+
+    <sc-if value="{{s4}}" hint-placeholder-val="{{false}}">
+      <h1 style="margin: 0; font-size: 22px; font-weight: 600">Contrôles proposés</h1>
+      <div style="background: #171B1F; border: 1px solid #262C32; border-radius: 12px">
+        <sc-for list="{{sets}}" as="s" hint-placeholder-count="3">
+          <div style="display: flex; align-items: center; gap: 12px; min-height: 60px; padding: 8px 14px; border-top: {{s.sep}}">
+            <input id="{{s.id}}" type="checkbox" checked="{{s.on}}" disabled="{{s.fixed}}" style="width: 22px; height: 22px; accent-color: #3FB8A4">
+            <label for="{{s.id}}" style="flex: 1"><span style="display: block">{{s.k}}</span><span style="display: block; font-size: 12px; color: #9AA3AB">{{s.v}}</span></label>
+          </div>
+        </sc-for>
+      </div>
+      <div style="padding: 12px; background: #14263A; border-radius: 10px; font-size: 13px; color: #C9E3F8">À l'ajout, Vigie lit les 30 derniers jours de logs disponibles et passe tous les contrôles. Compter quelques minutes : le site apparaît « en cours de première lecture » dans Mes sites.</div>
+    </sc-if>
+  </main>
+
+  <div style="display: flex; gap: 8px; padding: 12px 16px 20px; border-top: 1px solid #262C32; background: #13171A">
+    <sc-if value="{{canBack}}" hint-placeholder-val="{{false}}"><button type="button" onClick="{{back}}" style="flex: 1; height: 48px; background: transparent; border: 1px solid #626C76; border-radius: 10px; color: #E6E8EA; font: inherit; cursor: pointer">Retour</button></sc-if>
+    <button type="button" onClick="{{next}}" style="flex: 2; height: 48px; border: 0; border-radius: 10px; background: #3FB8A4; color: #0B1F1B; font: inherit; font-weight: 600; cursor: pointer">{{nextLabel}}</button>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":1500}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { step: 3 };
+  }
+  renderVals() {
+    var self = this;
+    var s = this.state.step;
+    var names = ['', 'adresse', 'connexion', 'détection', 'contrôles'];
+    var ok = 'flex: none; width: 24px; height: 24px; border-radius: 7px; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 13px; background: #12302B; color: #5FD3BE';
+    var info = 'flex: none; width: 24px; height: 24px; border-radius: 7px; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 13px; background: #14263A; color: #8CC8F5';
+    var sep = function (l) { return l.map(function (x, i) { x.sep = i === 0 ? '0' : '1px solid #22282D'; return x; }); };
+    return {
+      step: s, stepName: names[s],
+      dots: [1, 2, 3, 4].map(function (i) { return { style: 'background: ' + (i <= s ? '#3FB8A4' : '#2F363D') }; }),
+      s1: s === 1, s2: s === 2, s3: s === 3, s4: s === 4, canBack: s > 1,
+      nextLabel: s === 1 ? 'Sonder le site' : s === 2 ? 'Se connecter' : s === 3 ? 'Continuer' : 'Ajouter et lancer la première lecture',
+      next: function () { if (s < 4) self.setState({ step: s + 1 }); },
+      back: function () { self.setState({ step: s - 1 }); },
+      found: sep([
+        { sym: '✓', badge: ok, k: 'Le site répond', v: 'https://www.[client-4].fr · 200 · 0,3 s' },
+        { sym: '✓', badge: ok, k: 'PrestaShop 8.1 détecté', v: 'app/AppKernel.php · 3 domaines dans shop_url' },
+        { sym: '✓', badge: ok, k: 'Logs trouvés', v: '/home/[compte]/admin/logs/ · http, apache, php, sites' },
+        { sym: '✓', badge: ok, k: '.htaccess modifiable', v: '/home/[compte]/www/.htaccess' },
+        { sym: '✓', badge: ok, k: 'robots.txt modifiable', v: '/home/[compte]/www/robots.txt' },
+        { sym: 'i', badge: info, k: 'Compte partagé', v: 'ce compte héberge déjà [client-1].fr et 1 autre site : les ressources seront communes' }
+      ]),
+      sets: sep([
+        { id: 'c1', k: 'Socle commun', v: '9 contrôles · disponibilité, HTTPS, en-têtes, fichiers exposés', on: true, fixed: true },
+        { id: 'c2', k: 'Jeu PrestaShop', v: '4 contrôles · modules, debug, facettes, filtres combinés', on: true, fixed: false },
+        { id: 'c3', k: 'Robots d’IA', v: 'bloquer l’entraînement des modèles (17 robots)', on: true, fixed: false }
+      ])
+    };
+  }
+}
+</script>
+</body>
+</html>

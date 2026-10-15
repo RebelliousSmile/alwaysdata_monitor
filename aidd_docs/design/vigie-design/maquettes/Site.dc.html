@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Vigie — trafic, visiteurs</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0F1214}
+a{color:#7FC4F5}a:hover{color:#B5DDFA}
+:focus-visible{outline:2px solid #5FD3BE;outline-offset:2px}
+</style>
+</helmet>
+<div style="position: relative; width: 390px; min-height: 844px; box-sizing: border-box; background: #0F1214; color: #E6E8EA; font-family: 'IBM Plex Sans', system-ui, sans-serif; font-size: 15px; line-height: 1.45">
+
+  <header style="position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 4px; padding: 8px; background: #13171A; border-bottom: 1px solid #262C32">
+    <a href="Main.dc.html" aria-label="Retour à mes sites" style="width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; color: #B8C0C7"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"></path></svg></a>
+    <div style="flex: 1; min-width: 0">
+      <div style="font-family: 'IBM Plex Mono', monospace; font-size: 15px">[client-1].fr</div>
+      <div style="font-size: 12px; color: #9AA3AB">PrestaShop 8 · lu il y a 2 min</div>
+    </div>
+    <button type="button" aria-label="Relire maintenant" style="width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; background: transparent; border: 0; color: #5FD3BE; cursor: pointer"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.6-6.4"></path><path d="M21 3v6h-6"></path></svg></button>
+    <a href="Parametres.dc.html" aria-label="Paramètres du site" style="width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; color: #B8C0C7"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12"></path><circle cx="16" cy="6" r="2"></circle><circle cx="10" cy="12" r="2"></circle><circle cx="18" cy="18" r="2"></circle></svg></a>
+  </header>
+
+  <main style="padding: 16px 16px 24px; display: flex; flex-direction: column; gap: 14px">
+    <h1 style="margin: 0; font-size: 22px; font-weight: 600">Trafic</h1>
+    <nav aria-label="Trafic" style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); background: #171B1F; border: 1px solid #262C32; border-radius: 10px; padding: 3px">
+      <a href="Site.dc.html" aria-current="page" style="height: 44px; display: flex; align-items: center; justify-content: center; border-radius: 8px; background: #2A3138; color: #E6E8EA; font-weight: 600; text-decoration: none">Visiteurs</a>
+      <a href="Journal.dc.html" style="height: 44px; display: flex; align-items: center; justify-content: center; border-radius: 8px; color: #B8C0C7; text-decoration: none">Journal</a>
+      <a href="Blocages.dc.html" style="height: 44px; display: flex; align-items: center; justify-content: center; border-radius: 8px; color: #B8C0C7; text-decoration: none">Blocages</a>
+    </nav>
+
+    <div style="display: flex; align-items: center; gap: 8px">
+      <button type="button" aria-label="Jour précédent" style="width: 44px; height: 44px; flex: none; background: #171B1F; border: 1px solid #626C76; border-radius: 10px; color: #E6E8EA; cursor: pointer; display: flex; align-items: center; justify-content: center"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"></path></svg></button>
+      <button type="button" aria-label="Choisir le jour" style="flex: 1; min-height: 44px; background: transparent; border: 0; color: #E6E8EA; font: inherit; cursor: pointer; text-align: center">
+        <span style="display: block; font-weight: 600">Aujourd'hui · mer. 14 oct.</span>
+        <span style="display: block; font-size: 12px; color: #9AA3AB">log http · 92 140 lignes · lu à 21:48</span>
+      </button>
+      <button type="button" aria-label="Jour suivant" aria-disabled="true" style="width: 44px; height: 44px; flex: none; background: transparent; border: 1px solid #262C32; border-radius: 10px; color: #4A535B; display: flex; align-items: center; justify-content: center"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"></path></svg></button>
+    </div>
+
+    <div role="group" aria-label="Filtrer les visiteurs" style="display: flex; gap: 6px; overflow-x: auto; margin: 0 -16px; padding: 0 16px 4px">
+      <sc-for list="{{filters}}" as="f" hint-placeholder-count="7">
+        <button type="button" aria-pressed="{{f.pressed}}" onClick="{{f.pick}}" style="flex: none; height: 44px; padding: 0 14px; border-radius: 999px; font: inherit; font-size: 15px; cursor: pointer; white-space: nowrap; {{f.style}}">{{f.label}}</button>
+      </sc-for>
+    </div>
+
+    <div style="font-size: 13px; color: #9AA3AB">{{summary}}</div>
+
+    <sc-for list="{{rows}}" as="r" hint-placeholder-count="5">
+      <article style="background: #171B1F; border: 1px solid {{r.border}}; border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 10px">
+        <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 10px">
+          <div style="min-width: 0">
+            <a href="Journal.dc.html" style="display: block; color: #E6E8EA; text-decoration: underline; text-decoration-color: #626C76; text-underline-offset: 3px; {{r.whoStyle}}">{{r.who}}</a>
+            <div style="font-size: 12px; color: #9AA3AB">{{r.sub}}</div>
+          </div>
+          <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex: none">
+            <span style="{{r.chip}}">{{r.cat}}</span>
+            <sc-if value="{{r.isNew}}" hint-placeholder-val="{{false}}"><span style="padding: 1px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; background: #E6E8EA; color: #0F1214">nouveau</span></sc-if>
+          </div>
+        </div>
+        <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; padding: 10px 0; border-top: 1px solid #22282D; border-bottom: 1px solid #22282D">
+          <div><div style="font-family: 'IBM Plex Mono', monospace; font-size: 18px">{{r.req}}</div><div style="font-size: 12px; color: #9AA3AB">requêtes</div></div>
+          <div><div style="font-family: 'IBM Plex Mono', monospace; font-size: 18px">{{r.vol}}</div><div style="font-size: 12px; color: #9AA3AB">transférés</div></div>
+          <div><div style="font-family: 'IBM Plex Mono', monospace; font-size: 15px; line-height: 27px; white-space: nowrap">{{r.span}}</div><div style="font-size: 12px; color: #9AA3AB">actif</div></div>
+        </div>
+        <sc-if value="{{r.busy}}" hint-placeholder-val="{{false}}">
+          <div style="font-size: 13px; color: #F5BC62">Très actif : au-delà de 250 requêtes par jour</div>
+        </sc-if>
+        <div style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #9AA3AB; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">{{r.ua}}</div>
+        <sc-if value="{{r.hasNote}}" hint-placeholder-val="{{false}}">
+          <div style="display: flex; gap: 8px; font-size: 13px; color: #F5BC62"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: none; margin-top: 2px"><path d="M12 3l9.5 17h-19z"></path><path d="M12 10v4M12 17v.5"></path></svg><span>{{r.note}}</span></div>
+        </sc-if>
+
+        <sc-if value="{{r.queued}}" hint-placeholder-val="{{false}}">
+          <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px">
+            <span style="font-size: 13px; color: #F5BC62">{{r.queuedLabel}}</span>
+            <button type="button" onClick="{{r.undo}}" style="height: 44px; padding: 0 16px; background: transparent; border: 1px solid #626C76; border-radius: 10px; color: #E6E8EA; font: inherit; cursor: pointer">Retirer de la file</button>
+          </div>
+        </sc-if>
+        <sc-if value="{{r.idle}}" hint-placeholder-val="{{true}}">
+          <button type="button" onClick="{{r.open}}" style="height: 44px; border: 1px solid #626C76; border-radius: 10px; background: transparent; color: #E6E8EA; font: inherit; font-weight: 500; cursor: pointer">Décider…</button>
+        </sc-if>
+        <sc-if value="{{r.deciding}}" hint-placeholder-val="{{false}}">
+          <div role="radiogroup" aria-label="Décision" style="display: flex; flex-direction: column; gap: 8px">
+            <sc-for list="{{r.options}}" as="o" hint-placeholder-count="3">
+              <button type="button" role="radio" aria-checked="{{o.aria}}" onClick="{{o.pick}}" style="display: flex; gap: 10px; align-items: flex-start; text-align: left; padding: 10px 12px; border-radius: 10px; font: inherit; color: #E6E8EA; cursor: pointer; {{o.box}}">
+                <span style="{{o.dot}}" aria-hidden="true"></span>
+                <span><span style="display: block; font-weight: 500">{{o.label}}</span><span style="display: block; font-size: 13px; color: #B8C0C7">{{o.effect}}</span></span>
+              </button>
+            </sc-for>
+            <div style="display: flex; gap: 8px">
+              <button type="button" onClick="{{r.close}}" style="flex: 1; height: 48px; border: 1px solid #626C76; border-radius: 10px; background: transparent; color: #B8C0C7; font: inherit; cursor: pointer">Annuler</button>
+              <button type="button" onClick="{{r.confirm}}" style="flex: 2; height: 48px; border-radius: 10px; font: inherit; font-weight: 600; cursor: pointer; {{r.confirmStyle}}">{{r.confirmLabel}}</button>
+            </div>
+          </div>
+        </sc-if>
+      </article>
+    </sc-for>
+  </main>
+
+  <div style="position: sticky; bottom: 0; z-index: 2">
+    <sc-if value="{{hasQueue}}" hint-placeholder-val="{{false}}">
+      <div style="background: #1C2227; border-top: 1px solid #626C76; padding: 12px 16px; display: flex; flex-direction: column; gap: 10px">
+        <sc-if value="{{review}}" hint-placeholder-val="{{false}}">
+          <div style="display: flex; flex-direction: column; gap: 6px; max-height: 300px; overflow-y: auto">
+            <sc-if value="{{hasHt}}" hint-placeholder-val="{{false}}">
+              <div style="font-size: 12px; color: #9AA3AB; font-family: 'IBM Plex Mono', monospace">+ www/prestashop/.htaccess</div>
+              <pre style="margin: 0; padding: 10px; background: #0B0E10; border: 1px solid #22282D; border-radius: 8px; font-family: 'IBM Plex Mono', monospace; font-size: 12px; line-height: 1.6; color: #5FD3BE; overflow-x: auto; white-space: pre">{{htText}}</pre>
+            </sc-if>
+            <sc-if value="{{hasRobots}}" hint-placeholder-val="{{false}}">
+              <div style="font-size: 12px; color: #9AA3AB; font-family: 'IBM Plex Mono', monospace">+ www/prestashop/robots.txt</div>
+              <pre style="margin: 0; padding: 10px; background: #0B0E10; border: 1px solid #22282D; border-radius: 8px; font-family: 'IBM Plex Mono', monospace; font-size: 12px; line-height: 1.6; color: #8CC8F5; overflow-x: auto; white-space: pre">{{robotsText}}</pre>
+            </sc-if>
+            <sc-if value="{{hasAllow}}" hint-placeholder-val="{{false}}">
+              <div style="font-size: 13px; color: #B8C0C7">Liste blanche Vigie : <span style="font-family: 'IBM Plex Mono', monospace; color: #E6E8EA">{{allowText}}</span></div>
+            </sc-if>
+            <div style="font-size: 12px; color: #9AA3AB">Sauvegarde datée, écriture, test de l'accueil et de /commande. Retour arrière automatique si un test échoue.</div>
+          </div>
+        </sc-if>
+        <div style="display: flex; gap: 8px; align-items: center">
+          <span style="flex: 1; font-size: 13px">{{queueLabel}}</span>
+          <sc-if value="{{notReview}}" hint-placeholder-val="{{true}}">
+            <button type="button" onClick="{{openReview}}" style="height: 44px; padding: 0 18px; border: 0; border-radius: 10px; background: #3FB8A4; color: #0B1F1B; font: inherit; font-weight: 600; cursor: pointer">Vérifier</button>
+          </sc-if>
+          <sc-if value="{{review}}" hint-placeholder-val="{{false}}">
+            <button type="button" onClick="{{clear}}" style="height: 44px; padding: 0 12px; background: transparent; border: 1px solid #626C76; border-radius: 10px; color: #B8C0C7; font: inherit; cursor: pointer">Tout retirer</button>
+            <button type="button" onClick="{{apply}}" style="height: 44px; padding: 0 18px; border: 0; border-radius: 10px; background: #3FB8A4; color: #0B1F1B; font: inherit; font-weight: 600; cursor: pointer">Appliquer</button>
+          </sc-if>
+        </div>
+      </div>
+    </sc-if>
+    <sc-if value="{{toast}}" hint-placeholder-val="{{false}}">
+      <div role="status" style="display: flex; align-items: center; gap: 10px; background: #12302B; border-top: 1px solid #3FB8A4; padding: 10px 16px">
+        <span style="flex: 1; font-size: 13px; color: #5FD3BE">Appliqué à 21:51 · sauvegarde créée · accueil et /commande répondent 200</span>
+        <button type="button" onClick="{{undoApply}}" style="height: 44px; padding: 0 12px; background: transparent; border: 1px solid #3FB8A4; border-radius: 10px; color: #5FD3BE; font: inherit; cursor: pointer; white-space: nowrap">Annuler · 30 s</button>
+      </div>
+    </sc-if>
+    <nav aria-label="Navigation du site" style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); background: #13171A; border-top: 1px solid #2F363D; padding: 4px 4px 16px">
+      <a href="ATraiter.dc.html" style="position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-height: 56px; color: #B8C0C7; text-decoration: none; font-size: 12px"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 11l3 3 8-8"></path><path d="M20 12v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h9"></path></svg>À traiter<span style="position: absolute; top: 2px; left: 52%; min-width: 20px; height: 20px; padding: 0 6px; box-sizing: border-box; border-radius: 10px; background: #FF8B7D; color: #2A0E0A; font-size: 12px; font-weight: 600; line-height: 20px; text-align: center">5</span></a>
+      <a href="Site.dc.html" aria-current="page" style="position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-height: 56px; color: #5FD3BE; text-decoration: none; font-size: 12px; font-weight: 600"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h4l3-8 4 16 3-8h4"></path></svg>Trafic<span style="position: absolute; top: 2px; left: 52%; min-width: 20px; height: 20px; padding: 0 6px; box-sizing: border-box; border-radius: 10px; background: #F5BC62; color: #2A1E05; font-size: 12px; font-weight: 600; line-height: 20px; text-align: center">{{newCount}}</span></a>
+      <a href="Erreurs.dc.html" style="position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-height: 56px; color: #B8C0C7; text-decoration: none; font-size: 12px"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l9.5 17h-19z"></path><path d="M12 10v4M12 17v.5"></path></svg>Erreurs<span style="position: absolute; top: 2px; left: 52%; min-width: 20px; height: 20px; padding: 0 6px; box-sizing: border-box; border-radius: 10px; background: #FF8B7D; color: #2A0E0A; font-size: 12px; font-weight: 600; line-height: 20px; text-align: center">2</span></a>
+      <a href="Dispo.dc.html" style="position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-height: 56px; color: #B8C0C7; text-decoration: none; font-size: 12px"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.8 5.6a5.5 5.5 0 0 0-7.8 0L12 6.6l-1-1a5.5 5.5 0 0 0-7.8 7.8L12 22l8.8-8.6a5.5 5.5 0 0 0 0-7.8z"></path></svg>Santé<span style="position: absolute; top: 2px; left: 52%; min-width: 20px; height: 20px; padding: 0 6px; box-sizing: border-box; border-radius: 10px; background: #FF8B7D; color: #2A0E0A; font-size: 12px; font-weight: 600; line-height: 20px; text-align: center">3</span></a>
+    </nav>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":2300}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { filter: 'new', queue: {}, deciding: 'a', choice: { a: 'net' }, review: false, toast: false, lastQueue: null };
+  }
+  renderVals() {
+    var self = this;
+    var st = this.state;
+    var natColors = { ia: ['#2A1F3A', '#C9A8F5'], other: ['#22282D', '#C9D1D8'] };
+    var natLabel = { ia: 'Robot IA', seo: 'Robot SEO', moteur: 'Moteur', social: 'Aperçu de liens', inconnu: 'Inconnu' };
+    var chip = function (k) { var c = k === 'ia' ? natColors.ia : natColors.other; return 'padding: 2px 9px; border-radius: 999px; font-size: 12px; font-weight: 500; white-space: nowrap; background: ' + c[0] + '; color: ' + c[1]; };
+    var data = [
+      { id: 'a', kind: 'ip6', cat: 'inconnu', isNew: true, who: '2001:863:753:5e5::/64', sub: 'IPv6 · abonnement Bouygues · 1 adresse vue', ua: 'SamsungBrowser/30.0 Chrome/143 Mobile', req: 405, vol: '38 Mo', span: '02:14–02:31', note: 'Peut-être un vrai mobile : 9 pages produits vues avant la recherche en boucle.' },
+      { id: 'b', kind: 'bot', name: 'PerplexityBot', cat: 'ia', who: 'PerplexityBot', sub: '8 IP · plage officielle vérifiée', ua: 'compatible; PerplexityBot/1.0', req: 388, vol: '12 Mo', span: '00:03–23:58' },
+      { id: 'c', kind: 'ip4', cat: 'inconnu', isNew: true, who: '192.0.2.229', sub: 'Google Cloud · 1 IP', ua: 'web-image-collection-research', req: 283, vol: '210 Mo', span: '09:40–11:02' },
+      { id: 'd', kind: 'ip6', cat: 'inconnu', isNew: true, who: '2001:db8:800::/64', sub: 'IPv6 · abonnement Orange', ua: 'Windows NT 10.0 … Chrome/155.0.0.0', req: 255, vol: '21 Mo', span: '14:02–14:09', note: 'Chrome 155 n’existe pas : user-agent forgé.' },
+      { id: 'e', kind: 'bot', name: 'facebookexternalhit', cat: 'social', who: 'facebookexternalhit', sub: '57 IP · Meta', ua: 'facebookexternalhit/1.1; meta-webindexer/1.1', req: 107, vol: '6 Mo', span: '00:11–23:47', risk: true, note: 'Le bloquer casse les aperçus de liens sur Facebook et Instagram.' },
+      { id: 'f', kind: 'bot', name: 'SemrushBot', cat: 'seo', who: 'SemrushBot', sub: '11 IP', ua: 'compatible; SemrushBot/7~bl', req: 13, vol: '0,4 Mo', span: '03:20–05:12' },
+      { id: 'g', kind: 'bot', name: '360Spider', cat: 'moteur', who: '360Spider', sub: '8 IP · non vérifiable', ua: 'Edg/140.0.0.0; 360Spider', req: 8, vol: '0,3 Mo', span: '06:01–06:44' },
+      { id: 'h', kind: 'bot', name: 'DuckDuckBot', cat: 'moteur', who: 'DuckDuckBot', sub: '1 IP · plage officielle vérifiée', ua: 'DuckDuckBot/1.1', req: 4, vol: '0,1 Mo', span: '08:15–19:30', risk: true, note: 'Moteur de recherche légitime : le bloquer retire la boutique de DuckDuckGo.' }
+    ];
+    var optionsFor = function (d) {
+      if (d.kind === 'ip6') {
+        var single = d.who.replace('::/64', '::1');
+        return [
+          { id: 'net', label: 'Bloquer l’abonnement (/64)', effect: 'Toutes les adresses de cet abonnement ' + (d.sub.indexOf('Orange') > 0 ? 'Orange' : 'Bouygues') + ' : un foyer, une box. Les autres abonnés ne sont pas touchés.', danger: true, line: 'Require not ip ' + d.who, q: 'Blocage de l’abonnement' },
+          { id: 'one', label: 'Bloquer cette adresse seule', effect: 'Plus doux, mais une box IPv6 change souvent d’adresse : le blocage peut ne plus servir demain.', danger: true, line: 'Require not ip ' + single, q: 'Blocage de l’adresse' },
+          { id: 'allow', label: 'Autoriser', effect: 'Ne sera plus signalé ni bloqué automatiquement.', line: d.who, q: 'Autorisation' }
+        ];
+      }
+      if (d.kind === 'ip4') {
+        return [
+          { id: 'ip', label: 'Bloquer cette IP', effect: 'Réponse 403 sur tout le site, sans lancer PHP.', danger: true, line: 'Require not ip ' + d.who, q: 'Blocage de l’IP' },
+          { id: 'allow', label: 'Autoriser', effect: 'Ne sera plus signalé ni bloqué automatiquement.', line: d.who, q: 'Autorisation' }
+        ];
+      }
+      return [
+        { id: 'ht', label: 'Bloquer (.htaccess)', effect: 'Réponse 403, même si le robot ignore robots.txt.', danger: true, line: 'SetEnvIfNoCase User-Agent "' + d.name + '" vigie_bot', q: 'Blocage' },
+        { id: 'robots', label: 'Interdire dans robots.txt', effect: 'Seuls les robots honnêtes le respectent. Aucun 403.', robots: 'User-agent: ' + d.name + '\nDisallow: /', q: 'Interdiction robots.txt' },
+        { id: 'allow', label: 'Autoriser', effect: 'Ne sera plus signalé ni bloqué automatiquement.', line: d.name, q: 'Autorisation' }
+      ];
+    };
+    var setQ = function (id, v) { var q = Object.assign({}, self.state.queue); if (v) q[id] = v; else delete q[id]; self.setState({ queue: q, deciding: null, toast: false }); };
+    var filt = {
+      'new': function (d) { return d.isNew; }, all: function () { return true; },
+      ia: function (d) { return d.cat === 'ia'; }, seo: function (d) { return d.cat === 'seo'; },
+      moteur: function (d) { return d.cat === 'moteur'; }, social: function (d) { return d.cat === 'social'; }, inconnu: function (d) { return d.cat === 'inconnu'; }
+    };
+    var shown = data.filter(filt[st.filter]);
+    var rows = shown.map(function (d) {
+      var q = st.queue[d.id];
+      var deciding = st.deciding === d.id && !q;
+      var opts = optionsFor(d);
+      var choiceId = (st.choice[d.id]) || opts[0].id;
+      var chosen = opts.filter(function (o) { return o.id === choiceId; })[0] || opts[0];
+      return {
+        who: d.who, sub: d.sub, ua: d.ua, cat: natLabel[d.cat], chip: chip(d.cat), isNew: !!d.isNew,
+        whoStyle: d.kind === 'bot' ? 'font-weight: 600; font-size: 15px' : "font-family: 'IBM Plex Mono', monospace; font-size: 13px; word-break: break-all",
+        border: d.risk ? '#7A5A1E' : '#262C32',
+        req: d.req, vol: d.vol, span: d.span, busy: d.req >= 250,
+        hasNote: !!d.note, note: d.note || '',
+        queued: !!q, queuedLabel: q ? q.q + ' en attente' : '', idle: !q && !deciding, deciding: deciding,
+        open: function () { self.setState({ deciding: d.id }); },
+        close: function () { self.setState({ deciding: null }); },
+        undo: function () { setQ(d.id, null); },
+        options: opts.map(function (o) {
+          var on = o.id === chosen.id;
+          return { label: o.label, effect: o.effect, aria: on ? 'true' : 'false',
+            box: on ? 'background: #1C2227; border: 1px solid #E6E8EA' : 'background: transparent; border: 1px solid #626C76',
+            dot: 'flex: none; margin-top: 3px; width: 16px; height: 16px; border-radius: 50%; box-sizing: border-box; ' + (on ? 'border: 5px solid #E6E8EA' : 'border: 2px solid #9AA3AB'),
+            pick: function () { var c = Object.assign({}, self.state.choice); c[d.id] = o.id; self.setState({ choice: c }); } };
+        }),
+        confirmLabel: chosen.danger ? 'Ajouter le blocage à la file' : 'Ajouter à la file',
+        confirmStyle: chosen.danger ? 'background: #7A3329; border: 1px solid #FF8B7D; color: #FFFFFF' : 'background: #3FB8A4; border: 0; color: #0B1F1B',
+        confirm: function () {
+          var type = chosen.robots ? 'robots' : chosen.id === 'allow' ? 'allow' : 'ht';
+          setQ(d.id, { type: type, line: chosen.robots || chosen.line, q: chosen.q });
+        }
+      };
+    });
+    var items = Object.keys(st.queue).map(function (k) { return st.queue[k]; });
+    var ips = items.filter(function (q) { return q.type === 'ht' && q.line.indexOf('Require') === 0; }).map(function (q) { return '  ' + q.line; });
+    var uas = items.filter(function (q) { return q.type === 'ht' && q.line.indexOf('SetEnv') === 0; }).map(function (q) { return q.line; });
+    var ht = '';
+    if (uas.length) ht += uas.join('\n') + '\n';
+    if (ips.length || uas.length) {
+      ht += '<RequireAll>\n  Require all granted\n';
+      if (uas.length) ht += '  Require not env vigie_bot\n';
+      if (ips.length) ht += ips.join('\n') + '\n';
+      ht += '</RequireAll>';
+    }
+    var robots = items.filter(function (q) { return q.type === 'robots'; }).map(function (q) { return q.line; }).join('\n\n');
+    var allow = items.filter(function (q) { return q.type === 'allow'; }).map(function (q) { return q.line; }).join(', ');
+    var newCount = data.filter(function (d) { return d.isNew && !st.queue[d.id]; }).length;
+    var fdefs = [['new', 'À trier · ' + newCount], ['all', 'Tous'], ['inconnu', 'Inconnus'], ['ia', 'IA'], ['seo', 'SEO'], ['moteur', 'Moteurs'], ['social', 'Réseaux sociaux']];
+    var filters = fdefs.map(function (f) {
+      var on = st.filter === f[0];
+      return { label: f[1], pressed: on ? 'true' : 'false', pick: function () { self.setState({ filter: f[0] }); },
+        style: on ? 'background: #E6E8EA; color: #0F1214; border: 1px solid #E6E8EA; font-weight: 600' : 'background: transparent; color: #E6E8EA; border: 1px solid #626C76' };
+    });
+    var n = items.length;
+    return {
+      filters: filters, rows: rows, newCount: newCount,
+      summary: st.filter === 'new' ? 'Visiteurs automatisés jamais décidés, au-delà de 50 requêtes aujourd’hui.' : shown.length + ' visiteurs automatisés aujourd’hui, du plus actif au moins actif.',
+      hasQueue: n > 0, review: st.review && n > 0, notReview: !st.review,
+      queueLabel: n + (n > 1 ? ' modifications en attente' : ' modification en attente'),
+      openReview: function () { self.setState({ review: true }); },
+      hasHt: ht.length > 0, htText: '# BEGIN Vigie\n' + ht + '\n# END Vigie',
+      hasRobots: robots.length > 0, robotsText: robots,
+      hasAllow: allow.length > 0, allowText: allow,
+      apply: function () { self.setState({ lastQueue: self.state.queue, queue: {}, review: false, toast: true }); },
+      clear: function () { self.setState({ queue: {}, review: false }); },
+      toast: st.toast,
+      undoApply: function () { self.setState({ queue: self.state.lastQueue || {}, toast: false }); }
+    };
+  }
+}
+</script>
+</body>
+</html>

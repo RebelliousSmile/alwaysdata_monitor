@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Vigie — mes sites</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0F1214}
+a{color:#7FC4F5}a:hover{color:#B5DDFA}
+:focus-visible{outline:2px solid #5FD3BE;outline-offset:2px}
+</style>
+</helmet>
+<div style="width: 390px; min-height: 844px; box-sizing: border-box; background: #0F1214; color: #E6E8EA; font-family: 'IBM Plex Sans', system-ui, sans-serif; font-size: 15px; line-height: 1.45">
+
+  <header style="display: flex; align-items: center; gap: 10px; padding: 8px 8px 8px 16px; background: #13171A; border-bottom: 1px solid #262C32">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#3FB8A4" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l8 3v6c0 4.5-3.4 8.3-8 9-4.6-.7-8-4.5-8-9V6z"></path><path d="M9 12l2 2 4-4"></path></svg>
+    <span style="font-weight: 600; font-size: 18px">Vigie</span>
+    <div style="flex: 1"></div>
+    <button type="button" aria-label="Tout relire maintenant" style="width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; background: transparent; border: 0; color: #5FD3BE; cursor: pointer">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.6-6.4"></path><path d="M21 3v6h-6"></path></svg>
+    </button>
+    <a href="Reglages.dc.html" aria-label="Réglages globaux" style="width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; color: #B8C0C7">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12"></path><circle cx="16" cy="6" r="2"></circle><circle cx="10" cy="12" r="2"></circle><circle cx="18" cy="18" r="2"></circle></svg>
+    </a>
+  </header>
+
+  <main style="padding: 16px 16px 32px; display: flex; flex-direction: column; gap: 12px">
+    <div>
+      <h1 style="margin: 0; font-size: 22px; font-weight: 600">Mes sites</h1>
+      <div style="font-size: 13px; color: #9AA3AB">mercredi 14 octobre · 21:50 · les plus urgents d'abord</div>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 8px">
+      <sc-for list="{{sites}}" as="s" hint-placeholder-count="6">
+        <a href="{{s.href}}" style="display: flex; align-items: center; gap: 12px; min-height: 72px; padding: 12px 14px; background: #171B1F; border: 1px solid {{s.border}}; border-radius: 12px; text-decoration: none; color: #E6E8EA">
+          <span style="{{s.badge}}" aria-hidden="true">{{s.sym}}</span>
+          <span style="flex: 1; min-width: 0">
+            <span style="display: block; font-family: 'IBM Plex Mono', monospace; font-size: 15px">{{s.host}}</span>
+            <span style="display: block; font-size: 13px; {{s.todoStyle}}">{{s.todo}}</span>
+            <span style="display: block; font-size: 12px; color: #9AA3AB">{{s.fresh}}</span>
+          </span>
+          <span style="position: absolute; left: -9999px">{{s.state}}</span>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#9AA3AB" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"></path></svg>
+        </a>
+      </sc-for>
+    </div>
+
+    <a href="AjoutSite.dc.html" style="height: 48px; display: flex; align-items: center; justify-content: center; border: 1px dashed #626C76; border-radius: 12px; color: #E6E8EA; text-decoration: none">Ajouter un site</a>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    var K = {
+      fail: ['×', '#3A1A16', '#FF8B7D', '#7A3329', 'color: #FF8B7D', 'Non conforme'],
+      blind: ['?', '#2A3138', '#E6E8EA', '#626C76', 'color: #E6E8EA', 'Aveugle'],
+      warn: ['!', '#33280F', '#F5BC62', '#262C32', 'color: #F5BC62', 'À vérifier'],
+      ok: ['✓', '#12302B', '#5FD3BE', '#262C32', 'color: #B8C0C7', 'OK']
+    };
+    var mk = function (k, host, todo, fresh, href) {
+      var c = K[k];
+      return { host: host, todo: todo, fresh: fresh, href: href || 'ATraiter.dc.html', sym: c[0], state: c[5], border: c[3], todoStyle: c[4],
+        badge: 'flex: none; width: 28px; height: 28px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 15px; background: ' + c[1] + '; color: ' + c[2] };
+    };
+    return {
+      sites: [
+        mk('fail', '[client-1].fr', '1 module vulnérable · 12 erreurs fatales depuis 21:02', 'lu il y a 2 min'),
+        mk('blind', '[client-3].fr', 'Aveugle depuis 19:40 · connexion SSH refusée', 'dernière lecture réussie 19:38', 'Etats.dc.html'),
+        mk('warn', '[site-perso].fr', 'Pages lentes depuis 18:12 (plus de 3 s)', 'lu il y a 1 min'),
+        mk('ok', '[client-5].com', 'Rien à signaler', 'lu il y a 2 min'),
+        mk('ok', '[client-6].fr', 'Rien à signaler', 'lu il y a 3 min'),
+        mk('ok', '[client-2].com', 'Rien à signaler', 'lu il y a 2 min')
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>
