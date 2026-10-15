@@ -1,26 +1,41 @@
 //! `monitor serve` : service systemd `monitor-serve`, publié par Caddy.
 //!
-//! Phase 1 : seule la route `/health` existe. Tout le reste répond 404 sans
-//! corps, pour ne rien dire de l'outil à qui balaie les URL. `/health` publie
-//! l'heure du dernier `tick`, sans aucun nom de site : `monitor/scripts/deploy.mjs`
-//! en a besoin pour prouver qu'un `tick` du nouveau binaire est passé.
+//! Deux routes seulement :
+//!
+//! - `GET /health` publie l'heure du dernier `tick`, sans aucun nom de site :
+//!   `monitor/scripts/deploy.mjs` en a besoin pour prouver qu'un `tick` du
+//!   nouveau binaire est passé ;
+//! - `POST /r/v1/report` reçoit les rapports signés des agents
+//!   (`docs/protocole-agent.md`) et n'envoie jamais d'e-mail : `tick` notifie.
+//!
+//! Tout le reste, autre route comme autre méthode, et tout rapport refusé
+//! reçoivent le même 404 sans corps, pour ne rien dire de l'outil à qui balaie
+//! les URL ou sonde le point d'entrée.
 
 use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 use axum::Json;
 use axum::Router;
-use axum::extract::State;
+use axum::extract::{Request, State};
 use axum::http::StatusCode;
-use axum::routing::get;
+use axum::http::header::CONTENT_LENGTH;
+use axum::routing::{get, post};
 use serde::Serialize;
 
+use crate::ingest::{self, HEADER_SIGNATURE, HEADER_SITE, Reason, Refusal};
 use crate::store::Store;
 
 /// Au-delà, `tick` est considéré comme arrêté (timer chaque minute).
 pub const TICK_MAX_AGE: i64 = 180;
+
+/// Taille maximale du corps d'un rapport, en octets.
+pub const MAX_REPORT_BYTES: usize = 64 * 1024;
+/// Délai de réception du corps entier.
+pub const REPORT_BODY_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Debug, Serialize, PartialEq, Eq)]
 pub struct Health {
@@ -58,15 +73,34 @@ pub fn health(last_tick: Option<i64>, now: i64) -> (StatusCode, Health) {
     }
 }
 
+/// Heure courante en secondes Unix ; remplaçable dans les tests.
+pub type Clock = Arc<dyn Fn() -> i64 + Send + Sync>;
+
 struct AppState {
     database: PathBuf,
+    /// Identifiants des sites de la configuration.
+    sites: Vec<String>,
+    clock: Clock,
 }
 
-pub fn router(database: PathBuf) -> Router {
+pub fn router(database: PathBuf, sites: Vec<String>) -> Router {
+    router_with_clock(database, sites, Arc::new(crate::now))
+}
+
+pub fn router_with_clock(database: PathBuf, sites: Vec<String>, clock: Clock) -> Router {
     Router::new()
-        .route("/health", get(health_handler))
-        .fallback(|| async { StatusCode::NOT_FOUND })
-        .with_state(Arc::new(AppState { database }))
+        .route("/health", get(health_handler).fallback(not_found))
+        .route("/r/v1/report", post(report_handler).fallback(not_found))
+        .fallback(not_found)
+        .with_state(Arc::new(AppState {
+            database,
+            sites,
+            clock,
+        }))
+}
+
+async fn not_found() -> StatusCode {
+    StatusCode::NOT_FOUND
 }
 
 async fn health_handler(State(state): State<Arc<AppState>>) -> (StatusCode, Json<Health>) {
@@ -78,7 +112,7 @@ async fn health_handler(State(state): State<Arc<AppState>>) -> (StatusCode, Json
     .await;
     match last {
         Ok(Ok(last)) => {
-            let (code, body) = health(last, crate::now());
+            let (code, body) = health(last, (state.clock)());
             (code, Json(body))
         }
         Ok(Err(err)) => {
@@ -103,7 +137,88 @@ fn unavailable() -> (StatusCode, Json<Health>) {
     )
 }
 
-pub fn run(database: PathBuf, ip: IpAddr, port: u16) -> Result<()> {
+/// Journalise un refus et répond le 404 commun à tous les refus.
+fn refuse(refusal: Refusal) -> StatusCode {
+    if matches!(refusal.reason, Reason::Internal(_)) {
+        log::error!("{refusal}");
+    } else {
+        log::warn!("{refusal}");
+    }
+    StatusCode::NOT_FOUND
+}
+
+/// 204 si le rapport est accepté, 404 sans corps sinon. La raison d'un refus
+/// va au journal, avec le site et le `seq` quand ils sont lisibles.
+///
+/// La taille et le délai sont vérifiés ici plutôt que par des couches
+/// `tower-http`, qui répondraient 413 ou 408 au lieu du 404 commun.
+async fn report_handler(State(state): State<Arc<AppState>>, request: Request) -> StatusCode {
+    let (parts, body) = request.into_parts();
+    let header = |name: &str| {
+        parts
+            .headers
+            .get(name)
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_owned)
+    };
+    let site = header(HEADER_SITE);
+    let signature = header(HEADER_SIGNATURE);
+
+    // Taille et délai, avant toute lecture du JSON.
+    let announced = header(CONTENT_LENGTH.as_str()).and_then(|v| v.parse::<u64>().ok());
+    if announced.is_some_and(|len| len > MAX_REPORT_BYTES as u64) {
+        return refuse(Refusal::new(site.as_deref(), Reason::TooLarge));
+    }
+    let read = axum::body::to_bytes(body, MAX_REPORT_BYTES);
+    let bytes = match tokio::time::timeout(REPORT_BODY_TIMEOUT, read).await {
+        Ok(Ok(bytes)) => bytes,
+        Ok(Err(err)) => {
+            let too_large = err
+                .into_inner()
+                .downcast_ref::<http_body_util::LengthLimitError>()
+                .is_some();
+            let reason = if too_large {
+                Reason::TooLarge
+            } else {
+                Reason::Truncated
+            };
+            return refuse(Refusal::new(site.as_deref(), reason));
+        }
+        Err(_) => return refuse(Refusal::new(site.as_deref(), Reason::TooSlow)),
+    };
+
+    let now = (state.clock)();
+    let task_site = site.clone();
+    let task_state = Arc::clone(&state);
+    let outcome = tokio::task::spawn_blocking(move || {
+        ingest::ingest(
+            &task_state.database,
+            &task_state.sites,
+            task_site.as_deref(),
+            signature.as_deref(),
+            &bytes,
+            now,
+        )
+    })
+    .await;
+    match outcome {
+        Ok(Ok(accepted)) => {
+            log::info!(
+                "rapport accepté (site {}, seq {})",
+                accepted.site,
+                accepted.seq
+            );
+            StatusCode::NO_CONTENT
+        }
+        Ok(Err(refusal)) => refuse(refusal),
+        Err(err) => refuse(Refusal::new(
+            site.as_deref(),
+            Reason::Internal(format!("tâche interrompue : {err}")),
+        )),
+    }
+}
+
+pub fn run(database: PathBuf, sites: Vec<String>, ip: IpAddr, port: u16) -> Result<()> {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -114,7 +229,7 @@ pub fn run(database: PathBuf, ip: IpAddr, port: u16) -> Result<()> {
             .await
             .with_context(|| format!("écoute sur {addr} impossible"))?;
         log::info!("serve à l'écoute sur {addr}");
-        axum::serve(listener, router(database))
+        axum::serve(listener, router(database, sites))
             .with_graceful_shutdown(shutdown_signal())
             .await
             .context("serveur HTTP")
@@ -168,9 +283,9 @@ mod tests {
         assert_eq!(health(Some(1_100), 1_000).1.age_seconds, Some(0));
     }
 
-    async fn get(database: PathBuf, uri: &str) -> (StatusCode, Vec<u8>) {
-        let response = router(database)
-            .oneshot(Request::get(uri).body(Body::empty()).expect("request"))
+    async fn send(database: PathBuf, request: Request<Body>) -> (StatusCode, Vec<u8>) {
+        let response = router(database, vec!["site-a".into()])
+            .oneshot(request)
             .await
             .expect("response");
         let status = response.status();
@@ -181,6 +296,14 @@ mod tests {
             .expect("body")
             .to_bytes();
         (status, body.to_vec())
+    }
+
+    async fn get(database: PathBuf, uri: &str) -> (StatusCode, Vec<u8>) {
+        send(
+            database,
+            Request::get(uri).body(Body::empty()).expect("request"),
+        )
+        .await
     }
 
     #[tokio::test]
@@ -226,13 +349,27 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn other_routes_are_a_silent_404() {
+    async fn other_routes_and_methods_are_a_silent_404() {
         let dir = tempfile::tempdir().expect("tempdir");
         let db = dir.path().join("monitor.db");
-        for uri in ["/", "/admin", "/health/x", "/.env"] {
+        for uri in ["/", "/admin", "/health/x", "/.env", "/r/v1/report", "/r/v1"] {
             let (status, body) = get(db.clone(), uri).await;
             assert_eq!(status, StatusCode::NOT_FOUND, "{uri}");
             assert!(body.is_empty(), "{uri}");
         }
+        let post_health = Request::post("/health")
+            .body(Body::empty())
+            .expect("request");
+        let (status, body) = send(db.clone(), post_health).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert!(body.is_empty());
+        // Rapport sans en-têtes : refusé sans créer la base.
+        let report = Request::post("/r/v1/report")
+            .body(Body::from("{}"))
+            .expect("request");
+        let (status, body) = send(db.clone(), report).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert!(body.is_empty());
+        assert!(!db.exists());
     }
 }

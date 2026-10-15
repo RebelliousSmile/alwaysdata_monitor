@@ -3,18 +3,22 @@
 //! Sur le veilleur, toujours appeler le binaire par son chemin complet
 //! (`~/monitor/bin/monitor`) : les tâches planifiées n'ont pas le PATH du shell.
 
+use std::io::BufRead;
 use std::net::IpAddr;
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Duration;
 
-use anyhow::bail;
+use anyhow::{Context, bail};
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD;
 use clap::{Parser, Subcommand};
+use ed25519_dalek::VerifyingKey;
 
 use monitor::alert::{self, Notifier, SmtpNotifier};
 use monitor::config::{self, ConfigError};
 use monitor::finding::Severity;
-use monitor::store::{AckOutcome, SCHEMA_INCIDENTS, Store};
+use monitor::store::{AckOutcome, Agent, KeyOutcome, SCHEMA_AGENTS, SCHEMA_INCIDENTS, Store};
 use monitor::{human_age, iso_utc, now, serve, tick};
 
 /// Code de retour d'une configuration invalide ou introuvable.
@@ -55,7 +59,7 @@ enum Command {
     },
     /// État du veilleur : sites, incidents ouverts, dernier passage
     Status,
-    /// Sites surveillés
+    /// Sites surveillés et clés de leurs agents
     Site {
         #[command(subcommand)]
         action: SiteAction,
@@ -71,8 +75,32 @@ enum Command {
 
 #[derive(Debug, Subcommand)]
 enum SiteAction {
-    /// Liste les sites de la configuration
+    /// Liste les sites de la configuration et l'état de leur agent
     List,
+    /// Enregistre la clé publique de l'agent d'un site de la configuration
+    Add {
+        /// Identifiant du site
+        id: String,
+        /// Clé publique Ed25519 de l'agent, 32 octets en base64
+        #[arg(long)]
+        pubkey: String,
+    },
+    /// Remplace la clé de l'agent : l'ancienne ne fait plus rien accepter
+    RotateKey {
+        /// Identifiant du site
+        id: String,
+        /// Nouvelle clé publique Ed25519, 32 octets en base64
+        #[arg(long)]
+        pubkey: String,
+    },
+    /// Retire la clé de l'agent et l'état de ses rapports
+    Remove {
+        /// Identifiant du site
+        id: String,
+        /// Sans confirmation (sinon, retaper l'identifiant)
+        #[arg(long)]
+        yes: bool,
+    },
 }
 
 fn main() -> ExitCode {
@@ -95,18 +123,14 @@ fn run(cli: Cli) -> anyhow::Result<()> {
     let path = config::resolve_path(cli.config)?;
     let config = config::load(&path)?;
     match cli.command {
-        Command::Serve { ip, port } => serve::run(config.database, ip, port),
+        Command::Serve { ip, port } => {
+            let sites = config.sites.iter().map(|s| s.id.clone()).collect();
+            serve::run(config.database, sites, ip, port)
+        }
         Command::Tick => tick::run(&config, now()),
         Command::Check { site, once: _ } => check(&config, &site),
         Command::Status => status(&config),
-        Command::Site {
-            action: SiteAction::List,
-        } => {
-            for site in &config.sites {
-                println!("{}\t{}", site.id, site.url);
-            }
-            Ok(())
-        }
+        Command::Site { action } => site(&config, action),
         Command::Ack { id } => ack(&config, id),
         Command::TestAlert => {
             let notifier = SmtpNotifier::new(config.alerts.clone());
@@ -144,6 +168,117 @@ fn check(config: &config::Config, site: &str) -> anyhow::Result<()> {
     }
     if alarming > 0 {
         bail!("{alarming} constat(s) à traiter");
+    }
+    Ok(())
+}
+
+/// Clé publique Ed25519 en base64 : 32 octets, point valide de la courbe.
+fn parse_pubkey(encoded: &str) -> anyhow::Result<[u8; 32]> {
+    let raw = STANDARD
+        .decode(encoded.trim())
+        .context("clé publique : base64 illisible")?;
+    let Ok(key) = <[u8; 32]>::try_from(raw.as_slice()) else {
+        bail!(
+            "clé publique : {} octet(s) au lieu de 32 (clé Ed25519 brute)",
+            raw.len()
+        );
+    };
+    VerifyingKey::from_bytes(&key).context("clé publique : point Ed25519 invalide")?;
+    Ok(key)
+}
+
+fn require_site(config: &config::Config, id: &str) -> anyhow::Result<()> {
+    if !config.sites.iter().any(|s| s.id == id) {
+        bail!("aucun site « {id} » dans la configuration : l'y ajouter d'abord");
+    }
+    Ok(())
+}
+
+/// Agents enregistrés, ou aucun si la base est absente ou précède les agents.
+fn read_agents(config: &config::Config) -> anyhow::Result<Vec<Agent>> {
+    match Store::open_read(&config.database)? {
+        Some(store) if store.schema_version()? >= SCHEMA_AGENTS => store.agents(),
+        _ => Ok(Vec::new()),
+    }
+}
+
+/// État de l'agent d'un site, pour `site list` et `status`.
+fn agent_state(agent: Option<&Agent>, now: i64) -> String {
+    let Some(agent) = agent else {
+        return "sans agent".into();
+    };
+    let name = agent.agent.as_deref().unwrap_or("agent");
+    match agent.last_valid_at {
+        Some(at) => format!(
+            "{name}, dernier rapport il y a {} (seq {})",
+            human_age(now - at),
+            agent.last_seq
+        ),
+        None => format!(
+            "clé enregistrée il y a {}, aucun rapport",
+            human_age(now - agent.rotated_at.unwrap_or(agent.added_at))
+        ),
+    }
+}
+
+fn site(config: &config::Config, action: SiteAction) -> anyhow::Result<()> {
+    let now = now();
+    match action {
+        SiteAction::List => {
+            let agents = read_agents(config)?;
+            for site in &config.sites {
+                let agent = agents.iter().find(|a| a.site == site.id);
+                println!("{}\t{}\t{}", site.id, site.url, agent_state(agent, now));
+            }
+        }
+        SiteAction::Add { id, pubkey } => {
+            require_site(config, &id)?;
+            let key = parse_pubkey(&pubkey)?;
+            let mut store = Store::open(&config.database)?;
+            match store.add_key(&id, &key, now)? {
+                KeyOutcome::Done => println!("clé de l'agent de {id} enregistrée"),
+                KeyOutcome::AlreadyPresent => {
+                    bail!("{id} a déjà une clé : `monitor site rotate-key {id}` pour la remplacer")
+                }
+                other => bail!("issue inattendue : {other:?}"),
+            }
+        }
+        SiteAction::RotateKey { id, pubkey } => {
+            require_site(config, &id)?;
+            let key = parse_pubkey(&pubkey)?;
+            let mut store = Store::open(&config.database)?;
+            match store.rotate_key(&id, &key, now)? {
+                KeyOutcome::Done => {
+                    println!("clé de l'agent de {id} remplacée : l'ancienne est refusée")
+                }
+                KeyOutcome::Missing => {
+                    bail!("{id} n'a pas de clé : `monitor site add {id}` pour en enregistrer une")
+                }
+                KeyOutcome::Unchanged => bail!("{id} : cette clé est déjà la clé actuelle"),
+                other => bail!("issue inattendue : {other:?}"),
+            }
+        }
+        SiteAction::Remove { id, yes } => {
+            if !config.database.is_file() {
+                bail!("{id} n'a pas de clé (base absente)");
+            }
+            if !yes {
+                eprint!("retirer la clé de l'agent de {id} ? retaper « {id} » pour confirmer : ");
+                let mut line = String::new();
+                std::io::stdin()
+                    .lock()
+                    .read_line(&mut line)
+                    .context("lecture de la confirmation")?;
+                if line.trim() != id {
+                    bail!("confirmation différente : rien n'est retiré");
+                }
+            }
+            let mut store = Store::open(&config.database)?;
+            if !store.remove_key(&id)? {
+                bail!("{id} n'a pas de clé");
+            }
+            println!("clé de l'agent de {id} retirée : ses incidents seront clos au prochain tick");
+        }
     }
     Ok(())
 }
@@ -193,6 +328,10 @@ fn status(config: &config::Config) -> anyhow::Result<()> {
         Some(store) => store.check_runs()?,
         None => Vec::new(),
     };
+    let agents = match &store {
+        Some(store) if store.schema_version()? >= SCHEMA_AGENTS => store.agents()?,
+        _ => Vec::new(),
+    };
     println!("sites : {}", config.sites.len());
     for site in &config.sites {
         let last = runs
@@ -204,6 +343,8 @@ fn status(config: &config::Config) -> anyhow::Result<()> {
             format!("contrôlé il y a {}", human_age(now - at))
         });
         println!("  {}  {}  {last}", site.id, site.url);
+        let agent = agents.iter().find(|a| a.site == site.id);
+        println!("    agent : {}", agent_state(agent, now));
     }
     if let Some(store) = &store {
         let open = store.open_incidents()?;
@@ -231,9 +372,9 @@ fn status(config: &config::Config) -> anyhow::Result<()> {
             }
         }
         if !info.is_empty() {
-            println!("en-têtes manquants :");
+            println!("informations :");
             for i in info {
-                println!("  {} : {}", i.site, i.detail);
+                println!("  {} {} : {}", i.site, i.check_name, i.detail);
             }
         }
         println!(

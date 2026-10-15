@@ -7,6 +7,8 @@ pub mod checks;
 pub mod config;
 pub mod finding;
 pub mod http;
+pub mod ingest;
+pub mod report;
 pub mod serve;
 pub mod store;
 pub mod tick;

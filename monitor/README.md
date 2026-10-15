@@ -1,8 +1,9 @@
 # monitor — veilleur multi-sites
 
 Veilleur hébergé sur un VPS (nom provisoire). Il surveille les sites de
-l'extérieur et, à partir de la phase 3, reçoit les rapports signés d'un agent
-PHP posé sur chaque site. Il alerte par e-mail.
+l'extérieur, reçoit les rapports signés d'un agent PHP posé sur chaque site
+(protocole : [`docs/protocole-agent.md`](./docs/protocole-agent.md)) et alerte
+par e-mail.
 
 Ce dossier est indépendant du module PrestaShop `sc_alwaysdata` à la racine du
 dépôt : il n'entre ni dans son déploiement (`scripts/deploy.mjs`), ni dans une
@@ -14,15 +15,33 @@ Sur le veilleur, toujours appeler le binaire par son chemin complet.
 
 | Commande | Rôle |
 | -------- | ---- |
-| `~/monitor/bin/monitor serve` | Service `monitor-serve` derrière Caddy : écoute sur `$IP:$PORT` (ou `--ip`, `--port`), `127.0.0.1:8080` dans l'unité. Seule la route `/health` répond ; tout le reste renvoie 404 sans corps |
+| `~/monitor/bin/monitor serve` | Service `monitor-serve` derrière Caddy : écoute sur `$IP:$PORT` (ou `--ip`, `--port`), `127.0.0.1:8080` dans l'unité. Deux routes : `GET /health` et `POST /r/v1/report` ; tout le reste renvoie 404 sans corps |
 | `~/monitor/bin/monitor tick` | Lancé chaque minute par `monitor-tick.timer` : lance les contrôles dus, ouvre ou clôt les incidents, envoie les e-mails |
 | `~/monitor/bin/monitor check <site> --once` | Lance tous les contrôles d'un site et affiche les constats, sans écrire dans la base ni envoyer d'e-mail ; code 1 si un constat est à traiter |
-| `~/monitor/bin/monitor status` | Dernier passage, sites et dernier contrôle, incidents ouverts avec leur âge, en-têtes manquants, notifications en attente ; code 1 si `tick` est en retard |
-| `~/monitor/bin/monitor site list` | Sites de la configuration |
+| `~/monitor/bin/monitor status` | Dernier passage, sites et dernier contrôle, incidents ouverts avec leur âge, état de l'agent de chaque site, informations (en-têtes manquants), notifications en attente ; code 1 si `tick` est en retard |
+| `~/monitor/bin/monitor site list` | Sites de la configuration et état de leur agent : sans agent, clé sans rapport, âge du dernier rapport accepté |
+| `~/monitor/bin/monitor site add <site> --pubkey <base64>` | Enregistre la clé publique Ed25519 (32 octets) de l'agent d'un site de la configuration ; refusé si le site a déjà une clé |
+| `~/monitor/bin/monitor site rotate-key <site> --pubkey <base64>` | Remplace la clé : un rapport signé par l'ancienne est refusé dès maintenant |
+| `~/monitor/bin/monitor site remove <site> [--yes]` | Retire la clé et l'état des rapports ; sans `--yes`, demande de retaper l'identifiant |
 | `~/monitor/bin/monitor ack <id>` | Acquitte un incident : plus de rappel, la clôture automatique reste active |
 | `~/monitor/bin/monitor test-alert` | Envoie un e-mail de test par le relais SMTP configuré |
 
 `/health` répond 200 si le dernier `tick` date de moins de 3 minutes, sinon 503.
+
+## Rapports des agents
+
+`POST /r/v1/report` accepte au plus 64 Ko de corps, lu en 10 s au plus. Les
+vérifications suivent l'ordre taille, site connu, signature, schéma,
+horodatage (±300 s), `seq` strictement croissant, un rapport par minute et par
+site. Un rapport accepté reçoit 204 ; tout refus reçoit le même 404 sans corps,
+et la raison n'est écrite que dans le journal de `serve` (site, `seq`, raison,
+jamais le corps).
+
+Les constats d'un rapport accepté passent dans le cycle des incidents sous des
+contrôles préfixés `agent:`. `serve` n'envoie aucun e-mail : c'est le `tick`
+suivant qui notifie. Un site dont l'agent a une clé et ne fait accepter aucun
+rapport pendant `agent_silence` secondes (900 par défaut) ouvre un incident
+critique `heartbeat`, clos par le rapport accepté suivant.
 
 ## Contrôles
 
@@ -73,7 +92,8 @@ cargo clippy --locked --all-targets -- -D warnings
 `tests/external_checks.rs` sert les fixtures de `tests/fixtures/` en HTTPS
 local, avec une autorité de certification de test, et remplace l'envoi SMTP
 par un notifier en mémoire : aucun site réel n'est contacté, aucun e-mail
-n'est envoyé.
+n'est envoyé. `tests/ingest.rs` signe des rapports avec une clé de test et
+vérifie les vecteurs Ed25519 de la RFC 8032 (`tests/fixtures/rfc8032.json`).
 
 La version de Rust est épinglée à trois endroits, à garder identiques :
 `rust-toolchain.toml`, `rust-version` dans `Cargo.toml` et

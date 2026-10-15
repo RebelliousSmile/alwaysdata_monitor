@@ -3,20 +3,22 @@
 //! 1. enregistre le passage, que `/health` surveille ;
 //! 2. lance les contrôles dus, les sites les plus en retard d'abord, sans
 //!    commencer de requête après 40 s ;
-//! 3. réconcilie les incidents, puis envoie les e-mails en attente (ouvertures,
-//!    clôtures, rappels) jusqu'à 50 s. Ce qui n'a pas pu partir reste en
-//!    attente pour le passage suivant.
+//! 3. ouvre ou clôt le silence de chaque agent déclaré ;
+//! 4. réconcilie les incidents, puis envoie les e-mails en attente (ouvertures,
+//!    clôtures, rappels) jusqu'à 50 s, y compris ceux des rapports d'agent
+//!    acceptés par `serve`. Ce qui n'a pas pu partir reste en attente pour le
+//!    passage suivant.
 
 use std::time::{Duration, Instant};
 
 use anyhow::{Result, bail};
 
 use crate::alert::{self, Email, Notifier, SmtpNotifier};
-use crate::checks::{self, CheckError, CheckKind, Ctx};
+use crate::checks::{self, CheckError, CheckKind, Ctx, heartbeat};
 use crate::config::{Config, Site};
 use crate::finding::Finding;
 use crate::http::{Http, REQUEST_TIMEOUT, Trust};
-use crate::store::Store;
+use crate::store::{AGENT_PREFIX, Store};
 
 #[derive(Debug, Clone)]
 pub struct Options {
@@ -108,19 +110,31 @@ pub fn run_with(
         }
     }
 
-    let watched: Vec<(&str, &str)> = config
-        .sites
-        .iter()
-        .flat_map(|site| {
+    // Silence des agents : seuls les sites de la configuration qui ont une clé.
+    let agents = store.agents()?;
+    for site in &config.sites {
+        if let Some(agent) = agents.iter().find(|a| a.site == site.id) {
+            let findings = heartbeat::evaluate(site, agent, now);
+            store.reconcile(&site.id, heartbeat::NAME, &findings, now)?;
+        }
+    }
+
+    let closed = store.close_unwatched(
+        |site_id, check| {
+            let Some(site) = config.sites.iter().find(|s| s.id == site_id) else {
+                return false;
+            };
+            if check == heartbeat::NAME || check.starts_with(AGENT_PREFIX) {
+                return agents.iter().any(|a| a.site == site_id);
+            }
             CheckKind::ALL
                 .into_iter()
-                .filter(|kind| kind.applies(site))
-                .map(|kind| (site.id.as_str(), kind.name()))
-        })
-        .collect();
-    let closed = store.close_unwatched(&watched, now)?;
+                .any(|kind| kind.applies(site) && kind.name() == check)
+        },
+        now,
+    )?;
     if closed > 0 {
-        log::info!("{closed} incident(s) clos : contrôle retiré de la configuration");
+        log::info!("{closed} incident(s) clos : contrôle ou agent retiré de la configuration");
     }
 
     summary.emails_sent = notify(
