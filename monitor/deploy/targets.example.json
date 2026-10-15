@@ -1,0 +1,9 @@
+{
+  "veilleur": {
+    "host": "<vps>",
+    "user": "monitor",
+    "sshKey": "~/.ssh/monitor_ci",
+    "remoteDir": "monitor",
+    "healthUrl": "https://<sous-domaine>/health"
+  }
+}

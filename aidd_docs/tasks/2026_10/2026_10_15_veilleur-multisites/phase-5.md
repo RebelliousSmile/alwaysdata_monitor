@@ -93,7 +93,7 @@ journey
 
 ### `5)` Surveillance du veilleur
 
-> Une seule sonde externe, celle qui couvre la panne d'Alwaysdata.
+> Une seule sonde externe, celle qui couvre la panne du VPS ou du veilleur.
 
 1. Faire remplacer par l'utilisateur la sonde UptimeRobot actuelle (mot-clé `<mot-clé>` sur `<url-surveillée>`) par une sonde HTTP(s) sur `/health` du veilleur, qui alerte sur toute réponse autre que 2xx (le 503 d'un `tick` en retard compris). Le contrôle `content` du veilleur reprend la vérification de l'URL surveillée.
 2. Couper `tick` plus de 3 min et vérifier que UptimeRobot alerte, puis le réactiver.

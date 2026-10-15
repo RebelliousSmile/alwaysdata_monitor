@@ -1,0 +1,44 @@
+# Point d'entrée HTTP du veilleur, publié par Caddy (deploy/Caddyfile.example).
+[Unit]
+Description=monitor serve (veilleur multi-sites)
+After=network-online.target
+Wants=network-online.target
+# Avant le premier déploiement, l'unité est ignorée au lieu d'échouer en boucle.
+ConditionFileIsExecutable=/home/monitor/monitor/bin/monitor
+ConditionPathExists=/home/monitor/monitor/config.toml
+
+[Service]
+User=monitor
+Group=monitor
+Environment=IP=127.0.0.1 PORT=8080
+ExecStart=/home/monitor/monitor/bin/monitor serve
+Restart=on-failure
+RestartSec=5
+# Prioritaire sur les autres processus du VPS quand la mémoire manque.
+OOMScoreAdjust=-500
+
+# Durcissement : seule la base est accessible en écriture, pas le binaire.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/monitor/monitor/data
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

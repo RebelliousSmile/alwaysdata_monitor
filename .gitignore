@@ -3,3 +3,11 @@
 .php-cs-fixer.cache
 # Cibles réelles (hôtes et comptes clients) : le dépôt est public
 /deploy/targets.json
+# Veilleur (monitor/) : build, cibles et configurations réelles, bases locales
+/monitor/target/
+/monitor/deploy/targets.json
+/monitor/config.toml
+/monitor/remote.toml
+*.db
+*.db-wal
+*.db-shm
