@@ -14,7 +14,8 @@ est public.
 | SMTP authentifié sur 587 vers le relais Alwaysdata | **Fait** le 2026-10-15 depuis le VPS : STARTTLS exigé (`--ssl-reqd`), authentification par la boîte d'alerte, code SMTP 250, message reçu par le destinataire ; les relais `smtp-<compte>.alwaysdata.net` de deux comptes résolvent vers la même adresse (relais communs, l'authentification se fait par la boîte et non par le compte) |
 | Premier déploiement | **Fait** le 2026-10-15 : `monitor 0.1.0`, `/health` en 200 avec un tick postérieur à la bascule, route inconnue en 404 sans corps, HTTP redirigé en 308 vers HTTPS, `serve` sur `127.0.0.1:8080` seulement (8080 injoignable de l'extérieur), timer à la minute, base en 0600 dans `data/` |
 | Contrôles externes et alertes (phase 2) | **Fait** le 2026-10-15 : `monitor 0.2.0` déployé (commit 2b55edd), `/health` en 200 ; `status` en code 0, schéma v2, dernier tick à 26 s, site A contrôlé, aucun incident, trois en-têtes manquants (HSTS, `nosniff`, `frame-ancestors`) en information ; `test-alert` reçu par le destinataire (envoyé à 16:35:26 UTC) ; `config.toml`, `smtp-password` et la base en 0600 au propriétaire `monitor` |
-| Renommage en Vigie | **À faire** au déploiement de la 0.3.0 : le VPS tourne encore sous les anciens noms (utilisateur `monitor`, `~/monitor/`, unités `monitor-serve` et `monitor-tick`, `MONITOR_CONFIG`). La migration se fait avec l'accord de l'utilisateur |
+| Renommage en Vigie | **Fait** le 2026-10-15 : utilisateur `vigie` créé par `provision.sh`, `config.toml` (chemins réécrits), `smtp-password` et la base copiés vers `~vigie/vigie/` (base par `sqlite3 .backup`, `integrity_check` à `ok`, fichiers en 0600 au propriétaire `vigie`) ; `vigie 0.3.0` déployé (commit 208a73d), bascule à 20:23:38 UTC, base migrée en v4 au premier tick, `/health` en 200 avec un tick postérieur. Ancien `monitor` supprimé vers 20:47 UTC (unités, règle sudo, `10-monitor.conf` après `diff` identique à `10-vigie.conf`, utilisateur et dossier personnel) ; son dossier est archivé en 0600 dans `/root` |
+| Arrêt de `deploy.mjs` pendant la preuve HTTP | **À diagnostiquer** : au déploiement de la 0.3.0, le script s'est arrêté sans message juste après « Preuve HTTP », sans rendre le verrou `deploy.lock` (rendu à la main). Le déploiement lui-même avait abouti. Au prochain lancement : sans pipe, et relever le code de sortie |
 | Relance de `serve` après kill | **Fait** : `kill -9` du PID 3259, relancé en PID 3336 en moins de 8 s |
 | Relance après reboot | **Fait** le 2026-10-15 (extinction puis rallumage depuis la console Hetzner) : démarrage à 15:52:12 UTC, `serve` actif à 15:52:11 en PID 1048, `caddy`, `ufw`, `ssh.socket` et le timer actifs, premier tick à 15:53:00, `/health` en 200, `status` en code 0, 8080 toujours injoignable de l'extérieur |
 | Cloisonnement | **À mesurer** (tâche 5, une fois Hermes installé) |
@@ -26,9 +27,18 @@ est public.
 Sur un VPS neuf, avec la clé root déposée à la commande :
 
 ```console
-$ scp -r vigie/deploy root@<vps>:/root/vigie-deploy
-$ ssh root@<vps> sh /root/vigie-deploy/provision.sh "<clé publique ed25519 de déploiement>" <sous-domaine>
+$ git archive -o vigie-deploy.tar --prefix=vigie-deploy/ HEAD:vigie/deploy
+$ scp vigie-deploy.tar root@<vps>:/root/
+$ ssh root@<vps> 'tar -xf /root/vigie-deploy.tar -C /root && sh /root/vigie-deploy/provision.sh "<clé publique ed25519 de déploiement>" <sous-domaine>'
 ```
+
+`git archive` plutôt que `scp -r` : seul le contenu du commit part, pas le
+`targets.json` local, ignoré par git. Avec `HEAD:vigie/deploy`, les chemins
+perdent le préfixe `vigie/` et la règle `eol=lf` de la racine ne s'applique
+plus : sous Windows, `core.autocrlf` passerait le script en CRLF
+(`set: Illegal option -` sur le VPS). `vigie/deploy/.gitattributes` reprend
+la règle à la racine de cet arbre ; il n'agit qu'une fois commité, `git
+archive` lisant les règles du commit.
 
 Le script est idempotent. Il installe `unattended-upgrades`, `ufw` (22, 80 et
 443 seulement), Caddy, l'authentification SSH par clé seulement, l'utilisateur
