@@ -10,15 +10,15 @@ est public.
 | ----- | ---- |
 | VPS du veilleur | Hetzner CX23, Ubuntu 26.04.1 LTS, x86_64, Helsinki : **créé** le 2026-10-15, pare-feu Hetzner (22, 80, 443, ICMP) attaché |
 | Installation | `deploy/provision.sh` **lancé** le 2026-10-15 : sshd par clé seulement (`sshd -T`), mot de passe refusé (`Permission denied (publickey)`), `ufw` actif sur 22, 80 et 443, `monitor` en 0700 hors sudo sauf `systemctl restart monitor-serve.service` (`stop caddy` refusé), certificat Let's Encrypt obtenu par Caddy, `serve` ignoré faute de binaire (`/health` en 502) |
-| Relevé système du VPS | **À mesurer** après l'installation |
+| Relevé système du VPS | **Fait** le 2026-10-16 en `vigie` (voir [VPS du veilleur](#vps-du-veilleur)) : `x86_64`, glibc 2.43, `/home/vigie` en `ext4` sur disque local, seuls 22, 80 et 443 en écoute publique, `serve` sur `127.0.0.1:8080`. `ufw status` et les processus de `ss -ltnp` demandent root : à relever |
 | SMTP authentifié sur 587 vers le relais Alwaysdata | **Fait** le 2026-10-15 depuis le VPS : STARTTLS exigé (`--ssl-reqd`), authentification par la boîte d'alerte, code SMTP 250, message reçu par le destinataire ; les relais `smtp-<compte>.alwaysdata.net` de deux comptes résolvent vers la même adresse (relais communs, l'authentification se fait par la boîte et non par le compte) |
 | Premier déploiement | **Fait** le 2026-10-15 : `monitor 0.1.0`, `/health` en 200 avec un tick postérieur à la bascule, route inconnue en 404 sans corps, HTTP redirigé en 308 vers HTTPS, `serve` sur `127.0.0.1:8080` seulement (8080 injoignable de l'extérieur), timer à la minute, base en 0600 dans `data/` |
 | Contrôles externes et alertes (phase 2) | **Fait** le 2026-10-15 : `monitor 0.2.0` déployé (commit 2b55edd), `/health` en 200 ; `status` en code 0, schéma v2, dernier tick à 26 s, site A contrôlé, aucun incident, trois en-têtes manquants (HSTS, `nosniff`, `frame-ancestors`) en information ; `test-alert` reçu par le destinataire (envoyé à 16:35:26 UTC) ; `config.toml`, `smtp-password` et la base en 0600 au propriétaire `monitor` |
 | Renommage en Vigie | **Fait** le 2026-10-15 : utilisateur `vigie` créé par `provision.sh`, `config.toml` (chemins réécrits), `smtp-password` et la base copiés vers `~vigie/vigie/` (base par `sqlite3 .backup`, `integrity_check` à `ok`, fichiers en 0600 au propriétaire `vigie`) ; `vigie 0.3.0` déployé (commit 208a73d), bascule à 20:23:38 UTC, base migrée en v4 au premier tick, `/health` en 200 avec un tick postérieur. Ancien `monitor` supprimé vers 20:47 UTC (unités, règle sudo, `10-monitor.conf` après `diff` identique à `10-vigie.conf`, utilisateur et dossier personnel) ; son dossier est archivé en 0600 dans `/root` |
-| Arrêt de `deploy.mjs` pendant la preuve HTTP | **À diagnostiquer** : au déploiement de la 0.3.0, le script s'est arrêté sans message juste après « Preuve HTTP », sans rendre le verrou `deploy.lock` (rendu à la main). Le déploiement lui-même avait abouti. Au prochain lancement : sans pipe, et relever le code de sortie |
+| Arrêt de `deploy.mjs` pendant la preuve HTTP | **Contourné, cause non établie** : au déploiement de la 0.3.0, le processus a pris fin moins d'une seconde après « Preuve HTTP », pendant le premier `fetch`, sans message ni sur stdout ni sur stderr, et le `finally` du verrou n'a pas tourné (`deploy.lock` rendu à la main). Le déploiement lui-même avait abouti. Non reproduit le 2026-10-16 : la même suite (`wsl` synchrones, puis `fetch` de `/health` sortie en pipe) se termine en code 0. Depuis, le verrou est rendu avant la preuve HTTP, qui n'écrit rien, et un arrêt avant la fin affiche l'étape et le code. Au prochain `--apply` : sans pipe, et relever le code de sortie |
 | Relance de `serve` après kill | **Fait** : `kill -9` du PID 3259, relancé en PID 3336 en moins de 8 s |
 | Relance après reboot | **Fait** le 2026-10-15 (extinction puis rallumage depuis la console Hetzner) : démarrage à 15:52:12 UTC, `serve` actif à 15:52:11 en PID 1048, `caddy`, `ufw`, `ssh.socket` et le timer actifs, premier tick à 15:53:00, `/health` en 200, `status` en code 0, 8080 toujours injoignable de l'extérieur |
-| Cloisonnement | **À mesurer** (tâche 5, une fois Hermes installé) |
+| Cloisonnement | **Fait côté `vigie`** le 2026-10-16 (voir [Cloisonnement](#cloisonnement)) : dossiers en 0700, secrets et base en 0600, une seule règle sudo, unités à 3.1 sur `systemd-analyze security`. Le test d'un autre utilisateur est sans objet tant que Hermes n'est pas installé ; il reste à le refaire en root avec `nobody` |
 | sodium sur le site A | **Fait** le 2026-10-15 : PHP 8.3.35 en ligne de commande (`php -r 'echo PHP_VERSION;'`), `sodium` dans `php -m` ; le CLI affiche aussi `Warning: Module "intl" is already loaded` à chaque lancement |
 | Sortie IPv4 et IPv6 du site A | **Fait** le 2026-10-15 : `curl -4` et `curl -6` vers un site externe en 200 depuis le compte du site A |
 | `/health` en IPv4 et IPv6 depuis le poste | **Fait** le 2026-10-15 : `curl -4` et `curl -6` en 200 |
@@ -56,19 +56,30 @@ exécutable, `config.toml` présent) les font ignorer au lieu d'échouer.
 
 ## VPS du veilleur
 
-À compléter après l'installation :
+Relevé du 2026-10-16, en `vigie` :
 
 ```console
 $ uname -m
+x86_64
 $ ldd --version | head -1
-$ grep -E '^(PRETTY_NAME|VERSION_ID)=' /etc/os-release
-$ findmnt -no FSTYPE,SOURCE /home
-$ df -h /home | tail -1
-$ ufw status
-$ ss -ltnp
-$ systemctl is-active vigie-serve.service vigie-tick.timer caddy
-$ ~vigie/vigie/bin/vigie --version
+ldd (Ubuntu GLIBC 2.43-2ubuntu2.3) 2.43
+$ grep -E '^PRETTY_NAME=' /etc/os-release
+PRETTY_NAME="Ubuntu 26.04.1 LTS"
+$ findmnt -no FSTYPE,SOURCE -T /home/vigie
+ext4 /dev/sda1
+$ df -h /home/vigie | tail -1      # 38G, 1.8G utilisés, 5 %
+$ ss -ltn                          # en écoute
+0.0.0.0:22, [::]:22, *:80, *:443   publics
+127.0.0.1:8080                     serve
+127.0.0.1:2019                     API d'administration de Caddy
+127.0.0.53:53, 127.0.0.54:53       résolveur local
+$ systemctl is-active vigie-serve.service vigie-tick.timer caddy ufw ssh.socket unattended-upgrades
+active (×6)
+$ ~/vigie/bin/vigie --version
+vigie 0.3.0
 ```
+
+`ufw status` et `ss -ltnp`, qui nomme les processus, demandent root.
 
 Premier relevé, avant installation (2026-10-15) : `x86_64`, Ubuntu 26.04.1 LTS,
 racine en `ext4`, `sudo-rs 0.2.13` (son `visudo` accepte `-c` et `-f`),
@@ -139,8 +150,22 @@ conditions :
   `NoNewPrivileges`), et `serve` a un `OOMScoreAdjust=-500`.
 - Si Hermes redevient inutilisé : le désinstaller et révoquer ses jetons.
 
-À compléter (tâche 5) : PID de `serve` avant et après `kill`, puis après un
-reboot ; `sudo -u hermes cat ~vigie/vigie/config.toml` refusé.
+Mesuré le 2026-10-16, en `vigie` :
+
+- `/home/vigie`, `~/vigie` et `~/vigie/data` en 0700 ; `config.toml`,
+  `smtp-password` et `vigie.db` en 0600, tous à `vigie:vigie` (`namei -l`
+  confirme la chaîne depuis `/`).
+- `id` : `vigie` dans les groupes `vigie` et `users` seulement. `sudo -n -l`
+  ne liste que `(root) NOPASSWD: /usr/bin/systemctl restart vigie-serve.service`.
+- Comptes avec un shell : `root`, `sync`, `vigie`. Pas de groupe `docker`,
+  groupe `sudo` vide, pas d'utilisateur `hermes`.
+- `systemd-analyze security` : `vigie-serve.service` et `vigie-tick.service`
+  à 3.1 (`OK`).
+
+La relance de `serve` après `kill` et après un reboot est consignée dans le
+[Statut](#statut). Reste, en root : `sudo -u nobody cat
+/home/vigie/vigie/config.toml` doit être refusé. Le même test avec `hermes`
+attendra son installation.
 
 ## Plateforme du site A (Alwaysdata, 2026-10-15)
 
@@ -176,12 +201,6 @@ Conséquences :
 - **NFS** : le dossier personnel y est monté en NFS. Cela ne concerne plus le
   veilleur, qui tourne sur le disque local du VPS ; l'agent PHP, lui, n'écrit
   pas de base SQLite.
-
-## Site A
-
-À compléter : `php -v`, `php -m | grep -i sodium`, puis la même paire de
-commandes `curl -4 -s -m 10 -o /dev/null -w "ipv4 %{http_code}\n" https://www.google.com`
-et `curl -6 -s -m 10 -o /dev/null -w "ipv6 %{http_code}\n" https://www.google.com || echo ipv6 echec`.
 
 ## Build
 
