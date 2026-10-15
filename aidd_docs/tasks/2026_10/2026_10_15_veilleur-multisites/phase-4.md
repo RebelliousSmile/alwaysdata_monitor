@@ -11,9 +11,9 @@ status: pending
 > Tree of the final files. ✅ create · ✏️ modify · ❌ delete
 
 ```txt
-monitor/
+vigie/
 ├── agent/php/
-│   ├── monitor-agent.php              ✅ fichier unique : refus hors CLI, --init, contrôles en lecture seule, rapport signé
+│   ├── vigie-agent.php              ✅ fichier unique : refus hors CLI, --init, contrôles en lecture seule, rapport signé
 │   ├── config.example.json            ✅ site, endpoint, root, kind, critical[], must_contain[], uploads
 │   └── tests/
 │       ├── run.php                    ✅ exécuteur minimal, sans Composer, code 1 en cas d'échec
@@ -33,10 +33,10 @@ monitor/
 
 ```mermaid
 flowchart TD
-  A[deploy-agent.mjs site-a --apply] --> B[~/monitor-agent/monitor-agent.php, hors de ~/www]
-  B --> C[ssh <compte-site-a> : php monitor-agent.php --init]
-  C --> D[Clé privée 0600 dans ~/.monitor-agent, clé publique affichée]
-  D --> E[ssh veilleur : ~/monitor/bin/monitor site add site-a --pubkey ...]
+  A[deploy-agent.mjs site-a --apply] --> B[~/vigie-agent/vigie-agent.php, hors de ~/www]
+  B --> C[ssh <compte-site-a> : php vigie-agent.php --init]
+  C --> D[Clé privée 0600 dans ~/.vigie-agent, clé publique affichée]
+  D --> E[ssh veilleur : ~/vigie/bin/vigie site add site-a --pubkey ...]
   E --> F[Tâche planifiée Alwaysdata toutes les 5 min]
   F --> G[Agent : lecture de l'arborescence, rapport signé, POST]
   G --> H[Veilleur : 204, constats et comparaison des faits]
@@ -79,7 +79,7 @@ journey
 > Un fichier PHP sans dépendance, inerte s'il est appelé par le web.
 
 1. Quitter immédiatement si `PHP_SAPI !== 'cli'`, ou si l'extension sodium est absente (avec un message et le code 3).
-2. Lire la configuration JSON hors du webroot (`~/.monitor-agent/config.json`) et refuser toute clé inconnue.
+2. Lire la configuration JSON hors du webroot (`~/.vigie-agent/config.json`) et refuser toute clé inconnue.
 3. `--init` génère la paire de clés, écrit la clé privée en 0600, affiche la clé publique en base64 et refuse d'écraser une clé existante.
 4. `--dry-run` affiche le rapport sans l'envoyer.
 
@@ -119,9 +119,9 @@ journey
 
 > Un agent sur le compte `<compte-site-a>`, hors du webroot, lancé toutes les 5 minutes.
 
-1. `deploy-agent.mjs` : envoyer vers `~/monitor-agent/` en reprenant les garde-fous de déploiement (prévisualisation par défaut, refus si la destination est sous `~/www/`).
-2. Lancer `--init` en SSH, puis enregistrer la clé publique sur le veilleur avec `~/monitor/bin/monitor site add site-a --pubkey`.
-3. Faire créer par l'utilisateur la tâche planifiée `*/5 * * * * php ~/monitor-agent/monitor-agent.php` dans le panneau du compte `<compte-site-a>`.
+1. `deploy-agent.mjs` : envoyer vers `~/vigie-agent/` en reprenant les garde-fous de déploiement (prévisualisation par défaut, refus si la destination est sous `~/www/`).
+2. Lancer `--init` en SSH, puis enregistrer la clé publique sur le veilleur avec `~/vigie/bin/vigie site add site-a --pubkey`.
+3. Faire créer par l'utilisateur la tâche planifiée `*/5 * * * * php ~/vigie-agent/vigie-agent.php` dans le panneau du compte `<compte-site-a>`.
 4. Documenter la pose, la rotation de clé et le retrait dans `docs/agent-php.md`.
 
 ## Test acceptance criteria
@@ -132,5 +132,5 @@ journey
 | 2    | Sur les fixtures, l'absence de `wp-config.php`, le retrait du verrou installeur et un `shell.php` dans uploads donnent chacun un constat critique. Aucun fichier de l'arborescence n'est modifié (même mtime avant et après) |
 | 3    | Le veilleur répond 204 au rapport de l'agent. Un envoi échoué fait sortir l'agent avec un code différent de 0 |
 | 4    | Une empreinte de `.htaccess` modifiée entre deux rapports ouvre un incident d'avertissement. Un nouveau `.php` dans uploads ouvre un incident critique |
-| 5    | `php monitor/agent/php/tests/run.php` et `cargo test --locked` passent, y compris le test d'interopérabilité |
-| 6    | `ssh <veilleur> ~/monitor/bin/monitor status` montre le site A avec un dernier rapport d'agent de moins de 6 min et aucun incident |
+| 5    | `php vigie/agent/php/tests/run.php` et `cargo test --locked` passent, y compris le test d'interopérabilité |
+| 6    | `ssh <veilleur> ~/vigie/bin/vigie status` montre le site A avec un dernier rapport d'agent de moins de 6 min et aucun incident |
