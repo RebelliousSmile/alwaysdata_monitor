@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Vigie — santé, contrôles</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0F1214}
+a{color:#7FC4F5}a:hover{color:#B5DDFA}
+:focus-visible{outline:2px solid #5FD3BE;outline-offset:2px}
+</style>
+</helmet>
+<div style="position: relative; width: 390px; min-height: 844px; box-sizing: border-box; background: #0F1214; color: #E6E8EA; font-family: 'IBM Plex Sans', system-ui, sans-serif; font-size: 15px; line-height: 1.45">
+
+  <header style="position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 4px; padding: 8px; background: #13171A; border-bottom: 1px solid #262C32">
+    <a href="Main.dc.html" aria-label="Retour à mes sites" style="width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; color: #B8C0C7"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"></path></svg></a>
+    <div style="flex: 1; min-width: 0">
+      <div style="font-family: 'IBM Plex Mono', monospace; font-size: 15px">[client-1].fr</div>
+      <div style="font-size: 12px; color: #9AA3AB">PrestaShop 8 · lu il y a 2 min</div>
+    </div>
+    <button type="button" aria-label="Relire maintenant" style="width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; background: transparent; border: 0; color: #5FD3BE; cursor: pointer"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.6-6.4"></path><path d="M21 3v6h-6"></path></svg></button>
+    <a href="Parametres.dc.html" aria-label="Paramètres du site" style="width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; color: #B8C0C7"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12"></path><circle cx="16" cy="6" r="2"></circle><circle cx="10" cy="12" r="2"></circle><circle cx="18" cy="18" r="2"></circle></svg></a>
+  </header>
+
+  <main style="padding: 16px 16px 24px; display: flex; flex-direction: column; gap: 14px">
+    <h1 style="margin: 0; font-size: 22px; font-weight: 600">Santé</h1>
+    <nav aria-label="Santé" style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); background: #171B1F; border: 1px solid #262C32; border-radius: 10px; padding: 3px; margin-top: -4px">
+      <a href="Dispo.dc.html" style="height: 44px; display: flex; align-items: center; justify-content: center; border-radius: 8px; color: #B8C0C7; text-decoration: none">Dispo</a>
+      <a href="Ressources.dc.html" style="height: 44px; display: flex; align-items: center; justify-content: center; border-radius: 8px; color: #B8C0C7; text-decoration: none">Ressources</a>
+      <a href="Controles.dc.html" aria-current="page" style="height: 44px; display: flex; align-items: center; justify-content: center; border-radius: 8px; background: #2A3138; color: #E6E8EA; font-weight: 600; text-decoration: none">Contrôles</a>
+    </nav>
+
+    <div style="font-size: 13px; color: #9AA3AB">{{total}} contrôles · socle commun + jeu PrestaShop · passés ce matin à 03:00</div>
+
+    <div role="group" aria-label="Filtrer par état" style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px">
+      <sc-for list="{{tiles}}" as="t" hint-placeholder-count="4">
+        <button type="button" aria-pressed="{{t.pressed}}" onClick="{{t.pick}}" style="min-height: 60px; border-radius: 10px; padding: 6px 4px; font: inherit; cursor: pointer; {{t.style}}">
+          <span style="display: block; font-family: 'IBM Plex Mono', monospace; font-size: 18px">{{t.n}}</span>
+          <span style="display: block; font-size: 12px">{{t.label}}</span>
+        </button>
+      </sc-for>
+    </div>
+    <div style="display: flex; justify-content: space-between; align-items: center; font-size: 13px">
+      <span style="color: #9AA3AB">{{viewLabel}}</span>
+      <sc-if value="{{notAll}}" hint-placeholder-val="{{true}}"><button type="button" onClick="{{showAll}}" style="height: 44px; padding: 0 4px; background: transparent; border: 0; color: #7FC4F5; font: inherit; font-size: 13px; cursor: pointer">Tout afficher</button></sc-if>
+    </div>
+
+    <sc-for list="{{sections}}" as="s" hint-placeholder-count="2">
+      <section style="display: flex; flex-direction: column; gap: 6px">
+        <sc-if value="{{s.hasTitle}}" hint-placeholder-val="{{true}}"><h2 style="margin: 4px 0 0; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: #9AA3AB">{{s.title}}</h2></sc-if>
+        <div style="background: #171B1F; border: 1px solid #262C32; border-radius: 12px; overflow: hidden">
+          <sc-for list="{{s.items}}" as="it" hint-placeholder-count="3">
+            <div style="border-top: {{it.sep}}">
+              <button type="button" onClick="{{it.toggle}}" aria-expanded="{{it.aria}}" style="width: 100%; display: flex; align-items: center; gap: 12px; min-height: 60px; padding: 10px 14px; text-align: left; background: transparent; border: 0; color: #E6E8EA; font: inherit; cursor: pointer">
+                <span style="{{it.badge}}" aria-hidden="true">{{it.sym}}</span>
+                <span style="flex: 1; min-width: 0">
+                  <span style="display: block">{{it.title}}</span>
+                  <span style="display: block; font-size: 12px; color: #9AA3AB">{{it.sub}}</span>
+                </span>
+                <span style="position: absolute; left: -9999px">{{it.stLabel}}</span>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#9AA3AB" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="{{it.chev}}"><path d="M6 9l6 6 6-6"></path></svg>
+              </button>
+              <sc-if value="{{it.open}}" hint-placeholder-val="{{false}}">
+                <div style="padding: 0 14px 14px 54px; display: flex; flex-direction: column; gap: 8px">
+                  <div style="font-size: 13px; color: #B8C0C7">{{it.why}}</div>
+                  <sc-for list="{{it.rows}}" as="r" hint-placeholder-count="2">
+                    <div style="display: flex; align-items: center; gap: 8px; min-height: 32px; border-top: 1px solid #22282D; padding-top: 6px">
+                      <span style="flex: 1; min-width: 0; font-family: 'IBM Plex Mono', monospace; font-size: 12px; word-break: break-all">{{r.k}}</span>
+                      <span style="font-size: 12px; color: #9AA3AB; text-align: right">{{r.v}}</span>
+                    </div>
+                  </sc-for>
+                  <sc-if value="{{it.hasAction}}" hint-placeholder-val="{{false}}">
+                    <button type="button" onClick="{{it.act}}" style="height: 44px; margin-top: 4px; border: 1px solid #626C76; border-radius: 10px; background: transparent; color: #E6E8EA; font: inherit; font-size: 15px; cursor: pointer">{{it.actionLabel}}</button>
+                  </sc-if>
+                  <sc-if value="{{it.hasLink}}" hint-placeholder-val="{{false}}">
+                    <a href="{{it.linkHref}}" style="height: 44px; display: flex; align-items: center; justify-content: center; border: 1px solid #626C76; border-radius: 10px; color: #E6E8EA; text-decoration: none">{{it.linkLabel}}</a>
+                  </sc-if>
+                  <div style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #9AA3AB">{{it.how}}</div>
+                </div>
+              </sc-if>
+            </div>
+          </sc-for>
+        </div>
+      </section>
+    </sc-for>
+
+    <section aria-labelledby="h-add" style="display: flex; flex-direction: column; gap: 8px; margin-top: 4px">
+      <sc-if value="{{addClosed}}" hint-placeholder-val="{{true}}">
+        <button type="button" onClick="{{openAdd}}" style="height: 48px; background: transparent; border: 1px dashed #626C76; border-radius: 12px; color: #E6E8EA; font: inherit; cursor: pointer">Ajouter un contrôle</button>
+      </sc-if>
+      <sc-if value="{{addOpen}}" hint-placeholder-val="{{false}}">
+        <div style="background: #171B1F; border: 1px solid #626C76; border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 12px">
+          <h2 id="h-add" style="margin: 0; font-size: 15px; font-weight: 600">Nouveau contrôle</h2>
+          <div style="display: flex; flex-direction: column; gap: 6px">
+            <label for="ctype" style="font-size: 13px; color: #B8C0C7">Ce qu'on vérifie</label>
+            <select id="ctype" onChange="{{pickType}}" style="height: 44px; padding: 0 10px; background: #0F1214; border: 1px solid #626C76; border-radius: 10px; color: #E6E8EA; font: inherit; font-size: 15px">
+              <option value="url">Une URL répond un code HTTP</option>
+              <option value="has">Un fichier contient un texte</option>
+              <option value="hasnot">Un fichier ne contient pas un texte</option>
+              <option value="header">Un en-tête HTTP est présent</option>
+              <option value="ssh">Une commande SSH en lecture seule</option>
+            </select>
+          </div>
+          <sc-if value="{{isSsh}}" hint-placeholder-val="{{false}}">
+            <div style="display: flex; gap: 8px; padding: 10px 12px; background: #33280F; border-radius: 10px; font-size: 13px; color: #F5BC62"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: none; margin-top: 2px"><path d="M12 3l9.5 17h-19z"></path><path d="M12 10v4M12 17v.5"></path></svg><span>Seules les commandes de la liste autorisée sont acceptées : cat, grep, ls, stat, php -v, composer show. Aucune écriture, aucun pipe vers un autre programme.</span></div>
+          </sc-if>
+          <div style="display: flex; flex-direction: column; gap: 6px">
+            <label for="ctarget" style="font-size: 13px; color: #B8C0C7">{{targetLabel}}</label>
+            <input id="ctarget" type="text" value="{{targetValue}}" style="height: 44px; padding: 0 12px; background: #0F1214; border: 1px solid #626C76; border-radius: 10px; color: #E6E8EA; font-family: 'IBM Plex Mono', monospace; font-size: 13px">
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 6px">
+            <label for="cexp" style="font-size: 13px; color: #B8C0C7">Résultat attendu</label>
+            <input id="cexp" type="text" value="{{expValue}}" style="height: 44px; padding: 0 12px; background: #0F1214; border: 1px solid #626C76; border-radius: 10px; color: #E6E8EA; font-family: 'IBM Plex Mono', monospace; font-size: 13px">
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 6px">
+            <label for="cname" style="font-size: 13px; color: #B8C0C7">Nom affiché quand c'est OK</label>
+            <input id="cname" type="text" value="Cron du module protégé par token" style="height: 44px; padding: 0 12px; background: #0F1214; border: 1px solid #626C76; border-radius: 10px; color: #E6E8EA; font: inherit; font-size: 15px">
+          </div>
+          <div style="display: flex; align-items: center; gap: 10px">
+            <input id="calert" type="checkbox" checked style="width: 22px; height: 22px; accent-color: #3FB8A4">
+            <label for="calert" style="flex: 1">M'alerter si ce contrôle échoue</label>
+            <label for="cmode" style="position: absolute; left: -9999px">Mode d'envoi</label>
+            <select id="cmode" style="height: 44px; padding: 0 8px; background: #0F1214; border: 1px solid #626C76; border-radius: 10px; color: #E6E8EA; font: inherit; font-size: 13px"><option>Immédiat</option><option>Email du matin</option></select>
+          </div>
+          <div style="display: flex; gap: 8px">
+            <button type="button" onClick="{{closeAdd}}" style="flex: 1; height: 48px; background: transparent; border: 1px solid #626C76; border-radius: 10px; color: #B8C0C7; font: inherit; cursor: pointer">Annuler</button>
+            <button type="button" onClick="{{confirmAdd}}" style="flex: 2; height: 48px; border: 0; border-radius: 10px; background: #3FB8A4; color: #0B1F1B; font: inherit; font-weight: 600; cursor: pointer">Tester et ajouter</button>
+          </div>
+        </div>
+      </sc-if>
+    </section>
+  </main>
+
+  <div style="position: sticky; bottom: 0; z-index: 2">
+    <sc-if value="{{hasQueue}}" hint-placeholder-val="{{false}}">
+      <div style="background: #1C2227; border-top: 1px solid #626C76; padding: 12px 16px; display: flex; flex-direction: column; gap: 10px">
+        <sc-if value="{{review}}" hint-placeholder-val="{{false}}">
+          <pre style="margin: 0; padding: 10px; background: #0B0E10; border: 1px solid #22282D; border-radius: 8px; font-family: 'IBM Plex Mono', monospace; font-size: 12px; line-height: 1.6; color: #B8C0C7; overflow-x: auto; white-space: pre">{{diffText}}</pre>
+          <div style="font-size: 12px; color: #9AA3AB">Sauvegarde datée, écriture, test de l'accueil et de /commande. Retour arrière automatique si un test échoue.</div>
+        </sc-if>
+        <div style="display: flex; gap: 8px; align-items: center">
+          <span style="flex: 1; font-size: 13px">{{queueLabel}}</span>
+          <sc-if value="{{notReview}}" hint-placeholder-val="{{true}}"><button type="button" onClick="{{openReview}}" style="height: 44px; padding: 0 18px; border: 0; border-radius: 10px; background: #3FB8A4; color: #0B1F1B; font: inherit; font-weight: 600; cursor: pointer">Vérifier</button></sc-if>
+          <sc-if value="{{review}}" hint-placeholder-val="{{false}}">
+            <button type="button" onClick="{{clear}}" style="height: 44px; padding: 0 12px; background: transparent; border: 1px solid #626C76; border-radius: 10px; color: #B8C0C7; font: inherit; cursor: pointer">Tout retirer</button>
+            <button type="button" onClick="{{apply}}" style="height: 44px; padding: 0 18px; border: 0; border-radius: 10px; background: #3FB8A4; color: #0B1F1B; font: inherit; font-weight: 600; cursor: pointer">Appliquer</button>
+          </sc-if>
+        </div>
+      </div>
+    </sc-if>
+    <nav aria-label="Navigation du site" style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); background: #13171A; border-top: 1px solid #2F363D; padding: 4px 4px 16px">
+      <a href="ATraiter.dc.html" style="position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-height: 56px; color: #B8C0C7; text-decoration: none; font-size: 12px"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 11l3 3 8-8"></path><path d="M20 12v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h9"></path></svg>À traiter<span style="position: absolute; top: 2px; left: 52%; min-width: 20px; height: 20px; padding: 0 6px; box-sizing: border-box; border-radius: 10px; background: #FF8B7D; color: #2A0E0A; font-size: 12px; font-weight: 600; line-height: 20px; text-align: center">5</span></a>
+      <a href="Site.dc.html" style="position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-height: 56px; color: #B8C0C7; text-decoration: none; font-size: 12px"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h4l3-8 4 16 3-8h4"></path></svg>Trafic<span style="position: absolute; top: 2px; left: 52%; min-width: 20px; height: 20px; padding: 0 6px; box-sizing: border-box; border-radius: 10px; background: #F5BC62; color: #2A1E05; font-size: 12px; font-weight: 600; line-height: 20px; text-align: center">3</span></a>
+      <a href="Erreurs.dc.html" style="position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-height: 56px; color: #B8C0C7; text-decoration: none; font-size: 12px"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l9.5 17h-19z"></path><path d="M12 10v4M12 17v.5"></path></svg>Erreurs<span style="position: absolute; top: 2px; left: 52%; min-width: 20px; height: 20px; padding: 0 6px; box-sizing: border-box; border-radius: 10px; background: #FF8B7D; color: #2A0E0A; font-size: 12px; font-weight: 600; line-height: 20px; text-align: center">2</span></a>
+      <a href="Dispo.dc.html" aria-current="page" style="position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-height: 56px; color: #5FD3BE; text-decoration: none; font-size: 12px; font-weight: 600"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.8 5.6a5.5 5.5 0 0 0-7.8 0L12 6.6l-1-1a5.5 5.5 0 0 0-7.8 7.8L12 22l8.8-8.6a5.5 5.5 0 0 0 0-7.8z"></path></svg>Santé<span style="position: absolute; top: 2px; left: 52%; min-width: 20px; height: 20px; padding: 0 6px; box-sizing: border-box; border-radius: 10px; background: #FF8B7D; color: #2A0E0A; font-size: 12px; font-weight: 600; line-height: 20px; text-align: center">3</span></a>
+    </nav>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":2300}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { view: 'todo', open: { mod: true }, add: false, added: false, type: 'url', queue: {}, review: false };
+  }
+  renderVals() {
+    var self = this;
+    var st = this.state;
+    var S = { fail: ['×', '#3A1A16', '#FF8B7D', 'Non conforme'], warn: ['!', '#33280F', '#F5BC62', 'À vérifier'], choice: ['i', '#14263A', '#8CC8F5', 'Choix assumé'], ok: ['✓', '#12302B', '#5FD3BE', 'OK'] };
+    var rank = { fail: 0, warn: 1, choice: 2, ok: 3 };
+    var R = function (k, v) { return { k: k, v: v || '' }; };
+    var Q = function (id, label, diff) { return function () { var q = Object.assign({}, self.state.queue); if (q[id]) delete q[id]; else q[id] = { label: label, diff: diff }; self.setState({ queue: q }); }; };
+    var data = [
+      { sec: 'Jeu PrestaShop', items: [
+        { id: 'mod', st: 'fail', title: '1 module vulnérable', okTitle: 'Modules à jour', sub: '[nom du module] [x.y] · correctif en [x.z]', why: 'Une faille connue est publiée pour la version installée.', rows: [R('Référence', '[CVE à renseigner]'), R('Gravité', '[score]'), R('Corrigé dans', '[x.z]'), R('Installé', '[x.y] depuis le 03/09')], link: ['Ouvrir l’avis de sécurité', '#'], how: 'versions des modules comparées à [source des failles]' },
+        { id: 'fac', st: 'ok', title: 'Facettes ?q= réservées à la boutique', sub: 'contrôle du Referer · 9 domaines', why: 'Un robot ou un lien externe qui appelle une URL de filtres reçoit un 403.', rows: [R('www.[client-1].fr', ''), R('+ 8 domaines', 'lus depuis shop_url')], action: ['Désactiver (ajouter à la file)', '- # Vigie : facettes réservées (9 lignes)'], how: 'test sans Referer sur /2-accueil?q=Taille-M → 403' },
+        { id: 'fam', st: 'ok', title: 'Filtres combinés limités à 3 familles', sub: 'taille, couleur, marque…', why: 'Empêche l’exploration de toutes les combinaisons de filtres.', rows: [R('Maximum', '3 familles')], action: ['Passer à 4 (ajouter à la file)', '- RewriteCond … {3,}\n+ RewriteCond … {4,}'], how: 'test à 4 familles → 403' },
+        { id: 'dbg', st: 'ok', title: 'Mode debug désactivé', sub: '_PS_MODE_DEV_ à false', why: '', rows: [], how: 'config/defines.inc.php' }
+      ] },
+      { sec: '.htaccess et robots.txt', items: [
+        { id: 'dup', st: 'warn', title: '2 robots bloqués deux fois', okTitle: 'Aucun robot bloqué deux fois', sub: 'meta-externalagent, Bytespider', why: 'Ils figurent aussi dans une règle combinée [OR] écrite à la main. Vigie ne touche pas à ces règles : pour débloquer l’un d’eux, il faudra corriger la règle à la main.', rows: [R('meta-externalagent', 'lignes 14 et 31'), R('Bytespider', 'lignes 15 et 32')], how: 'chaque user-agent ne doit apparaître qu’une fois' },
+        { id: 'ht', st: 'ok', title: 'Bloc Vigie en tête du .htaccess', sub: 'écrit le 26/09 · 10 sauvegardes', why: 'Les règles passent avant PrestaShop : Apache répond 403 sans lancer PHP.', rows: [], link: ['Voir les blocages et les sauvegardes', 'Blocages.dc.html'], how: '« # BEGIN Vigie » avant « # BEGIN PrestaShop »' },
+        { id: 'rb', st: 'ok', title: 'Bloc Vigie présent dans robots.txt', sub: 'rétabli 1 fois après régénération', why: 'PrestaShop réécrit robots.txt depuis Trafic et SEO. Vigie remet son bloc s’il disparaît.', rows: [R('Chemins interdits', '6'), R('Robots SEO interdits', '12')], how: '« # BEGIN Vigie » présent' }
+      ] },
+      { sec: 'Robots d’IA', items: [
+        { id: 'ia1', st: 'ok', title: 'Entraînement des modèles bloqué', sub: '17 robots sur 17', why: 'N’amène aucun visiteur. Bloqués dans robots.txt et le .htaccess.', rows: [R('GPTBot, ClaudeBot, CCBot…', 'robots.txt + .htaccess'), R('Google-Extended, Applebot-Extended', 'robots.txt seul')], how: 'les « -Extended » ne visitent pas : robots.txt suffit' },
+        { id: 'ia2', st: 'choice', title: 'Moteurs de réponse IA autorisés', sub: 'OAI-SearchBot, Claude-SearchBot, PerplexityBot', why: 'Ils citent la boutique dans les réponses de ChatGPT, Claude ou Perplexity, avec un lien. Les bloquer fait disparaître la boutique de ces réponses.', rows: [], action: ['Bloquer ces 3 robots (ajouter à la file)', '+ SetEnvIfNoCase User-Agent "OAI-SearchBot" vigie_bot\n+ SetEnvIfNoCase User-Agent "Claude-SearchBot" vigie_bot\n+ SetEnvIfNoCase User-Agent "PerplexityBot" vigie_bot'], how: '' },
+        { id: 'ia3', st: 'choice', title: 'Assistants à la demande autorisés', sub: 'ChatGPT-User, Claude-User, Perplexity-User', why: 'Une personne a demandé à son assistant de lire une page, souvent un client qui compare.', rows: [], how: '' }
+      ] },
+      { sec: 'Socle commun', items: [
+        { id: 'hdr', st: 'warn', title: 'Content-Security-Policy absent', okTitle: 'En-têtes de sécurité présents', sub: 'les 3 autres en-têtes sont là', why: 'HSTS, X-Content-Type-Options et Referrer-Policy sont présents.', rows: [R('Content-Security-Policy', 'absent'), R('Strict-Transport-Security', 'présent')], how: 'HEAD https://www.[client-1].fr/' },
+        { id: 'tls', st: 'ok', title: 'Certificat HTTPS valide', sub: 'expire dans 83 jours', why: 'Alerte à moins de 14 jours.', rows: [], how: '' },
+        { id: 'sen', st: 'ok', title: 'Rien de sensible exposé', sub: '.env, .git, /install, sauvegardes', why: 'Chaque chemin doit répondre 403 ou 404.', rows: [R('/install', '404'), R('/.git/config', '403'), R('/backup.zip', '404')], how: '' },
+        { id: 'gg', st: 'ok', title: 'Googlebot et bingbot jamais bloqués', sub: 'garde-fou', why: 'Aucune règle, même écrite à la main, ne coupe les moteurs de recherche.', rows: [], how: 'robots.txt et .htaccess ne les citent pas' }
+      ] }
+    ];
+    if (st.added) {
+      data.push({ sec: 'Mes contrôles', items: [{ id: 'cus', st: 'ok', title: 'Cron du module protégé par token', sub: 'ajouté à l’instant · alerte immédiate si échec', why: 'Contrôle personnalisé.', rows: [R('/module/sc_alwaysdata/cron', 'répond 403')], how: 'GET sans token → 403 attendu' }] });
+    }
+    var counts = { fail: 0, warn: 0, choice: 0, ok: 0 };
+    var total = 0;
+    data.forEach(function (s) { s.items.forEach(function (it) { counts[it.st]++; total++; }); });
+    var mk = function (it, i) {
+      var open = !!st.open[it.id];
+      var c = S[it.st];
+      var q = st.queue[it.id];
+      return {
+        title: it.title, sub: it.sub, why: it.why, rows: it.rows, how: it.how,
+        hasAction: !!it.action, actionLabel: it.action ? (q ? 'En attente dans la file · retirer' : it.action[0]) : '',
+        act: it.action ? Q(it.id, it.action[0], it.action[1]) : null,
+        hasLink: !!it.link, linkLabel: it.link ? it.link[0] : '', linkHref: it.link ? it.link[1] : '#',
+        sym: c[0], stLabel: c[3],
+        badge: 'flex: none; width: 28px; height: 28px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 15px; background: ' + c[1] + '; color: ' + c[2],
+        sep: i === 0 ? '0' : '1px solid #22282D', open: open, aria: open ? 'true' : 'false', chev: open ? 'transform: rotate(180deg)' : '',
+        toggle: function () { var o = Object.assign({}, self.state.open); o[it.id] = !o[it.id]; self.setState({ open: o }); }
+      };
+    };
+    var sections;
+    if (st.view === 'all') {
+      sections = data.map(function (s) {
+        var items = s.items.slice().sort(function (a, b) { return rank[a.st] - rank[b.st]; });
+        return { title: s.sec, hasTitle: true, items: items.map(mk) };
+      });
+    } else {
+      var keep = st.view === 'todo' ? ['fail', 'warn'] : [st.view];
+      var flat = [];
+      data.forEach(function (s) { s.items.forEach(function (it) { if (keep.indexOf(it.st) >= 0) flat.push(it); }); });
+      flat.sort(function (a, b) { return rank[a.st] - rank[b.st]; });
+      sections = flat.length ? [{ title: '', hasTitle: false, items: flat.map(mk) }] : [];
+    }
+    var tdefs = [['fail', 'non conforme', '#3A1A16', '#FF8B7D'], ['warn', 'à vérifier', '#33280F', '#F5BC62'], ['choice', 'choix', '#14263A', '#8CC8F5'], ['ok', 'OK', '#12302B', '#5FD3BE']];
+    var tiles = tdefs.map(function (t) {
+      var on = st.view === t[0] || (st.view === 'todo' && (t[0] === 'fail' || t[0] === 'warn'));
+      return { n: counts[t[0]], label: t[1], pressed: on ? 'true' : 'false',
+        style: 'background: ' + t[2] + '; color: ' + t[3] + '; border: 2px solid ' + (on ? t[3] : 'transparent'),
+        pick: function () { self.setState({ view: t[0] }); } };
+    });
+    var viewLabels = { todo: 'À traiter : non conformes et à vérifier', all: 'Tous les contrôles, par rubrique', fail: 'Non conformes', warn: 'À vérifier', choice: 'Choix assumés', ok: 'Contrôles OK' };
+    var items = Object.keys(st.queue).map(function (k) { return st.queue[k]; });
+    var n = items.length;
+    var tt = {
+      url: ['URL', '/module/sc_alwaysdata/cron', '403'], has: ['Fichier', 'www/prestashop/.htaccess', 'Header always set X-Frame-Options'],
+      hasnot: ['Fichier', 'www/prestashop/config/defines.inc.php', '_PS_MODE_DEV_ à true'], header: ['URL', '/', 'Content-Security-Policy'], ssh: ['Commande', 'php -v', 'PHP 8.2']
+    }[st.type];
+    return {
+      sections: sections, tiles: tiles, total: total, viewLabel: viewLabels[st.view], notAll: st.view !== 'all',
+      showAll: function () { self.setState({ view: 'all' }); },
+      addOpen: st.add, addClosed: !st.add, isSsh: st.type === 'ssh',
+      targetLabel: tt[0], targetValue: tt[1], expValue: tt[2],
+      pickType: function (e) { self.setState({ type: e.target.value }); },
+      openAdd: function () { self.setState({ add: true }); },
+      closeAdd: function () { self.setState({ add: false }); },
+      confirmAdd: function () { var o = Object.assign({}, self.state.open); o.cus = true; self.setState({ add: false, added: true, open: o, view: 'all' }); },
+      hasQueue: n > 0, review: st.review && n > 0, notReview: !st.review,
+      queueLabel: n + (n > 1 ? ' modifications en attente' : ' modification en attente'),
+      diffText: items.map(function (i) { return i.diff; }).join('\n'),
+      openReview: function () { self.setState({ review: true }); },
+      apply: function () { self.setState({ queue: {}, review: false }); },
+      clear: function () { self.setState({ queue: {}, review: false }); }
+    };
+  }
+}
+</script>
+</body>
+</html>

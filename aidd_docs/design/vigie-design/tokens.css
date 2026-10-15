@@ -1,0 +1,43 @@
+/* Vigie — jetons de design (thème sombre). Le thème clair reprend les mêmes noms. */
+:root {
+  /* Fonds */
+  --vg-bg: #0F1214;          /* fond des écrans */
+  --vg-surface: #171B1F;     /* cartes, listes */
+  --vg-surface-2: #1C2227;   /* file d'écriture, sélection */
+  --vg-surface-3: #2A3138;   /* onglet actif, état « aveugle » */
+  --vg-header: #13171A;      /* en-tête, barre du bas */
+  --vg-code: #0B0E10;        /* blocs de diff et de log */
+
+  /* Lignes */
+  --vg-line: #262C32;        /* séparation douce */
+  --vg-line-soft: #22282D;   /* séparation dans une carte */
+  --vg-control: #626C76;     /* contour des contrôles : 3,2:1 sur carte, 3,5:1 sur fond */
+  --vg-switch-off: #646D75;  /* interrupteur éteint : 3,3:1 */
+
+  /* Texte */
+  --vg-text: #E6E8EA;        /* 15,3:1 */
+  --vg-text-2: #B8C0C7;      /* 9,4:1 */
+  --vg-text-3: #9AA3AB;      /* 6,8:1 — minimum, jamais plus clair */
+  --vg-link: #7FC4F5;
+
+  /* Sens — le rouge n'est utilisé QUE pour la gravité ou le danger */
+  --vg-primary: #3FB8A4;     --vg-on-primary: #0B1F1B;
+  --vg-ok: #5FD3BE;          --vg-ok-bg: #12302B;
+  --vg-danger: #FF8B7D;      --vg-danger-bg: #3A1A16;  --vg-danger-line: #7A3329;  --vg-danger-text: #FFB3A9;
+  --vg-warn: #F5BC62;        --vg-warn-bg: #33280F;
+  --vg-info: #8CC8F5;        --vg-info-bg: #14263A;
+  --vg-ia: #C9A8F5;          --vg-ia-bg: #2A1F3A;      /* catégorie « Robot IA » */
+  --vg-neutral: #C9D1D8;     --vg-neutral-bg: #22282D; /* autres catégories */
+
+  /* Typo — 5 tailles seulement */
+  --vg-font: 'IBM Plex Sans', system-ui, sans-serif;
+  --vg-mono: 'IBM Plex Mono', ui-monospace, monospace; /* IP, chemins, heures, volumes */
+  --vg-fs-xs: 12px;  --vg-fs-sm: 13px;  --vg-fs-md: 15px;  --vg-fs-lg: 18px;  --vg-fs-xl: 22px;
+
+  /* Formes */
+  --vg-radius-card: 12px;  --vg-radius-control: 10px;  --vg-radius-pill: 999px;
+  --vg-tap: 44px;          /* hauteur minimale de toute cible tactile */
+  --vg-gutter: 16px;
+}
+
+:focus-visible { outline: 2px solid var(--vg-ok); outline-offset: 2px; }
