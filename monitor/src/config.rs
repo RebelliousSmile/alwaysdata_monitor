@@ -96,10 +96,23 @@ pub struct Site {
     /// Secondes entre deux passages des contrôles du site.
     #[serde(default = "default_interval")]
     pub interval: u64,
+    /// Secondes sans rapport accepté de l'agent avant l'incident `heartbeat`.
+    /// Sans effet tant que le site n'a pas de clé.
+    #[serde(default = "default_agent_silence")]
+    pub agent_silence: u64,
 }
 
 fn default_interval() -> u64 {
     DEFAULT_INTERVAL
+}
+
+/// Silence toléré par défaut : trois envois de 5 min manqués.
+pub const DEFAULT_AGENT_SILENCE: u64 = 900;
+/// En dessous, un seul rapport refusé par le débit (60 s) suffirait à alerter.
+pub const MIN_AGENT_SILENCE: u64 = 180;
+
+fn default_agent_silence() -> u64 {
+    DEFAULT_AGENT_SILENCE
 }
 
 impl Site {
@@ -261,6 +274,12 @@ impl Config {
                     site.id, site.interval
                 ));
             }
+            if site.agent_silence < MIN_AGENT_SILENCE {
+                return Err(format!(
+                    "agent_silence du site « {} » : {MIN_AGENT_SILENCE} s au moins (reçu : {})",
+                    site.id, site.agent_silence
+                ));
+            }
         }
         Ok(())
     }
@@ -296,6 +315,7 @@ url = "https://www.example.org/"
         assert_eq!(site.id, "exemple");
         assert_eq!(site.kind, SiteKind::Generic);
         assert_eq!(site.interval, DEFAULT_INTERVAL);
+        assert_eq!(site.agent_silence, DEFAULT_AGENT_SILENCE);
         assert_eq!(site.content_url(), "https://www.example.org/");
         assert_eq!(config.alerts.smtp_port, 587);
         assert_eq!(config.alerts.smtp_user(), "monitor@example.org");
@@ -304,7 +324,7 @@ url = "https://www.example.org/"
     #[test]
     fn reads_site_kind_keyword_and_interval() {
         let raw = format!(
-            "{VALID}kind = \"wordpress\"\nkeyword_url = \"https://www.example.org/kb/\"\nkeyword = \"/problemes/\"\ninterval = 600\n"
+            "{VALID}kind = \"wordpress\"\nkeyword_url = \"https://www.example.org/kb/\"\nkeyword = \"/problemes/\"\ninterval = 600\nagent_silence = 1800\n"
         );
         let config = parse_str(&raw).expect("valide");
         let site = &config.sites[0];
@@ -312,6 +332,7 @@ url = "https://www.example.org/"
         assert_eq!(site.content_url(), "https://www.example.org/kb/");
         assert_eq!(site.keyword.as_deref(), Some("/problemes/"));
         assert_eq!(site.interval, 600);
+        assert_eq!(site.agent_silence, 1800);
     }
 
     #[test]
@@ -319,6 +340,7 @@ url = "https://www.example.org/"
         for extra in [
             "kind = \"joomla\"",
             "interval = 30",
+            "agent_silence = 120",
             "keyword = \"  \"",
             "keyword_url = \"http://www.example.org/kb/\"",
         ] {

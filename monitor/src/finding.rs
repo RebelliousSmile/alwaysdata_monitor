@@ -50,7 +50,9 @@ impl fmt::Display for Severity {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Finding {
     pub site: String,
-    pub check: &'static str,
+    /// Nom d'un contrôle externe, `heartbeat`, ou `agent:<famille>` pour un
+    /// constat rapporté par l'agent du site.
+    pub check: String,
     pub severity: Severity,
     /// Stable d'un passage à l'autre : jamais d'heure ni de valeur mesurée.
     pub key: String,
@@ -61,14 +63,14 @@ pub struct Finding {
 impl Finding {
     pub fn new(
         site: &str,
-        check: &'static str,
+        check: impl Into<String>,
         severity: Severity,
         key: impl Into<String>,
         detail: impl Into<String>,
     ) -> Self {
         Self {
             site: site.to_owned(),
-            check,
+            check: check.into(),
             severity,
             key: key.into(),
             detail: detail.into(),

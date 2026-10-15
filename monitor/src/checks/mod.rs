@@ -6,6 +6,7 @@
 mod content;
 mod exposed;
 mod headers;
+pub mod heartbeat;
 mod installer;
 mod tls;
 

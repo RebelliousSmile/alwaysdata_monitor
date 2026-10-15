@@ -133,7 +133,7 @@ reboot ; `sudo -u hermes cat ~monitor/monitor/config.toml` refusé.
 ## Plateforme du site A (Alwaysdata, 2026-10-15)
 
 Relevé en lecture seule sur le compte SSH d'un site déjà hébergé sur
-Alwaysdata. Il sert à l'agent PHP (phase 3) : les comptes d'une même plateforme
+Alwaysdata. Il sert à l'agent PHP (phase 4) : les comptes d'une même plateforme
 partagent l'image système, mais le relevé est à refaire sur le compte du site A.
 
 ```console
