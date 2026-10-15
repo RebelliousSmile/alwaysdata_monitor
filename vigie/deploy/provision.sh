@@ -2,8 +2,13 @@
 # Installation du VPS du veilleur (Ubuntu 24.04 ou 26.04, Debian 12 ou 13), en root. Idempotente : la relancer
 # ne change que ce qui diffère.
 #
-#   scp -r vigie/deploy root@<vps>:/root/vigie-deploy
-#   ssh root@<vps> sh /root/vigie-deploy/provision.sh "<clé publique ed25519 de déploiement>" [<sous-domaine>]
+#   git archive -o vigie-deploy.tar --prefix=vigie-deploy/ HEAD:vigie/deploy
+#   scp vigie-deploy.tar root@<vps>:/root/
+#   ssh root@<vps> 'tar -xf /root/vigie-deploy.tar -C /root && sh /root/vigie-deploy/provision.sh "<clé publique ed25519 de déploiement>" [<sous-domaine>]'
+#
+# git archive plutôt que scp -r : seul le contenu du commit part, pas le
+# targets.json local (ignoré par git). Fins de ligne LF même sous core.autocrlf :
+# voir le .gitattributes de ce dossier.
 #
 # Sans sous-domaine, Caddy est installé mais /etc/caddy/Caddyfile n'est pas
 # touché. Hermes Agent n'est pas installé ici (voir plan.md, Décisions).
