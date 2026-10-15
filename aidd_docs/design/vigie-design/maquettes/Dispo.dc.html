@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Vigie — santé, disponibilité</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0F1214}
+a{color:#7FC4F5}a:hover{color:#B5DDFA}
+:focus-visible{outline:2px solid #5FD3BE;outline-offset:2px}
+</style>
+</helmet>
+<div style="position: relative; width: 390px; min-height: 844px; box-sizing: border-box; background: #0F1214; color: #E6E8EA; font-family: 'IBM Plex Sans', system-ui, sans-serif; font-size: 15px; line-height: 1.45">
+
+  <header style="position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 4px; padding: 8px; background: #13171A; border-bottom: 1px solid #262C32">
+    <a href="Main.dc.html" aria-label="Retour à mes sites" style="width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; color: #B8C0C7"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"></path></svg></a>
+    <div style="flex: 1; min-width: 0">
+      <div style="font-family: 'IBM Plex Mono', monospace; font-size: 15px">[client-1].fr</div>
+      <div style="font-size: 12px; color: #9AA3AB">PrestaShop 8 · lu il y a 2 min</div>
+    </div>
+    <button type="button" aria-label="Relire maintenant" style="width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; background: transparent; border: 0; color: #5FD3BE; cursor: pointer"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.6-6.4"></path><path d="M21 3v6h-6"></path></svg></button>
+    <a href="Parametres.dc.html" aria-label="Paramètres du site" style="width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; color: #B8C0C7"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12"></path><circle cx="16" cy="6" r="2"></circle><circle cx="10" cy="12" r="2"></circle><circle cx="18" cy="18" r="2"></circle></svg></a>
+  </header>
+
+  <main style="padding: 16px 16px 24px; display: flex; flex-direction: column; gap: 18px">
+    <h1 style="margin: 0; font-size: 22px; font-weight: 600">Santé</h1>
+    <nav aria-label="Santé" style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); background: #171B1F; border: 1px solid #262C32; border-radius: 10px; padding: 3px; margin-top: -4px">
+      <a href="Dispo.dc.html" aria-current="page" style="height: 44px; display: flex; align-items: center; justify-content: center; border-radius: 8px; background: #2A3138; color: #E6E8EA; font-weight: 600; text-decoration: none">Dispo</a>
+      <a href="Ressources.dc.html" style="height: 44px; display: flex; align-items: center; justify-content: center; border-radius: 8px; color: #B8C0C7; text-decoration: none">Ressources</a>
+      <a href="Controles.dc.html" style="position: relative; height: 44px; display: flex; align-items: center; justify-content: center; gap: 6px; border-radius: 8px; color: #B8C0C7; text-decoration: none">Contrôles <span style="min-width: 20px; height: 20px; padding: 0 6px; box-sizing: border-box; border-radius: 10px; background: #FF8B7D; color: #2A0E0A; font-size: 12px; font-weight: 600; line-height: 20px; text-align: center">3</span></a>
+    </nav>
+
+    <div style="display: flex; align-items: center; gap: 12px; background: #12302B; border-radius: 12px; padding: 14px">
+      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#5FD3BE" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M8 12l3 3 5-6"></path></svg>
+      <div><div style="font-weight: 600; color: #5FD3BE">Le site répond</div><div style="font-size: 13px; color: #B8C0C7">dernière sonde 21:49 · depuis Paris, Francfort, Londres</div></div>
+    </div>
+
+    <section aria-labelledby="h-probes" style="display: flex; flex-direction: column; gap: 8px">
+      <h2 id="h-probes" style="margin: 0; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: #9AA3AB">Sondes · toutes les 2 min</h2>
+      <div style="background: #171B1F; border: 1px solid #262C32; border-radius: 12px">
+        <sc-for list="{{probes}}" as="p" hint-placeholder-count="3">
+          <div style="display: flex; align-items: center; gap: 10px; min-height: 56px; padding: 8px 14px; border-top: {{p.sep}}">
+            <div style="flex: 1; min-width: 0"><div style="font-family: 'IBM Plex Mono', monospace; font-size: 13px; word-break: break-all">{{p.url}}</div><div style="font-size: 12px; color: #9AA3AB">{{p.what}}</div></div>
+            <span style="font-family: 'IBM Plex Mono', monospace; font-size: 13px; color: #5FD3BE">{{p.code}}</span>
+            <span style="font-family: 'IBM Plex Mono', monospace; font-size: 13px; width: 52px; text-align: right">{{p.time}}</span>
+          </div>
+        </sc-for>
+        <button type="button" style="width: 100%; min-height: 48px; background: transparent; border: 0; border-top: 1px solid #22282D; color: #7FC4F5; font: inherit; font-size: 13px; cursor: pointer">Ajouter une sonde</button>
+      </div>
+    </section>
+
+    <section aria-labelledby="h-inc" style="display: flex; flex-direction: column; gap: 8px">
+      <h2 id="h-inc" style="margin: 0; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: #9AA3AB">Incidents · 30 derniers jours</h2>
+      <div style="background: #171B1F; border: 1px solid #262C32; border-radius: 12px">
+        <sc-for list="{{incidents}}" as="i" hint-placeholder-count="2">
+          <a href="Journal.dc.html" style="display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-top: {{i.sep}}; text-decoration: none; color: #E6E8EA">
+            <span style="{{i.chip}}">{{i.kind}}</span>
+            <span style="flex: 1; min-width: 0"><span style="display: block; font-size: 13px">{{i.what}}</span><span style="display: block; font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #9AA3AB">{{i.when}}</span></span>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#9AA3AB" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"></path></svg>
+          </a>
+        </sc-for>
+        <div style="padding: 12px 14px; border-top: 1px solid #22282D; font-size: 13px; color: #9AA3AB">Aucun autre incident depuis le 14/09.</div>
+      </div>
+    </section>
+
+    <section aria-labelledby="h-tls" style="display: flex; flex-direction: column; gap: 8px">
+      <h2 id="h-tls" style="margin: 0; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: #9AA3AB">Certificat HTTPS</h2>
+      <div style="background: #171B1F; border: 1px solid #262C32; border-radius: 12px; padding: 12px 14px; display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 4px 10px; font-size: 13px">
+        <span style="color: #9AA3AB">Expire</span><span>le 05/01/2027, dans 83 jours</span>
+        <span style="color: #9AA3AB">Domaines</span><span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px">[client-1].fr + 8 domaines</span>
+        <span style="color: #9AA3AB">Renouvellement</span><span>automatique chez Alwaysdata</span>
+      </div>
+    </section>
+  </main>
+
+  <nav aria-label="Navigation du site" style="position: sticky; bottom: 0; z-index: 2; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); background: #13171A; border-top: 1px solid #2F363D; padding: 4px 4px 16px">
+    <a href="ATraiter.dc.html" style="position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-height: 56px; color: #B8C0C7; text-decoration: none; font-size: 12px"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 11l3 3 8-8"></path><path d="M20 12v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h9"></path></svg>À traiter<span style="position: absolute; top: 2px; left: 52%; min-width: 20px; height: 20px; padding: 0 6px; box-sizing: border-box; border-radius: 10px; background: #FF8B7D; color: #2A0E0A; font-size: 12px; font-weight: 600; line-height: 20px; text-align: center">5</span></a>
+    <a href="Site.dc.html" style="position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-height: 56px; color: #B8C0C7; text-decoration: none; font-size: 12px"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h4l3-8 4 16 3-8h4"></path></svg>Trafic<span style="position: absolute; top: 2px; left: 52%; min-width: 20px; height: 20px; padding: 0 6px; box-sizing: border-box; border-radius: 10px; background: #F5BC62; color: #2A1E05; font-size: 12px; font-weight: 600; line-height: 20px; text-align: center">3</span></a>
+    <a href="Erreurs.dc.html" style="position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-height: 56px; color: #B8C0C7; text-decoration: none; font-size: 12px"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l9.5 17h-19z"></path><path d="M12 10v4M12 17v.5"></path></svg>Erreurs<span style="position: absolute; top: 2px; left: 52%; min-width: 20px; height: 20px; padding: 0 6px; box-sizing: border-box; border-radius: 10px; background: #FF8B7D; color: #2A0E0A; font-size: 12px; font-weight: 600; line-height: 20px; text-align: center">2</span></a>
+    <a href="Dispo.dc.html" aria-current="page" style="position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-height: 56px; color: #5FD3BE; text-decoration: none; font-size: 12px; font-weight: 600"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.8 5.6a5.5 5.5 0 0 0-7.8 0L12 6.6l-1-1a5.5 5.5 0 0 0-7.8 7.8L12 22l8.8-8.6a5.5 5.5 0 0 0 0-7.8z"></path></svg>Santé<span style="position: absolute; top: 2px; left: 52%; min-width: 20px; height: 20px; padding: 0 6px; box-sizing: border-box; border-radius: 10px; background: #FF8B7D; color: #2A0E0A; font-size: 12px; font-weight: 600; line-height: 20px; text-align: center">3</span></a>
+  </nav>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":1400}}'>
+class Component extends DCLogic {
+  renderVals() {
+    var sep = function (l) { return l.map(function (x, i) { x.sep = i === 0 ? '0' : '1px solid #22282D'; return x; }); };
+    var chip = function (bg, fg) { return 'flex: none; padding: 2px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; background: ' + bg + '; color: ' + fg; };
+    return {
+      probes: sep([
+        { url: '/', what: 'page d’accueil', code: '200', time: '0,21 s' },
+        { url: '/commande', what: 'tunnel de commande', code: '200', time: '0,38 s' }
+      ]),
+      incidents: sep([
+        { kind: 'Coupure', chip: chip('#3A1A16', '#FF8B7D'), what: 'Injoignable depuis 2 sondes · réponses 503', when: '09/10 16:22 → 16:31 · 9 min' },
+        { kind: 'Lent', chip: chip('#33280F', '#F5BC62'), what: 'Accueil à 4,2 s', when: '02/10 03:10 → 03:12 · 2 min' }
+      ])
+    };
+  }
+}
+</script>
+</body>
+</html>

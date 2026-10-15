@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Vigie — réglages globaux</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0F1214}
+a{color:#7FC4F5}a:hover{color:#B5DDFA}
+:focus-visible{outline:2px solid #5FD3BE;outline-offset:2px}
+</style>
+</helmet>
+<div style="position: relative; width: 390px; min-height: 844px; box-sizing: border-box; background: #0F1214; color: #E6E8EA; font-family: 'IBM Plex Sans', system-ui, sans-serif; font-size: 15px; line-height: 1.45">
+
+  <header style="position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 4px; padding: 8px; background: #13171A; border-bottom: 1px solid #262C32">
+    <a href="Main.dc.html" aria-label="Retour à mes sites" style="width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; color: #B8C0C7"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"></path></svg></a>
+    <div style="flex: 1; min-width: 0"><div style="font-weight: 600">Réglages</div><div style="font-size: 12px; color: #9AA3AB">pour tous les sites</div></div>
+  </header>
+
+  <main style="padding: 16px 16px 32px; display: flex; flex-direction: column; gap: 22px">
+
+    <section aria-labelledby="h-rules" style="display: flex; flex-direction: column; gap: 8px">
+      <h2 id="h-rules" style="margin: 0; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: #9AA3AB">Quand m'écrire · {{activeCount}} règles actives</h2>
+      <div style="background: #171B1F; border: 1px solid #262C32; border-radius: 12px">
+        <sc-for list="{{rules}}" as="r" hint-placeholder-count="9">
+          <div style="padding: 12px 14px; border-top: {{r.sep}}; display: flex; flex-direction: column; gap: 8px">
+            <div style="display: flex; align-items: center; gap: 12px">
+              <div style="flex: 1; min-width: 0; {{r.labelStyle}}">{{r.label}}</div>
+              <button type="button" role="switch" aria-checked="{{r.aria}}" aria-label="{{r.label}}" onClick="{{r.toggle}}" style="flex: none; width: 52px; height: 32px; padding: 3px; border: 0; border-radius: 999px; cursor: pointer; display: flex; {{r.track}}"><span style="width: 26px; height: 26px; border-radius: 50%; background: #F4F6F7"></span></button>
+            </div>
+            <sc-if value="{{r.on}}" hint-placeholder-val="{{true}}">
+              <sc-if value="{{r.hasNum}}" hint-placeholder-val="{{true}}">
+                <div style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: #B8C0C7">
+                  <label for="{{r.inputId}}">{{r.before}}</label>
+                  <input id="{{r.inputId}}" type="number" value="{{r.num}}" style="width: 64px; height: 44px; padding: 0 8px; background: #0F1214; border: 1px solid #626C76; border-radius: 10px; color: #E6E8EA; font-family: 'IBM Plex Mono', monospace; font-size: 13px; text-align: right">
+                  <span>{{r.after}}</span>
+                </div>
+              </sc-if>
+              <sc-if value="{{r.noNum}}" hint-placeholder-val="{{false}}"><div style="font-size: 13px; color: #B8C0C7">{{r.before}}</div></sc-if>
+              <div role="group" aria-label="Envoi pour {{r.label}}" style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); background: #0F1214; border: 1px solid #262C32; border-radius: 10px; padding: 3px">
+                <button type="button" aria-pressed="{{r.nowPressed}}" onClick="{{r.setNow}}" style="height: 40px; border: 0; border-radius: 8px; font: inherit; font-size: 13px; cursor: pointer; {{r.nowStyle}}">Immédiat</button>
+                <button type="button" aria-pressed="{{r.digestPressed}}" onClick="{{r.setDigest}}" style="height: 40px; border: 0; border-radius: 8px; font: inherit; font-size: 13px; cursor: pointer; {{r.digestStyle}}">Email du matin</button>
+              </div>
+              <sc-if value="{{r.hasNote}}" hint-placeholder-val="{{false}}"><div style="font-size: 12px; color: #9AA3AB">{{r.note}}</div></sc-if>
+            </sc-if>
+          </div>
+        </sc-for>
+        <div style="display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-top: 1px solid #22282D">
+          <div style="flex: 1"><div>Prévenir quand c'est rétabli</div><div style="font-size: 12px; color: #9AA3AB">pour les alertes immédiates</div></div>
+          <button type="button" role="switch" aria-checked="true" aria-label="Prévenir quand c'est rétabli" style="flex: none; width: 52px; height: 32px; padding: 3px; border: 0; border-radius: 999px; display: flex; justify-content: flex-end; background: #3FB8A4"><span style="width: 26px; height: 26px; border-radius: 50%; background: #F4F6F7"></span></button>
+        </div>
+      </div>
+      <div style="font-size: 12px; color: #9AA3AB">Immédiat : au plus un email toutes les 30 min par règle et par site, sauf « Site injoignable » et « Vigie ne voit plus un site ». Chaque site peut changer un seuil dans ses paramètres.</div>
+    </section>
+
+    <section aria-labelledby="h-dest" style="display: flex; flex-direction: column; gap: 8px">
+      <h2 id="h-dest" style="margin: 0; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: #9AA3AB">Destinataires</h2>
+      <div style="background: #171B1F; border: 1px solid #262C32; border-radius: 12px">
+        <sc-for list="{{dest}}" as="d" hint-placeholder-count="2">
+          <div style="padding: 10px 14px; border-top: {{d.sep}}; display: flex; flex-direction: column; gap: 8px">
+            <div style="display: flex; align-items: center; gap: 8px">
+              <span style="flex: 1; min-width: 0; font-family: 'IBM Plex Mono', monospace; font-size: 13px; overflow: hidden; text-overflow: ellipsis">{{d.mail}}</span>
+              <button type="button" aria-label="Supprimer {{d.mail}}" onClick="{{d.remove}}" style="flex: none; width: 44px; height: 44px; background: transparent; border: 1px solid #626C76; border-radius: 10px; color: #B8C0C7; cursor: pointer; display: flex; align-items: center; justify-content: center"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"></path></svg></button>
+            </div>
+            <label for="{{d.id}}" style="position: absolute; left: -9999px">Ce que reçoit {{d.mail}}</label>
+            <select id="{{d.id}}" style="height: 44px; padding: 0 8px; background: #0F1214; border: 1px solid #626C76; border-radius: 10px; color: #E6E8EA; font: inherit; font-size: 13px">
+              <sc-for list="{{d.scopes}}" as="o" hint-placeholder-count="3"><option selected="{{o.sel}}">{{o.v}}</option></sc-for>
+            </select>
+          </div>
+        </sc-for>
+        <div style="display: flex; gap: 8px; padding: 10px 14px; border-top: 1px solid #22282D">
+          <label for="newmail" style="position: absolute; left: -9999px">Ajouter un destinataire</label>
+          <input id="newmail" type="email" placeholder="ajouter une adresse" style="flex: 1; min-width: 0; height: 44px; padding: 0 12px; background: #0F1214; border: 1px solid #626C76; border-radius: 10px; color: #E6E8EA; font: inherit; font-size: 15px">
+          <button type="button" aria-label="Ajouter" style="width: 44px; height: 44px; flex: none; background: transparent; border: 1px solid #626C76; border-radius: 10px; color: #E6E8EA; cursor: pointer; display: flex; align-items: center; justify-content: center"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg></button>
+        </div>
+      </div>
+      <div style="display: flex; align-items: center; justify-content: space-between; gap: 10px; background: #171B1F; border: 1px solid #262C32; border-radius: 12px; padding: 8px 14px">
+        <label for="hour">Email du matin à</label>
+        <input id="hour" type="time" value="08:00" style="height: 44px; padding: 0 10px; background: #0F1214; border: 1px solid #626C76; border-radius: 10px; color: #E6E8EA; font: inherit; color-scheme: dark">
+      </div>
+      <div style="display: flex; gap: 8px">
+        <a href="Emails.dc.html" style="flex: 1; height: 44px; display: flex; align-items: center; justify-content: center; border: 1px solid #626C76; border-radius: 10px; color: #E6E8EA; text-decoration: none; font-size: 13px">Voir des exemples</a>
+        <button type="button" onClick="{{test}}" style="flex: 1; height: 44px; background: transparent; border: 1px solid #626C76; border-radius: 10px; color: #E6E8EA; font: inherit; font-size: 13px; cursor: pointer">{{testLabel}}</button>
+      </div>
+    </section>
+
+    <section aria-labelledby="h-keys" style="display: flex; flex-direction: column; gap: 8px">
+      <h2 id="h-keys" style="margin: 0; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: #9AA3AB">Clés SSH</h2>
+      <div style="background: #171B1F; border: 1px solid #262C32; border-radius: 12px">
+        <div style="padding: 10px 14px"><div style="font-family: 'IBM Plex Mono', monospace; font-size: 13px">vigie_ed25519</div><div style="font-size: 12px; color: #9AA3AB">5 sites · créée le 20/09</div></div>
+        <div style="padding: 10px 14px; border-top: 1px solid #22282D"><div style="font-family: 'IBM Plex Mono', monospace; font-size: 13px">vigie_2026</div><div style="font-size: 12px; color: #FF8B7D">refusée par [client-3].fr depuis 19:40</div></div>
+        <sc-if value="{{newKey}}" hint-placeholder-val="{{false}}">
+          <div style="padding: 12px 14px; border-top: 1px solid #22282D; display: flex; flex-direction: column; gap: 8px">
+            <div style="font-size: 13px">Clé créée. Ajoute la clé publique dans Alwaysdata › Accès distant › SSH, puis teste la connexion depuis le site.</div>
+            <pre style="margin: 0; padding: 10px; background: #0B0E10; border: 1px solid #22282D; border-radius: 8px; font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #B8C0C7; white-space: pre-wrap; word-break: break-all">ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA[…] vigie_oct26</pre>
+            <button type="button" style="height: 44px; background: transparent; border: 1px solid #626C76; border-radius: 10px; color: #E6E8EA; font: inherit; cursor: pointer">Copier la clé publique</button>
+          </div>
+        </sc-if>
+        <button type="button" onClick="{{makeKey}}" style="width: 100%; min-height: 48px; background: transparent; border: 0; border-top: 1px solid #22282D; color: #7FC4F5; font: inherit; font-size: 13px; cursor: pointer">Créer une nouvelle clé</button>
+      </div>
+    </section>
+
+    <section aria-labelledby="h-look" style="display: flex; flex-direction: column; gap: 8px">
+      <h2 id="h-look" style="margin: 0; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: #9AA3AB">Apparence</h2>
+      <div role="radiogroup" aria-label="Thème" style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); background: #171B1F; border: 1px solid #262C32; border-radius: 10px; padding: 3px">
+        <sc-for list="{{themes}}" as="t" hint-placeholder-count="3">
+          <button type="button" role="radio" aria-checked="{{t.aria}}" onClick="{{t.pick}}" style="height: 44px; border: 0; border-radius: 8px; font: inherit; font-size: 15px; cursor: pointer; {{t.style}}">{{t.label}}</button>
+        </sc-for>
+      </div>
+      <div style="font-size: 12px; color: #9AA3AB">Le thème clair se lit mieux dehors, en plein soleil.</div>
+    </section>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":2300}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = {
+      on: { down: true, blind: true, slow: true, freq: true, bot: true, php: true, vuln: true, tls: true, ht: true },
+      mode: { down: 0, blind: 0, slow: 0, freq: 1, bot: 1, php: 0, vuln: 0, tls: 1, ht: 1 },
+      dest: ['a', 'b'], sent: false, newKey: false, theme: 'dark'
+    };
+  }
+  renderVals() {
+    var self = this;
+    var st = this.state;
+    var defs = [
+      { id: 'down', label: 'Site injoignable', before: '2 sondes en échec pendant', num: 2, after: 'min', note: 'Jamais limité à un email toutes les 30 min.' },
+      { id: 'blind', label: 'Vigie ne voit plus un site', before: 'connexion SSH en échec depuis', num: 30, after: 'min', note: 'Jamais limité.' },
+      { id: 'slow', label: 'Pages lentes', before: 'plus de', num: 3, after: 's pendant 10 min' },
+      { id: 'php', label: 'Erreurs PHP fatales', before: 'plus de', num: 5, after: 'en 1 heure' },
+      { id: 'vuln', label: 'Faille trouvée au contrôle', before: 'dès qu’une nouvelle faille est trouvée' },
+      { id: 'freq', label: 'IP très active', before: 'plus de', num: 250, after: 'req/jour' },
+      { id: 'bot', label: 'Nouveau visiteur à trier', before: 'plus de', num: 50, after: 'req/jour' },
+      { id: 'tls', label: 'Certificat bientôt expiré', before: 'moins de', num: 14, after: 'jours' },
+      { id: 'ht', label: '.htaccess ou robots.txt modifié', before: 'par Vigie ou à la main' }
+    ];
+    var seg = function (on) { return on ? 'background: #2A3138; color: #E6E8EA; font-weight: 600' : 'background: transparent; color: #B8C0C7'; };
+    var setMode = function (id, m) { var n = Object.assign({}, self.state.mode); n[id] = m; self.setState({ mode: n }); };
+    var rules = defs.map(function (d, i) {
+      var on = st.on[d.id];
+      var m = st.mode[d.id];
+      return {
+        label: d.label, before: d.before, num: d.num, after: d.after || '', hasNum: d.num !== undefined, noNum: d.num === undefined, inputId: 'n-' + d.id,
+        hasNote: !!d.note, note: d.note || '',
+        on: on, aria: on ? 'true' : 'false', sep: i === 0 ? '0' : '1px solid #22282D',
+        labelStyle: on ? 'color: #E6E8EA' : 'color: #9AA3AB',
+        track: on ? 'justify-content: flex-end; background: #3FB8A4' : 'justify-content: flex-start; background: #646D75',
+        toggle: function () { var n = Object.assign({}, self.state.on); n[d.id] = !n[d.id]; self.setState({ on: n }); },
+        nowPressed: m === 0 ? 'true' : 'false', digestPressed: m === 1 ? 'true' : 'false',
+        nowStyle: seg(m === 0), digestStyle: seg(m === 1),
+        setNow: function () { setMode(d.id, 0); }, setDigest: function () { setMode(d.id, 1); }
+      };
+    });
+    var scopes = ['Tout', 'Immédiat seulement', 'Coupures seulement'];
+    var D = { a: ['[ton-adresse]@[domaine]', 'Tout'], b: ['[contact-client]@[client-1].fr', 'Coupures seulement'] };
+    var dest = st.dest.map(function (k, i) {
+      return { id: 'scope-' + k, mail: D[k][0], sep: i === 0 ? '0' : '1px solid #22282D',
+        scopes: scopes.map(function (s) { return { v: s, sel: s === D[k][1] }; }),
+        remove: function () { self.setState({ dest: self.state.dest.filter(function (x) { return x !== k; }) }); } };
+    });
+    var tdefs = [['dark', 'Sombre'], ['light', 'Clair'], ['auto', 'Système']];
+    var themes = tdefs.map(function (t) {
+      var on = st.theme === t[0];
+      return { label: t[1], aria: on ? 'true' : 'false', style: seg(on), pick: function () { self.setState({ theme: t[0] }); } };
+    });
+    return {
+      rules: rules, dest: dest, themes: themes,
+      activeCount: defs.filter(function (d) { return st.on[d.id]; }).length,
+      testLabel: st.sent ? 'Envoyé à ' + st.dest.length + ' adresse' + (st.dest.length > 1 ? 's' : '') : 'Envoyer un test',
+      test: function () { self.setState({ sent: true }); },
+      newKey: st.newKey, makeKey: function () { self.setState({ newKey: true }); }
+    };
+  }
+}
+</script>
+</body>
+</html>
