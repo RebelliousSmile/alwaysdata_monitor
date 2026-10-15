@@ -1,0 +1,10 @@
+{
+  "name": "sc-alwaysdata-deploy",
+  "private": true,
+  "type": "module",
+  "description": "Outillage de déploiement du module sc_alwaysdata (non embarqué dans le module)",
+  "scripts": {
+    "deploy:check": "node --test scripts/deploy-lib.test.mjs && node scripts/deploy.mjs --check",
+    "deploy:module": "node scripts/deploy.mjs"
+  }
+}

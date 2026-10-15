@@ -1,3 +1,5 @@
 /vendor/
 *.log
 .php-cs-fixer.cache
+# Cibles réelles (hôtes et comptes clients) : le dépôt est public
+/deploy/targets.json
