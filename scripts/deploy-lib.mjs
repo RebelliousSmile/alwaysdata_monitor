@@ -1,5 +1,5 @@
-// Fonctions pures du déploiement, partagées par scripts/deploy.mjs (module) et
-// vigie/scripts/deploy.mjs (veilleur) : aucune n'appelle git, WSL ni le
+// Fonctions pures du déploiement, partagées par scripts/deploy.mjs (module),
+// vigie/scripts/deploy.mjs (veilleur) et vigie/scripts/deploy-agent.mjs (agent) : aucune n'appelle git, WSL ni le
 // réseau, pour rester testables avec `node --test`. withRemoteLock reçoit la
 // fonction ssh en paramètre pour la même raison.
 
@@ -130,6 +130,42 @@ export async function withRemoteLock(ssh, { lockPath, sshKey, remote }, body) {
       console.error(`✖ Verrou non libéré : wsl ssh -i ${sshKey} ${remote} "rmdir ${lockPath}"`)
     }
   }
+}
+
+// L'agent n'a rien à faire sous le webroot d'Alwaysdata (~/www) : appelé par
+// le web, il sort sans rien faire, mais rien ne doit pouvoir l'exposer.
+export function validateAgentTarget(name, raw, file) {
+  const access = validateSshAccess(name, raw, file)
+  const remoteDir = validateRemoteRelativePath('remoteDir', raw.remoteDir ?? 'vigie-agent')
+  if (/^www/i.test(remoteDir)) {
+    throw new Error(`remoteDir ne doit pas être sous le webroot ~/www (reçu : ${remoteDir})`)
+  }
+  return {
+    ...access,
+    remoteDir,
+    script: `${remoteDir}/vigie-agent.php`,
+    lockPath: `${remoteDir}/deploy.lock`,
+    recordPath: `${remoteDir}/last-deploy.json`,
+  }
+}
+
+// Chemin absolu résolu sur la cible (liens compris) : sous ~/www, refus.
+export function assertOutsideWebroot(resolved, home) {
+  if (!resolved.startsWith('/') || !home.startsWith('/')) {
+    throw new Error(`Chemins distants illisibles : ${resolved} (home ${home})`)
+  }
+  const webroot = `${home.replace(/\/+$/, '')}/www`
+  if (resolved === webroot || resolved.startsWith(`${webroot}/`)) {
+    throw new Error(`Destination ${resolved} sous le webroot ${webroot} : refusé`)
+  }
+  return resolved
+}
+
+export function extractAgentVersion(php) {
+  const match = /^const VERSION = '([^']+)';$/m.exec(php)
+  if (!match) throw new Error('Constante VERSION introuvable dans vigie-agent.php')
+  parseVersion(match[1])
+  return match[1]
 }
 
 export function validateTarget(name, raw) {

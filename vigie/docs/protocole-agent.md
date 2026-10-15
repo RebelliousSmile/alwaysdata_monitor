@@ -4,8 +4,10 @@ Un agent installé sur un site envoie au veilleur, à intervalle régulier, un
 rapport signé de ce qu'il voit de l'intérieur. Le veilleur ne garde que la clé
 publique de chaque site : la clé privée ne quitte jamais le site.
 
-Ce document est le contrat. `vigie/src/report.rs`, `vigie/src/ingest.rs`
-et `vigie/tests/ingest.rs` en reprennent chaque règle.
+Ce document est le contrat. `vigie/src/report.rs`, `vigie/src/ingest.rs`,
+`vigie/src/facts.rs` et `vigie/tests/ingest.rs` en reprennent chaque règle.
+L'agent PHP qui le respecte est décrit dans `agent-php.md`, et
+`vigie/tests/interop.rs` vérifie un rapport qu'il a signé.
 
 ## Requête
 
@@ -42,12 +44,13 @@ rapport) :
 | `agent` | chaîne | nom et version de l'agent, 1 à 64 caractères imprimables |
 | `findings` | tableau | 100 constats au plus, voir ci-dessous |
 | `facts` | objet | 50 entrées au plus ; clés `[a-z0-9_-]`, 1 à 64 caractères ; valeurs chaînes de 256 caractères au plus, nombres, booléens ou `null` |
+| `files` | objet, facultatif | 100 entrées au plus ; clé : chemin d'un fichier critique relatif à la racine du site, 1 à 200 caractères imprimables ; valeur : son SHA-256 en 64 caractères hexadécimaux minuscules, ou `null` si le fichier est absent |
 
 Chaque constat :
 
 | Champ | Type | Règle |
 | ----- | ---- | ----- |
-| `check` | chaîne | famille du contrôle, `[a-z0-9-]`, 1 à 32 caractères |
+| `check` | chaîne | famille du contrôle, `[a-z0-9-]`, 1 à 32 caractères, sauf `integrity`, réservé au veilleur |
 | `severity` | chaîne | `info`, `warning` ou `critical` |
 | `key` | chaîne | identifiant stable du constat, 1 à 200 caractères imprimables, jamais une heure ni une valeur mesurée |
 | `detail` | chaîne | texte lisible, 1 à 300 caractères imprimables, montré dans l'e-mail |
@@ -60,6 +63,9 @@ constats à chaque rapport, même ceux déjà signalés.
 
 `facts` sert au relevé (versions de PHP, du CMS, des extensions…) : le dernier
 relevé accepté est conservé, il n'ouvre aucun incident.
+
+`files` sert à la comparaison d'intégrité (voir plus bas) : l'agent ne garde
+aucun état, c'est le veilleur qui voit qu'un fichier a changé.
 
 ## Acceptation
 
@@ -101,9 +107,36 @@ Un refus répété se lit dans `journalctl -u vigie-serve` sur le veilleur.
   le contrôle `agent:<check>` : un constat nouveau ouvre un incident, un constat
   disparu le clôt. Les constats `info` sont montrés dans `vigie status` et
   jamais envoyés par e-mail.
+- Les empreintes `files` sont comparées à la référence du site (ci-dessous).
 - Un incident « agent silencieux » ouvert pour ce site est clos.
 - `serve` n'envoie aucun e-mail : le passage suivant de `vigie tick`, dans la
   minute, envoie les ouvertures et les clôtures.
+
+## Intégrité des fichiers critiques
+
+Le premier rapport accepté qui porte des empreintes `files` pose la
+**référence** du site. Ensuite, à chaque rapport :
+
+- une empreinte différente de celle de la référence ouvre un incident
+  d'avertissement `agent:integrity`, clé `modified:<chemin>`. La référence ne
+  suit pas : l'incident reste ouvert tant que le fichier diffère, et se clôt
+  s'il revient à son contenu de référence ;
+- un chemin inconnu de la référence, ou absent quand elle a été posée, y entre
+  avec son empreinte, sans incident ;
+- un fichier absent (`null`) n'ouvre rien ici, l'agent le signale lui-même
+  (`critical-file`), et la référence garde son ancienne empreinte : un fichier
+  restauré avec un autre contenu est signalé ;
+- un chemin que l'agent ne rapporte plus reste dans la référence.
+
+Après une modification voulue (mise à jour de WordPress, règle `.htaccess`
+ajoutée), prendre les empreintes du dernier rapport comme nouvelle référence :
+
+```console
+$ ~/vigie/bin/vigie site accept site-a
+```
+
+Les incidents d'intégrité du site sont clos aussitôt. `site remove` efface la
+référence avec la clé ; `site rotate-key` la garde.
 
 ## Silence
 
@@ -119,6 +152,7 @@ clôt.
 $ ~/vigie/bin/vigie site add site-a --pubkey <base64 de la clé publique>
 $ ~/vigie/bin/vigie site list
 $ ~/vigie/bin/vigie site rotate-key site-a --pubkey <base64 de la nouvelle clé>
+$ ~/vigie/bin/vigie site accept site-a
 $ ~/vigie/bin/vigie site remove site-a
 ```
 
@@ -130,6 +164,7 @@ $ ~/vigie/bin/vigie site remove site-a
   refusé dès la rotation. La séquence repart de zéro, puisque l'ancienne clé ne
   peut plus rien faire accepter ; le silence reste mesuré depuis le dernier
   rapport accepté.
-- `site remove` retire la clé et l'état des rapports, après confirmation (taper
+- `site remove` retire la clé, l'état des rapports et la référence
+  d'empreintes, après confirmation (taper
   l'identifiant du site) ou avec `--yes`. Les incidents de l'agent sont clos au
   passage suivant de `tick`.

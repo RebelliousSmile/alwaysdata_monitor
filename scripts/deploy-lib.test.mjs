@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import {
   assertVersionsAligned,
+  assertOutsideWebroot,
   assertWslHome,
   backupFileName,
   compareVersions,
@@ -12,6 +13,8 @@ import {
   shQuote,
   sshOptions,
   touchesContainer,
+  extractAgentVersion,
+  validateAgentTarget,
   validateRemoteRelativePath,
   validateSshAccess,
   validateTarget,
@@ -193,4 +196,34 @@ test('withRemoteLock signale un verrou non rendu sans masquer le résultat', asy
   t.mock.method(console, 'error', message => errors.push(message))
   assert.equal(await withRemoteLock(ssh, LOCK, async () => 'ok'), 'ok')
   assert.match(errors[0], /Verrou non libéré.*rmdir vigie\/deploy\.lock/)
+})
+
+const AGENT = { host: 'ssh-site.example.org', user: 'site', sshKey: '~/.ssh/vigie_agent' }
+
+test('validateAgentTarget pose ~/vigie-agent par défaut', () => {
+  const target = validateAgentTarget('site-a-agent', AGENT, 'x.json')
+  assert.equal(target.script, 'vigie-agent/vigie-agent.php')
+  assert.equal(target.lockPath, 'vigie-agent/deploy.lock')
+  assert.equal(target.remote, 'site@ssh-site.example.org')
+})
+
+test('validateAgentTarget refuse une destination sous ~/www', () => {
+  for (const remoteDir of ['www', 'www/vigie', 'WWW/x', 'www-old']) {
+    assert.throws(() => validateAgentTarget('a', { ...AGENT, remoteDir }, 'x.json'), /webroot/)
+  }
+  assert.throws(() => validateAgentTarget('a', { ...AGENT, remoteDir: '../www' }, 'x.json'), /relatif/)
+})
+
+test('assertOutsideWebroot juge le chemin résolu, liens compris', () => {
+  assert.equal(assertOutsideWebroot('/home/site/vigie-agent', '/home/site'), '/home/site/vigie-agent')
+  assert.equal(assertOutsideWebroot('/home/site/wwwx', '/home/site/'), '/home/site/wwwx')
+  assert.throws(() => assertOutsideWebroot('/home/site/www', '/home/site'), /webroot/)
+  assert.throws(() => assertOutsideWebroot('/home/site/www/a', '/home/site'), /webroot/)
+  assert.throws(() => assertOutsideWebroot('', '/home/site'), /illisibles/)
+})
+
+test('extractAgentVersion lit la constante de l\'agent', () => {
+  assert.equal(extractAgentVersion("<?php\nconst VERSION = '0.1.0';\nconst AGENT = 'x';\n"), '0.1.0')
+  assert.throws(() => extractAgentVersion('<?php\n'), /VERSION introuvable/)
+  assert.throws(() => extractAgentVersion("const VERSION = '0.1';"), /non numérique/)
 })

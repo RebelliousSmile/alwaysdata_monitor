@@ -5,6 +5,7 @@
 pub mod alert;
 pub mod checks;
 pub mod config;
+pub mod facts;
 pub mod finding;
 pub mod http;
 pub mod ingest;

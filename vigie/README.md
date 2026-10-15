@@ -1,9 +1,9 @@
 # vigie — veilleur multi-sites
 
-Veilleur hébergé sur un VPS (nom provisoire). Il surveille les sites de
+Veilleur hébergé sur un VPS. Il surveille les sites de
 l'extérieur, reçoit les rapports signés d'un agent PHP posé sur chaque site
-(protocole : [`docs/protocole-agent.md`](./docs/protocole-agent.md)) et alerte
-par e-mail.
+(protocole : [`docs/protocole-agent.md`](./docs/protocole-agent.md), pose :
+[`docs/agent-php.md`](./docs/agent-php.md)) et alerte par e-mail.
 
 Ce dossier est indépendant du module PrestaShop `sc_alwaysdata` à la racine du
 dépôt : il n'entre ni dans son déploiement (`scripts/deploy.mjs`), ni dans une
@@ -22,7 +22,8 @@ Sur le veilleur, toujours appeler le binaire par son chemin complet.
 | `~/vigie/bin/vigie site list` | Sites de la configuration et état de leur agent : sans agent, clé sans rapport, âge du dernier rapport accepté |
 | `~/vigie/bin/vigie site add <site> --pubkey <base64>` | Enregistre la clé publique Ed25519 (32 octets) de l'agent d'un site de la configuration ; refusé si le site a déjà une clé |
 | `~/vigie/bin/vigie site rotate-key <site> --pubkey <base64>` | Remplace la clé : un rapport signé par l'ancienne est refusé dès maintenant |
-| `~/vigie/bin/vigie site remove <site> [--yes]` | Retire la clé et l'état des rapports ; sans `--yes`, demande de retaper l'identifiant |
+| `~/vigie/bin/vigie site accept <site>` | Prend les empreintes du dernier rapport comme référence et clôt les incidents d'intégrité : à lancer après une modification voulue d'un fichier critique |
+| `~/vigie/bin/vigie site remove <site> [--yes]` | Retire la clé, l'état des rapports et la référence des empreintes ; sans `--yes`, demande de retaper l'identifiant |
 | `~/vigie/bin/vigie ack <id>` | Acquitte un incident : plus de rappel, la clôture automatique reste active |
 | `~/vigie/bin/vigie test-alert` | Envoie un e-mail de test par le relais SMTP configuré |
 
@@ -42,6 +43,14 @@ contrôles préfixés `agent:`. `serve` n'envoie aucun e-mail : c'est le `tick`
 suivant qui notifie. Un site dont l'agent a une clé et ne fait accepter aucun
 rapport pendant `agent_silence` secondes (900 par défaut) ouvre un incident
 critique `heartbeat`, clos par le rapport accepté suivant.
+
+L'agent ne garde aucun état : c'est le veilleur qui voit une dérive. Le premier
+rapport qui porte des empreintes (`files`) pose la référence du site ; ensuite,
+un fichier critique dont l'empreinte diffère ouvre un avertissement
+`agent:integrity`, maintenu tant que le fichier diffère et jusqu'à
+`site accept`. Un chemin nouveau entre dans la référence sans constat. Le
+contrôle `integrity` est réservé au veilleur : un rapport qui l'envoie est
+refusé.
 
 ## Contrôles
 
@@ -94,6 +103,21 @@ local, avec une autorité de certification de test, et remplace l'envoi SMTP
 par un notifier en mémoire : aucun site réel n'est contacté, aucun e-mail
 n'est envoyé. `tests/ingest.rs` signe des rapports avec une clé de test et
 vérifie les vecteurs Ed25519 de la RFC 8032 (`tests/fixtures/rfc8032.json`).
+`tests/interop.rs` vérifie qu'un rapport signé par l'agent PHP (sodium) est
+accepté tel quel par ed25519-dalek et par l'ingestion.
+
+L'agent PHP a ses propres tests, sans Composer, sur les arborescences de
+`agent/php/tests/fixtures/` (sodium requis, PHP 8.1 au moins) :
+
+```powershell
+php -d extension=sodium vigie/agent/php/tests/run.php
+# Après une modification du format du rapport : régénérer la fixture d'interopérabilité
+php -d extension=sodium vigie/agent/php/tests/make-interop-fixture.php
+```
+
+Sous Windows, l'antivirus peut mettre en quarantaine un fichier de test qui
+ressemble à un webshell (« Failed to open stream: Invalid argument ») : les
+fixtures ne contiennent que du PHP anodin.
 
 La version de Rust est épinglée à trois endroits, à garder identiques :
 `rust-toolchain.toml`, `rust-version` dans `Cargo.toml` et
@@ -121,3 +145,16 @@ en `vigie.prev`. Le script affiche la commande de retour arrière.
 Après la bascule, le script redémarre `serve` par la seule règle sudo de
 l'utilisateur `vigie` ; `tick` prend le nouveau binaire au passage suivant du
 timer.
+
+L'agent PHP se déploie de la même façon sur le compte SSH de chaque site, dans
+`~/vigie-agent/` (jamais sous `~/www`, refusé avant et après résolution des
+liens) :
+
+```powershell
+node vigie/scripts/deploy-agent.mjs site-a-agent --check    # php -l local si PHP est disponible
+node vigie/scripts/deploy-agent.mjs site-a-agent            # prévisualisation, compare les sha256
+node vigie/scripts/deploy-agent.mjs site-a-agent --apply    # envoi, php -l distant, bascule atomique
+```
+
+Le script ne touche ni à la configuration ni à la clé de l'agent : la pose
+complète est décrite dans [`docs/agent-php.md`](./docs/agent-php.md).
