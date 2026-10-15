@@ -1,5 +1,7 @@
-// Fonctions pures du déploiement : aucune n'appelle git, WSL ni le réseau,
-// pour rester testables avec `node --test`.
+// Fonctions pures du déploiement, partagées par scripts/deploy.mjs (module) et
+// monitor/scripts/deploy.mjs (veilleur) : aucune n'appelle git, WSL ni le
+// réseau, pour rester testables avec `node --test`. withRemoteLock reçoit la
+// fonction ssh en paramètre pour la même raison.
 
 // Liste blanche de ce qui part sur la boutique. Tout le reste (tests, outillage
 // PHP et Node, CHANGELOG, vendor/) reste local : le module se charge sans
@@ -54,19 +56,86 @@ export function shQuote(value) {
   return `'${String(value).replace(/'/g, `'\\''`)}'`
 }
 
-export function validateTarget(name, raw) {
-  if (!/^[a-z0-9-]+$/.test(name)) throw new Error(`Nom de cible invalide : ${name}`)
-  if (!raw || typeof raw !== 'object') throw new Error(`Cible « ${name} » absente de deploy/targets.json`)
-  const { host, user, sshKey, shopRoot, siteUrl, lifecycleRevision } = raw
+// Nom, hôte, compte et clé d'une cible : commun au module et au veilleur.
+// `file` ne sert qu'au message d'erreur.
+export function validateSshAccess(name, raw, file) {
+  if (!/^[a-z0-9-]+$/.test(name ?? '')) throw new Error(`Nom de cible invalide : ${name}`)
+  if (!raw || typeof raw !== 'object') throw new Error(`Cible « ${name} » absente de ${file}`)
+  const { host, user, sshKey } = raw
   if (!SAFE_HOST.test(host ?? '')) throw new Error(`host invalide pour « ${name} » : ${host}`)
   if (!SAFE_USER.test(user ?? '')) throw new Error(`user invalide pour « ${name} » : ${user}`)
   if (!/^~\/\.ssh\/[A-Za-z0-9._-]+$/.test(sshKey ?? '')) {
     throw new Error(`sshKey doit être une clé de ~/.ssh côté WSL (reçu : ${sshKey})`)
   }
-  // Relatif au home SSH : on ne devine pas /home/<compte>.
-  if (!SAFE_PATH.test(shopRoot ?? '') || shopRoot.startsWith('/') || shopRoot.includes('..')) {
-    throw new Error(`shopRoot doit être un chemin relatif au home SSH (reçu : ${shopRoot})`)
+  return { name, host, user, sshKey, remote: `${user}@${host}` }
+}
+
+// Relatif au home SSH : on ne devine pas /home/<compte>. Le chemin est ensuite
+// interpolé sans guillemets dans des commandes distantes, d'où la liste blanche.
+export function validateRemoteRelativePath(field, value) {
+  if (!SAFE_PATH.test(value ?? '') || value.startsWith('/') || value.includes('..')) {
+    throw new Error(`${field} doit être un chemin relatif au home SSH (reçu : ${value})`)
   }
+  return value
+}
+
+// HOME de WSL, interpolé dans un `rm -rf` de staging : refuser tout ce qui
+// n'est pas /home/<utilisateur> ou /root.
+export function assertWslHome(home) {
+  if (!/^\/(?:root|home\/[A-Za-z0-9._-]+)$/.test(home ?? '')) {
+    throw new Error(`HOME de WSL inattendu : « ${home} » (attendu /home/<utilisateur> ou /root)`)
+  }
+  return home
+}
+
+export function sshOptions(keyPath, wslHome) {
+  return [
+    '-i', keyPath,
+    '-o', 'IdentitiesOnly=yes',
+    '-o', 'BatchMode=yes',
+    '-o', 'StrictHostKeyChecking=accept-new',
+    '-o', 'ServerAliveInterval=15',
+    '-o', 'ServerAliveCountMax=4',
+    '-o', 'ControlMaster=auto',
+    '-o', `ControlPath=${wslHome}/.ssh/cm-%r@%h:%p`,
+    '-o', 'ControlPersist=60s',
+  ]
+}
+
+export function missingKeyHelp({ keyPath, sshKey, remote, comment }) {
+  return [
+    `Clé SSH absente côté WSL : ${keyPath}`,
+    `  wsl ssh-keygen -t ed25519 -N "" -C ${comment} -f ${sshKey}`,
+    `  wsl ssh-copy-id -i ${sshKey}.pub ${remote}`,
+  ].join('\n')
+}
+
+// Verrou distant par `mkdir` (atomique) : pris avant `body`, toujours rendu
+// après, même si `body` échoue. Un verrou non rendu est signalé, pas masqué.
+export async function withRemoteLock(ssh, { lockPath, sshKey, remote }, body) {
+  try {
+    await ssh(`mkdir ${lockPath}`)
+  }
+  catch {
+    throw new Error(`Verrou déjà pris (~/${lockPath}) : un autre déploiement est en cours, ou un précédent a été interrompu`)
+  }
+  try {
+    return await body()
+  }
+  finally {
+    try {
+      await ssh(`rmdir ${lockPath}`)
+    }
+    catch {
+      console.error(`✖ Verrou non libéré : wsl ssh -i ${sshKey} ${remote} "rmdir ${lockPath}"`)
+    }
+  }
+}
+
+export function validateTarget(name, raw) {
+  const access = validateSshAccess(name, raw, 'deploy/targets.json')
+  const { shopRoot, siteUrl, lifecycleRevision } = raw
+  validateRemoteRelativePath('shopRoot', shopRoot)
   let url
   try {
     url = new URL(siteUrl)
@@ -81,12 +150,8 @@ export function validateTarget(name, raw) {
 
   const stateDir = `deploy/sc_alwaysdata-${name}`
   return {
-    name,
-    host,
-    user,
-    sshKey,
+    ...access,
     siteUrl: url.href,
-    remote: `${user}@${host}`,
     moduleDir: `${shopRoot}/modules/sc_alwaysdata`,
     shopRoot,
     stateDir,

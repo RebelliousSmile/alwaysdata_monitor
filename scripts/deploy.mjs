@@ -16,14 +16,18 @@ import {
   DEPLOY_PATHS,
   REMOTE_PROTECTED,
   assertVersionsAligned,
+  assertWslHome,
   backupFileName,
   compareVersions,
   extractXmlVersion,
+  missingKeyHelp,
   parseArgs,
   parseItemized,
   shQuote,
+  sshOptions,
   touchesContainer,
   validateTarget,
+  withRemoteLock,
 } from './deploy-lib.mjs'
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..')
@@ -66,7 +70,7 @@ console.log(`Module sc_alwaysdata v${version} — commit ${shortCommit} (${branc
 
 // --- Staging Linux natif (WSL) ----------------------------------------------
 
-const wslHome = wsl(['printenv', 'HOME']).trim()
+const wslHome = assertWslHome(wsl(['printenv', 'HOME']).trim())
 const stageDir = `${wslHome}/deploy-stage/sc_alwaysdata-${target.name}`
 // git archive applique la conversion de fin de ligne de la copie de travail :
 // avec core.autocrlf=true (Windows), il produirait du CRLF.
@@ -90,24 +94,10 @@ try {
   wsl(['test', '-f', keyPath])
 }
 catch {
-  throw new Error([
-    `Clé SSH absente côté WSL : ${keyPath}`,
-    `  wsl ssh-keygen -t ed25519 -N "" -C sc_alwaysdata-${target.name} -f ${target.sshKey}`,
-    `  wsl ssh-copy-id -i ${target.sshKey}.pub ${target.remote}`,
-  ].join('\n'))
+  throw new Error(missingKeyHelp({ keyPath, sshKey: target.sshKey, remote: target.remote, comment: `sc_alwaysdata-${target.name}` }))
 }
 
-const sshOpts = [
-  '-i', keyPath,
-  '-o', 'IdentitiesOnly=yes',
-  '-o', 'BatchMode=yes',
-  '-o', 'StrictHostKeyChecking=accept-new',
-  '-o', 'ServerAliveInterval=15',
-  '-o', 'ServerAliveCountMax=4',
-  '-o', 'ControlMaster=auto',
-  '-o', `ControlPath=${wslHome}/.ssh/cm-%r@%h:%p`,
-  '-o', 'ControlPersist=60s',
-]
+const sshOpts = sshOptions(keyPath, wslHome)
 
 function ssh(remoteCommand, { inherit = false } = {}) {
   return wsl(['ssh', ...sshOpts, target.remote, remoteCommand], inherit ? { stdio: 'inherit' } : {})
@@ -171,15 +161,8 @@ if (!options.apply) {
 ssh(`mkdir -p ${target.backupDir}`)
 if (!guardRaw) ssh(`printf '%s\\n' ${shQuote(JSON.stringify(target.guard))} > ${target.guardPath}`)
 
-try {
-  ssh(`mkdir ${target.lockPath}`)
-}
-catch {
-  throw new Error(`Verrou déjà pris (~/${target.lockPath}) : un autre déploiement est en cours, ou un précédent a été interrompu`)
-}
-
 let failed = false
-try {
+await withRemoteLock(ssh, target, async () => {
   const backup = `${target.backupDir}/${backupFileName(new Date(), remoteVersion)}`
   console.log(`\nSauvegarde du module en ligne → ~/${backup}`)
   ssh(`tar -czf ${backup} -C ${target.shopRoot}/modules sc_alwaysdata`)
@@ -212,15 +195,7 @@ try {
   if (direction > 0) {
     console.log(`\nv${remoteVersion} → v${version} : lancer la mise à jour du module dans le back-office (Modules > Gestionnaire de modules) pour jouer les scripts upgrade/.`)
   }
-}
-finally {
-  try {
-    ssh(`rmdir ${target.lockPath}`)
-  }
-  catch {
-    console.error(`✖ Verrou non libéré : wsl ssh -i ${target.sshKey} ${target.remote} "rmdir ${target.lockPath}"`)
-  }
-}
+})
 
 if (failed) process.exit(1)
 console.log(`\nDéployé : sc_alwaysdata v${version} (${shortCommit}) sur ${target.name}.`)

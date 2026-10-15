@@ -1,0 +1,22 @@
+# Modèle de ~/monitor/config.toml (sur le veilleur seulement).
+#
+# Le dépôt est public : la vraie liste des sites et le destinataire réel ne
+# doivent jamais y être commités. Aucun secret ici : les clés publiques des
+# agents arrivent en phase 3, les clés privées ne quittent jamais les sites.
+#
+# Le fichier est cherché dans --config, sinon dans $MONITOR_CONFIG, sinon dans
+# ~/monitor/config.toml. Toute clé inconnue est refusée (code de retour 2).
+
+# Base SQLite partagée par `monitor serve` et `monitor tick` (chemin absolu).
+# Dans data/ : c'est le seul dossier que les unités systemd ouvrent en écriture,
+# et SQLite y crée ses fichiers -wal et -shm.
+database = "/home/monitor/monitor/data/monitor.db"
+
+[alerts]
+to = "alertes@example.org"
+from = "monitor@example.org"
+
+# Identifiant : [a-z0-9-], 64 caractères au plus. URL en https.
+[[sites]]
+id = "exemple"
+url = "https://www.example.org/"
