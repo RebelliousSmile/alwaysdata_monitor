@@ -1,5 +1,0 @@
-# À garder identique à `rust-version` dans Cargo.toml et à `toolchain:` dans
-# .github/workflows/monitor.yml.
-[toolchain]
-channel = "1.93.0"
-components = ["clippy", "rustfmt"]

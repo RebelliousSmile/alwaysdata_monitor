@@ -11,7 +11,7 @@ status: pending
 > Tree of the final files. ✅ create · ✏️ modify · ❌ delete
 
 ```txt
-monitor/
+vigie/
 ├── src/clock.rs                       ✅ horloge injectable (système en production, simulée dans les tests)
 ├── src/tick.rs                        ✏️ lit l'heure via clock.rs
 ├── src/ingest.rs                      ✏️ lit l'heure via clock.rs
@@ -34,7 +34,7 @@ flowchart TD
   E --> F{T_alerte - T0 < 10 min ?}
   F -->|oui| G[Réception validée]
   F -->|non| H[Échec consigné, intervalles revus]
-  I[Production : suppression de .monitor-canary] --> J[E-mail en moins de 10 min puis restauration et e-mail de clôture]
+  I[Production : suppression de .vigie-canary] --> J[E-mail en moins de 10 min puis restauration et e-mail de clôture]
   K[UptimeRobot : sonde HTTP sur /health du veilleur] --> L[Panne du veilleur ou tick arrêté signalés]
 ```
 
@@ -50,13 +50,13 @@ journey
   section Happy path
     Incident injecté à chaque décalage de phase entre 0 et 5 min => passages simulés => premier e-mail en moins de 10 min dans tous les cas: 5: system
     Reprise locale réelle par replay-incident.mjs => chronomètre => alerte reçue en moins de 10 min: 5: cli
-    Suppression de .monitor-canary en production => attente => e-mail reçu en moins de 10 min: 5: cli
+    Suppression de .vigie-canary en production => attente => e-mail reçu en moins de 10 min: 5: cli
   section Edge case - les deux signaux à la fois
     Agent et contrôle externe constatent l'incident au même passage => tick => un e-mail par constat, pas de doublon par constat: 1: system
   section Edge case - veilleur arrêté
     Tâche tick désactivée plus de 3 min => sonde UptimeRobot => /health répond 503 et UptimeRobot alerte: 1: cli
   section Teardown
-    Restauration de .monitor-canary et réactivation de tick => incidents clos, e-mail de clôture, /health 200: 5: cli
+    Restauration de .vigie-canary et réactivation de tick => incidents clos, e-mail de clôture, /health 200: 5: cli
 ```
 
 ## Tasks to do
@@ -80,14 +80,14 @@ journey
 
 > Le même scénario avec les vrais processus.
 
-1. `replay-incident.mjs` lance `monitor serve` en local (build Windows, vérifié par la CI depuis la phase 1), le serveur de fixtures et l'agent PHP en boucle de 5 min, ainsi que `tick` chaque minute, avec un SMTP de capture local ou un notifier fichier.
+1. `replay-incident.mjs` lance `vigie serve` en local (build Windows, vérifié par la CI depuis la phase 1), le serveur de fixtures et l'agent PHP en boucle de 5 min, ainsi que `tick` chaque minute, avec un SMTP de capture local ou un notifier fichier.
 2. Chronométrer T0 → premier e-mail, consigner le résultat et tout arrêter dans un `finally`.
 
 ### `4)` Reprise en production, sans risque
 
 > Prouver la chaîne réelle sans remettre le site A dans l'état exploité.
 
-1. Ajouter `.monitor-canary` (vide) à `critical[]` de l'agent du site A et le déposer dans `~/www/<site-a>/`.
+1. Ajouter `.vigie-canary` (vide) à `critical[]` de l'agent du site A et le déposer dans `~/www/<site-a>/`.
 2. Le supprimer en notant T0, attendre l'e-mail et noter T_alerte, puis le restaurer et attendre l'e-mail de clôture.
 3. Ne jamais toucher `wp-config.php`, `.htaccess` ni l'installeur en production.
 

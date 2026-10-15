@@ -1,5 +1,5 @@
 // Fonctions pures du déploiement, partagées par scripts/deploy.mjs (module) et
-// monitor/scripts/deploy.mjs (veilleur) : aucune n'appelle git, WSL ni le
+// vigie/scripts/deploy.mjs (veilleur) : aucune n'appelle git, WSL ni le
 // réseau, pour rester testables avec `node --test`. withRemoteLock reçoit la
 // fonction ssh en paramètre pour la même raison.
 
