@@ -224,6 +224,7 @@ fn site(base: &str) -> Site {
         keyword_url: Some(format!("{base}/kb/")),
         keyword: Some("/problemes/".into()),
         interval: 300,
+        agent_silence: 900,
     }
 }
 

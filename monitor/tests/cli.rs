@@ -53,7 +53,7 @@ fn tick_then_status_succeeds_and_migrations_rerun_cleanly() {
     let after = monitor(&config, &["status"]);
     assert!(after.status.success(), "{after:?}");
     let stdout = String::from_utf8_lossy(&after.stdout);
-    assert!(stdout.contains("schéma v2"), "{stdout}");
+    assert!(stdout.contains("schéma v3"), "{stdout}");
     assert!(stdout.contains("→ ok"), "{stdout}");
     assert!(stdout.contains("incidents ouverts : aucun"), "{stdout}");
     assert!(stdout.contains("notifications en attente : 0"), "{stdout}");
@@ -78,4 +78,100 @@ fn ack_of_an_unknown_incident_fails() {
     let out = monitor(&config, &["ack", "42"]);
     assert_eq!(out.status.code(), Some(1), "{out:?}");
     assert!(String::from_utf8_lossy(&out.stderr).contains("aucun incident 42"));
+}
+
+/// Clés publiques des tests 1 et 2 de la RFC 8032, section 7.1.
+const KEY_1: &str = "11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=";
+const KEY_2: &str = "PUAXw+hDiVqStwqnTRt+vJyYLM8uxJaMwM1V8Sr0Zgw=";
+
+const SITE_A: &str = "[[sites]]\nid = \"site-a\"\nurl = \"https://site-a.example.org/\"\n";
+
+fn stdout(out: &Output) -> String {
+    String::from_utf8_lossy(&out.stdout).into_owned()
+}
+
+fn stderr(out: &Output) -> String {
+    String::from_utf8_lossy(&out.stderr).into_owned()
+}
+
+#[test]
+fn site_add_checks_the_key_and_the_site() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let config = write_config(dir.path(), SITE_A);
+
+    let short = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==";
+    let out = monitor(&config, &["site", "add", "site-a", "--pubkey", short]);
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    assert!(
+        stderr(&out).contains("31 octet(s) au lieu de 32"),
+        "{out:?}"
+    );
+    let out = monitor(
+        &config,
+        &["site", "add", "site-a", "--pubkey", "pas*du*base64"],
+    );
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    let out = monitor(&config, &["site", "add", "site-b", "--pubkey", KEY_1]);
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    assert!(stderr(&out).contains("aucun site « site-b »"), "{out:?}");
+    assert!(!dir.path().join("monitor.db").exists());
+
+    let out = monitor(&config, &["site", "add", "site-a", "--pubkey", KEY_1]);
+    assert!(out.status.success(), "{out:?}");
+    let out = monitor(&config, &["site", "add", "site-a", "--pubkey", KEY_2]);
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    assert!(stderr(&out).contains("rotate-key"), "{out:?}");
+
+    let out = monitor(&config, &["site", "list"]);
+    assert!(out.status.success(), "{out:?}");
+    assert!(stdout(&out).contains("aucun rapport"), "{out:?}");
+}
+
+#[test]
+fn rotate_key_then_remove_with_and_without_confirmation() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let config = write_config(dir.path(), SITE_A);
+
+    let out = monitor(
+        &config,
+        &["site", "rotate-key", "site-a", "--pubkey", KEY_1],
+    );
+    assert_eq!(out.status.code(), Some(1), "pas encore de clé : {out:?}");
+    let out = monitor(&config, &["site", "add", "site-a", "--pubkey", KEY_1]);
+    assert!(out.status.success(), "{out:?}");
+    let out = monitor(
+        &config,
+        &["site", "rotate-key", "site-a", "--pubkey", KEY_1],
+    );
+    assert_eq!(out.status.code(), Some(1), "même clé : {out:?}");
+    let out = monitor(
+        &config,
+        &["site", "rotate-key", "site-a", "--pubkey", KEY_2],
+    );
+    assert!(out.status.success(), "{out:?}");
+
+    // Sans --yes, stdin fermé : aucune confirmation, rien n'est retiré.
+    let out = monitor(&config, &["site", "remove", "site-a"]);
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    assert!(!stdout(&monitor(&config, &["site", "list"])).contains("sans agent"));
+
+    let out = monitor(&config, &["site", "remove", "site-a", "--yes"]);
+    assert!(out.status.success(), "{out:?}");
+    assert!(stdout(&monitor(&config, &["site", "list"])).contains("sans agent"));
+    let out = monitor(&config, &["site", "remove", "site-a", "--yes"]);
+    assert_eq!(out.status.code(), Some(1), "déjà retirée : {out:?}");
+}
+
+#[test]
+fn status_shows_the_agent_of_each_site() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let config = write_config(dir.path(), SITE_A);
+    assert!(
+        monitor(&config, &["site", "add", "site-a", "--pubkey", KEY_1])
+            .status
+            .success()
+    );
+    let out = monitor(&config, &["status"]);
+    let text = stdout(&out);
+    assert!(text.contains("agent : clé enregistrée il y a"), "{text}");
 }

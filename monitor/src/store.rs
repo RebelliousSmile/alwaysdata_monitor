@@ -46,10 +46,33 @@ const MIGRATIONS: &[&str] = &[
     );
     CREATE UNIQUE INDEX incidents_open_key ON incidents(key) WHERE closed_at IS NULL;
     CREATE INDEX incidents_site_check ON incidents(site, check_name);",
+    // 3 : clé publique de l'agent de chaque site (Ed25519, 32 octets), et état
+    // de ses rapports : dernier `seq` accepté, date de réception, dernier relevé.
+    "CREATE TABLE site_keys (
+        site TEXT PRIMARY KEY,
+        pubkey BLOB NOT NULL CHECK (length(pubkey) = 32),
+        added_at INTEGER NOT NULL,
+        rotated_at INTEGER
+    );
+    CREATE TABLE reports (
+        site TEXT PRIMARY KEY,
+        last_seq INTEGER NOT NULL,
+        last_valid_at INTEGER NOT NULL,
+        agent TEXT NOT NULL,
+        facts TEXT NOT NULL
+    );",
 ];
 
 /// Version de schéma à partir de laquelle les incidents existent.
 pub const SCHEMA_INCIDENTS: usize = 2;
+/// Version de schéma à partir de laquelle les clés d'agent existent.
+pub const SCHEMA_AGENTS: usize = 3;
+
+/// Au plus un rapport accepté par site pendant cette durée, en secondes.
+pub const REPORT_MIN_GAP: i64 = 60;
+
+/// Préfixe des contrôles rapportés par un agent.
+pub const AGENT_PREFIX: &str = "agent:";
 
 /// Délai entre deux rappels d'un incident ouvert et non acquitté.
 pub const REMINDER_PERIOD: i64 = 24 * 3600;
@@ -73,6 +96,87 @@ pub enum AckOutcome {
     AlreadyClosed,
     AlreadyAcked,
     Acked,
+}
+
+/// Agent déclaré d'un site, et état de ses rapports.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Agent {
+    pub site: String,
+    pub pubkey: [u8; 32],
+    pub added_at: i64,
+    pub rotated_at: Option<i64>,
+    /// 0 avant le premier rapport, et après une rotation de clé.
+    pub last_seq: i64,
+    pub last_valid_at: Option<i64>,
+    pub agent: Option<String>,
+}
+
+impl Agent {
+    /// Point de départ du silence : dernier rapport accepté, sinon déclaration.
+    pub fn last_sign_of_life(&self) -> i64 {
+        self.last_valid_at.unwrap_or(self.added_at)
+    }
+}
+
+/// Rapport authentifié et à l'heure, prêt à être enregistré.
+#[derive(Debug, Clone, Copy)]
+pub struct AcceptedReport<'a> {
+    pub site: &'a str,
+    pub pubkey: &'a [u8; 32],
+    pub seq: i64,
+    pub agent: &'a str,
+    /// Relevé, en JSON.
+    pub facts: &'a str,
+    /// Contrôles déjà préfixés par `agent:`.
+    pub findings: &'a [Finding],
+}
+
+/// Issue de l'enregistrement d'un rapport déjà authentifié.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReportOutcome {
+    Accepted,
+    /// Clé retirée ou remplacée entre la vérification et l'écriture.
+    UnknownSite,
+    /// `seq` inférieur ou égal au dernier accepté.
+    Replay {
+        last_seq: i64,
+    },
+    /// Moins de `REPORT_MIN_GAP` secondes depuis le dernier rapport accepté.
+    TooSoon {
+        last_valid_at: i64,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KeyOutcome {
+    Done,
+    /// `add` : le site a déjà une clé.
+    AlreadyPresent,
+    /// `rotate` : le site n'a pas de clé.
+    Missing,
+    /// `rotate` : la nouvelle clé est l'actuelle.
+    Unchanged,
+}
+
+const AGENT_COLUMNS: &str = "k.site, k.pubkey, k.added_at, k.rotated_at,
+     COALESCE(r.last_seq, 0), r.last_valid_at, r.agent";
+
+fn agent_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Agent> {
+    let raw: Vec<u8> = row.get(1)?;
+    // La contrainte CHECK de la table garantit 32 octets.
+    let mut pubkey = [0u8; 32];
+    if raw.len() == 32 {
+        pubkey.copy_from_slice(&raw);
+    }
+    Ok(Agent {
+        site: row.get(0)?,
+        pubkey,
+        added_at: row.get(2)?,
+        rotated_at: row.get(3)?,
+        last_seq: row.get(4)?,
+        last_valid_at: row.get(5)?,
+        agent: row.get(6)?,
+    })
 }
 
 const INCIDENT_COLUMNS: &str =
@@ -263,81 +367,24 @@ impl Store {
         findings: &[Finding],
         now: i64,
     ) -> Result<()> {
-        let mut by_key: HashMap<String, &Finding> = HashMap::new();
-        for finding in findings {
-            // Deux constats de même clé : le plus grave l'emporte.
-            let key = finding.incident_key();
-            match by_key.get(&key) {
-                Some(kept) if kept.severity >= finding.severity => {}
-                _ => {
-                    by_key.insert(key, finding);
-                }
-            }
-        }
         let tx = self.conn.transaction()?;
-        let open: Vec<(i64, String, String)> = {
-            let mut stmt = tx.prepare(
-                "SELECT id, key, severity FROM incidents
-                 WHERE site = ?1 AND check_name = ?2 AND closed_at IS NULL",
-            )?;
-            let rows = stmt.query_map([site, check], |row| {
-                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
-            })?;
-            rows.collect::<rusqlite::Result<_>>()?
-        };
-        for (id, key, severity) in &open {
-            match by_key.remove(key) {
-                Some(finding) => {
-                    let before = Severity::parse(severity).unwrap_or(Severity::Critical);
-                    // Une gravité qui monte vaut un nouvel e-mail d'ouverture.
-                    let raised = finding.severity > before;
-                    tx.execute(
-                        "UPDATE incidents SET severity = ?2, detail = ?3,
-                           open_notified_at = CASE WHEN ?4 THEN NULL ELSE open_notified_at END,
-                           last_reminder_at = CASE WHEN ?4 THEN NULL ELSE last_reminder_at END
-                         WHERE id = ?1",
-                        params![id, finding.severity.as_str(), finding.detail, raised],
-                    )?;
-                }
-                None => {
-                    tx.execute(
-                        "UPDATE incidents SET closed_at = ?2 WHERE id = ?1",
-                        params![id, now],
-                    )?;
-                }
-            }
-        }
-        let mut fresh: Vec<_> = by_key.into_iter().collect();
-        fresh.sort_by(|a, b| a.0.cmp(&b.0));
-        for (key, finding) in fresh {
-            tx.execute(
-                "INSERT INTO incidents (key, site, check_name, severity, detail, opened_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                params![
-                    key,
-                    site,
-                    check,
-                    finding.severity.as_str(),
-                    finding.detail,
-                    now
-                ],
-            )?;
-        }
+        reconcile_in(&tx, site, check, findings, now)?;
         tx.commit()?;
         Ok(())
     }
 
     /// Clôt les incidents ouverts dont le couple (site, contrôle) n'est plus
-    /// surveillé : site retiré de la configuration, ou type de site changé.
-    pub fn close_unwatched(&mut self, watched: &[(&str, &str)], now: i64) -> Result<usize> {
+    /// surveillé : site retiré de la configuration, type de site changé, ou
+    /// clé d'agent retirée.
+    pub fn close_unwatched(
+        &mut self,
+        is_watched: impl Fn(&str, &str) -> bool,
+        now: i64,
+    ) -> Result<usize> {
         let stale: Vec<i64> = self
             .open_incidents()?
             .into_iter()
-            .filter(|i| {
-                !watched
-                    .iter()
-                    .any(|(site, check)| i.site == *site && i.check_name == *check)
-            })
+            .filter(|i| !is_watched(&i.site, &i.check_name))
             .map(|i| i.id)
             .collect();
         let tx = self.conn.transaction()?;
@@ -441,6 +488,244 @@ impl Store {
         )?;
         Ok(AckOutcome::Acked)
     }
+
+    /// Agents déclarés, par site.
+    pub fn agents(&self) -> Result<Vec<Agent>> {
+        let sql = format!(
+            "SELECT {AGENT_COLUMNS} FROM site_keys k LEFT JOIN reports r ON r.site = k.site
+             ORDER BY k.site"
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows = stmt.query_map([], agent_from_row)?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    pub fn agent(&self, site: &str) -> Result<Option<Agent>> {
+        let sql = format!(
+            "SELECT {AGENT_COLUMNS} FROM site_keys k LEFT JOIN reports r ON r.site = k.site
+             WHERE k.site = ?1"
+        );
+        Ok(self
+            .conn
+            .query_row(&sql, [site], agent_from_row)
+            .optional()?)
+    }
+
+    pub fn add_key(&mut self, site: &str, pubkey: &[u8; 32], now: i64) -> Result<KeyOutcome> {
+        let inserted = self.conn.execute(
+            "INSERT INTO site_keys (site, pubkey, added_at) VALUES (?1, ?2, ?3)
+             ON CONFLICT (site) DO NOTHING",
+            params![site, pubkey.as_slice(), now],
+        )?;
+        Ok(if inserted == 1 {
+            KeyOutcome::Done
+        } else {
+            KeyOutcome::AlreadyPresent
+        })
+    }
+
+    /// Remplace la clé : l'ancienne ne fait plus rien accepter, et la séquence
+    /// repart de zéro pour le nouvel agent. Le silence reste mesuré depuis le
+    /// dernier rapport accepté.
+    pub fn rotate_key(&mut self, site: &str, pubkey: &[u8; 32], now: i64) -> Result<KeyOutcome> {
+        let tx = self
+            .conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let current: Option<Vec<u8>> = tx
+            .query_row(
+                "SELECT pubkey FROM site_keys WHERE site = ?1",
+                [site],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let outcome = match current {
+            None => KeyOutcome::Missing,
+            Some(current) if current == pubkey.as_slice() => KeyOutcome::Unchanged,
+            Some(_) => {
+                tx.execute(
+                    "UPDATE site_keys SET pubkey = ?2, rotated_at = ?3 WHERE site = ?1",
+                    params![site, pubkey.as_slice(), now],
+                )?;
+                tx.execute("UPDATE reports SET last_seq = 0 WHERE site = ?1", [site])?;
+                KeyOutcome::Done
+            }
+        };
+        tx.commit()?;
+        Ok(outcome)
+    }
+
+    /// Retire la clé et l'état des rapports. `false` si le site n'avait pas de
+    /// clé. Les incidents de l'agent sont clos par le `tick` suivant.
+    pub fn remove_key(&mut self, site: &str) -> Result<bool> {
+        let tx = self.conn.transaction()?;
+        let removed = tx.execute("DELETE FROM site_keys WHERE site = ?1", [site])?;
+        tx.execute("DELETE FROM reports WHERE site = ?1", [site])?;
+        tx.commit()?;
+        Ok(removed == 1)
+    }
+
+    /// Enregistre un rapport authentifié et à l'heure : vérifie la séquence
+    /// puis le débit, et, s'il est accepté, fait passer ses constats dans le
+    /// cycle des incidents et clôt le silence de l'agent. Tout ou rien, sous
+    /// verrou d'écriture : deux rapports simultanés ne passent pas tous deux.
+    ///
+    /// `pubkey` est la clé qui a vérifié la signature : si elle a changé ou
+    /// disparu entre-temps, le rapport est refusé comme d'un site inconnu.
+    ///
+    /// `findings` décrit l'état complet vu par l'agent : un contrôle `agent:`
+    /// ouvert et absent du rapport est clos.
+    pub fn accept_report(
+        &mut self,
+        report: &AcceptedReport<'_>,
+        now: i64,
+    ) -> Result<ReportOutcome> {
+        let AcceptedReport {
+            site,
+            pubkey,
+            seq,
+            agent,
+            facts,
+            findings,
+        } = *report;
+        let tx = self
+            .conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let current: Option<Vec<u8>> = tx
+            .query_row(
+                "SELECT pubkey FROM site_keys WHERE site = ?1",
+                [site],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if current.as_deref() != Some(pubkey.as_slice()) {
+            return Ok(ReportOutcome::UnknownSite);
+        }
+        let last: Option<(i64, i64)> = tx
+            .query_row(
+                "SELECT last_seq, last_valid_at FROM reports WHERE site = ?1",
+                [site],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
+        if let Some((last_seq, last_valid_at)) = last {
+            if seq <= last_seq {
+                return Ok(ReportOutcome::Replay { last_seq });
+            }
+            if now - last_valid_at < REPORT_MIN_GAP {
+                return Ok(ReportOutcome::TooSoon { last_valid_at });
+            }
+        }
+        tx.execute(
+            "INSERT INTO reports (site, last_seq, last_valid_at, agent, facts)
+             VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT (site) DO UPDATE SET last_seq = excluded.last_seq,
+               last_valid_at = excluded.last_valid_at, agent = excluded.agent,
+               facts = excluded.facts",
+            params![site, seq, now, agent, facts],
+        )?;
+        let mut checks: Vec<String> = {
+            let mut stmt = tx.prepare(
+                "SELECT DISTINCT check_name FROM incidents
+                 WHERE site = ?1 AND closed_at IS NULL AND check_name LIKE 'agent:%'",
+            )?;
+            let rows = stmt.query_map([site], |row| row.get(0))?;
+            rows.collect::<rusqlite::Result<_>>()?
+        };
+        checks.extend(findings.iter().map(|f| f.check.clone()));
+        checks.sort();
+        checks.dedup();
+        for check in &checks {
+            let of_check: Vec<Finding> = findings
+                .iter()
+                .filter(|f| f.check == *check)
+                .cloned()
+                .collect();
+            reconcile_in(&tx, site, check, &of_check, now)?;
+        }
+        reconcile_in(&tx, site, crate::checks::heartbeat::NAME, &[], now)?;
+        tx.commit()?;
+        Ok(ReportOutcome::Accepted)
+    }
+
+    /// Dernier relevé (`facts`) accepté d'un site, en JSON.
+    pub fn last_facts(&self, site: &str) -> Result<Option<String>> {
+        Ok(self
+            .conn
+            .query_row("SELECT facts FROM reports WHERE site = ?1", [site], |row| {
+                row.get(0)
+            })
+            .optional()?)
+    }
+}
+
+/// Cœur de [`Store::reconcile`], dans une transaction ouverte par l'appelant.
+fn reconcile_in(
+    conn: &Connection,
+    site: &str,
+    check: &str,
+    findings: &[Finding],
+    now: i64,
+) -> Result<()> {
+    let mut by_key: HashMap<String, &Finding> = HashMap::new();
+    for finding in findings {
+        // Deux constats de même clé : le plus grave l'emporte.
+        let key = finding.incident_key();
+        match by_key.get(&key) {
+            Some(kept) if kept.severity >= finding.severity => {}
+            _ => {
+                by_key.insert(key, finding);
+            }
+        }
+    }
+    let open: Vec<(i64, String, String)> = {
+        let mut stmt = conn.prepare(
+            "SELECT id, key, severity FROM incidents
+             WHERE site = ?1 AND check_name = ?2 AND closed_at IS NULL",
+        )?;
+        let rows = stmt.query_map([site, check], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+        })?;
+        rows.collect::<rusqlite::Result<_>>()?
+    };
+    for (id, key, severity) in &open {
+        match by_key.remove(key) {
+            Some(finding) => {
+                let before = Severity::parse(severity).unwrap_or(Severity::Critical);
+                // Une gravité qui monte vaut un nouvel e-mail d'ouverture.
+                let raised = finding.severity > before;
+                conn.execute(
+                    "UPDATE incidents SET severity = ?2, detail = ?3,
+                       open_notified_at = CASE WHEN ?4 THEN NULL ELSE open_notified_at END,
+                       last_reminder_at = CASE WHEN ?4 THEN NULL ELSE last_reminder_at END
+                     WHERE id = ?1",
+                    params![id, finding.severity.as_str(), finding.detail, raised],
+                )?;
+            }
+            None => {
+                conn.execute(
+                    "UPDATE incidents SET closed_at = ?2 WHERE id = ?1",
+                    params![id, now],
+                )?;
+            }
+        }
+    }
+    let mut fresh: Vec<_> = by_key.into_iter().collect();
+    fresh.sort_by(|a, b| a.0.cmp(&b.0));
+    for (key, finding) in fresh {
+        conn.execute(
+            "INSERT INTO incidents (key, site, check_name, severity, detail, opened_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                key,
+                site,
+                check,
+                finding.severity.as_str(),
+                finding.detail,
+                now
+            ],
+        )?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -681,17 +966,173 @@ mod tests {
             .expect("1");
         assert_eq!(
             store
-                .close_unwatched(&[("site-a", "exposed")], 10)
+                .close_unwatched(|site, check| site == "site-a" && check == "exposed", 10)
                 .expect("kept"),
             0
         );
         assert_eq!(
             store
-                .close_unwatched(&[("site-b", "exposed")], 10)
+                .close_unwatched(|site, check| site == "site-b" && check == "exposed", 10)
                 .expect("closed"),
             1
         );
         assert!(store.open_incidents().expect("open").is_empty());
+    }
+
+    const KEY_A: [u8; 32] = [1; 32];
+    const KEY_B: [u8; 32] = [2; 32];
+
+    fn agent_finding(key: &str) -> Finding {
+        Finding::new("site-a", "agent:php", Severity::Critical, key, "x")
+    }
+
+    fn send(
+        store: &mut Store,
+        pubkey: &[u8; 32],
+        seq: i64,
+        agent: &str,
+        facts: &str,
+        findings: &[Finding],
+        now: i64,
+    ) -> ReportOutcome {
+        let report = AcceptedReport {
+            site: "site-a",
+            pubkey,
+            seq,
+            agent,
+            facts,
+            findings,
+        };
+        store.accept_report(&report, now).expect("accept_report")
+    }
+
+    #[test]
+    fn keys_are_added_once_rotated_and_removed() {
+        let (_dir, mut store) = temp_store();
+        assert!(store.agent("site-a").expect("none").is_none());
+        assert_eq!(
+            store.add_key("site-a", &KEY_A, 100).expect("add"),
+            KeyOutcome::Done
+        );
+        assert_eq!(
+            store.add_key("site-a", &KEY_B, 110).expect("dup"),
+            KeyOutcome::AlreadyPresent
+        );
+        let agent = store.agent("site-a").expect("agent").expect("some");
+        assert_eq!(agent.pubkey, KEY_A);
+        assert_eq!(agent.last_seq, 0);
+        assert_eq!(agent.last_sign_of_life(), 100);
+
+        assert_eq!(
+            send(&mut store, &KEY_A, 5, "a/1", "{}", &[], 200),
+            ReportOutcome::Accepted
+        );
+        assert_eq!(
+            store.rotate_key("site-a", &KEY_A, 300).expect("same"),
+            KeyOutcome::Unchanged
+        );
+        assert_eq!(
+            store.rotate_key("site-b", &KEY_B, 300).expect("missing"),
+            KeyOutcome::Missing
+        );
+        assert_eq!(
+            store.rotate_key("site-a", &KEY_B, 300).expect("rotate"),
+            KeyOutcome::Done
+        );
+        let agent = store.agent("site-a").expect("agent").expect("some");
+        assert_eq!(agent.pubkey, KEY_B);
+        assert_eq!(agent.rotated_at, Some(300));
+        assert_eq!(agent.last_seq, 0);
+        assert_eq!(agent.last_sign_of_life(), 200);
+        // Vérifié avec l'ancienne clé juste avant la rotation : refusé.
+        assert_eq!(
+            send(&mut store, &KEY_A, 6, "a/1", "{}", &[], 400),
+            ReportOutcome::UnknownSite
+        );
+        assert_eq!(
+            send(&mut store, &KEY_B, 1, "a/1", "{}", &[], 400),
+            ReportOutcome::Accepted
+        );
+
+        assert!(store.remove_key("site-a").expect("remove"));
+        assert!(!store.remove_key("site-a").expect("again"));
+        assert!(store.agents().expect("agents").is_empty());
+        assert_eq!(store.last_facts("site-a").expect("facts"), None);
+    }
+
+    #[test]
+    fn reports_need_a_key_a_growing_seq_and_a_gap() {
+        let (_dir, mut store) = temp_store();
+        assert_eq!(
+            send(&mut store, &KEY_A, 1, "a/1", "{}", &[], 100),
+            ReportOutcome::UnknownSite
+        );
+        store.add_key("site-a", &KEY_A, 0).expect("add");
+        assert_eq!(
+            send(&mut store, &KEY_A, 3, "a/1", r#"{"php":"8.3"}"#, &[], 100),
+            ReportOutcome::Accepted
+        );
+        assert_eq!(
+            send(&mut store, &KEY_A, 3, "a/1", "{}", &[], 200),
+            ReportOutcome::Replay { last_seq: 3 }
+        );
+        assert_eq!(
+            send(
+                &mut store,
+                &KEY_A,
+                4,
+                "a/1",
+                "{}",
+                &[],
+                100 + REPORT_MIN_GAP - 1
+            ),
+            ReportOutcome::TooSoon { last_valid_at: 100 }
+        );
+        assert_eq!(
+            store.last_facts("site-a").expect("facts").as_deref(),
+            Some(r#"{"php":"8.3"}"#)
+        );
+        assert_eq!(
+            send(
+                &mut store,
+                &KEY_A,
+                4,
+                "a/2",
+                "{}",
+                &[],
+                100 + REPORT_MIN_GAP
+            ),
+            ReportOutcome::Accepted
+        );
+        let agent = store.agent("site-a").expect("agent").expect("some");
+        assert_eq!(agent.last_seq, 4);
+        assert_eq!(agent.agent.as_deref(), Some("a/2"));
+    }
+
+    #[test]
+    fn a_report_is_the_full_state_of_the_agent_checks() {
+        let (_dir, mut store) = temp_store();
+        store.add_key("site-a", &KEY_A, 0).expect("add");
+        let silent = Finding::new("site-a", "heartbeat", Severity::Critical, "silent", "x");
+        store
+            .reconcile("site-a", "heartbeat", &[silent], 50)
+            .expect("silent");
+        store
+            .reconcile("site-a", "exposed", &[crit(".env")], 50)
+            .expect("external");
+        let findings = [agent_finding("debug"), agent_finding("debug")];
+        send(&mut store, &KEY_A, 1, "a/1", "{}", &findings, 100);
+        let open = store.open_incidents().expect("open");
+        let checks: Vec<_> = open.iter().map(|i| i.check_name.as_str()).collect();
+        // Le silence est clos, le contrôle externe intact, le constat ouvert.
+        assert_eq!(checks.len(), 2, "{checks:?}");
+        assert!(checks.contains(&"exposed"));
+        assert!(checks.contains(&"agent:php"));
+
+        send(&mut store, &KEY_A, 2, "a/1", "{}", &[], 200);
+        let open = store.open_incidents().expect("open");
+        assert_eq!(open.len(), 1);
+        assert_eq!(open[0].check_name, "exposed");
     }
 
     #[test]
