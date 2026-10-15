@@ -1,0 +1,9 @@
+[Unit]
+Description=vigie tick chaque minute
+
+[Timer]
+OnCalendar=*:*:00
+AccuracySec=1s
+
+[Install]
+WantedBy=timers.target

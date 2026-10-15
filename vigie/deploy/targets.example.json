@@ -1,0 +1,9 @@
+{
+  "veilleur": {
+    "host": "<vps>",
+    "user": "vigie",
+    "sshKey": "~/.ssh/vigie_ci",
+    "remoteDir": "vigie",
+    "healthUrl": "https://<sous-domaine>/health"
+  }
+}
