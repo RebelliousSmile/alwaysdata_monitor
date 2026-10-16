@@ -179,14 +179,13 @@ fn replay(site: &IncidentSite, agent_phase: i64, external_phase: i64) -> Delays 
             first_tick.min(next_report) - MINUTE,
         )
         .expect("add_key");
-    drop(store);
     let mut seq = 0;
     let mut send = |at: i64| {
         seq += 1;
         let body = serde_json::to_vec(&report(seq, at, at > injected)).expect("json");
         let signature = STANDARD.encode(key.sign(&body).to_bytes());
         ingest::ingest(
-            &config.database,
+            &mut store,
             &["site-a".into()],
             Some("site-a"),
             Some(&signature),

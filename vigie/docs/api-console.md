@@ -256,7 +256,7 @@ automatique et son e-mail restent. Corps de la requête ignoré.
 
 - 200 et l'incident, `state` à `acked`. Sur un incident déjà acquitté, la même
   réponse, `acked_at` inchangé.
-- 409, corps vide, si l'incident est fermé : la base n'est pas modifiée.
+- 409 si l'incident est fermé : la base n'est pas modifiée.
 - 404 si l'identifiant est inconnu.
 - Le journal du veilleur note l'id de l'appareil qui a acquitté.
 
@@ -330,14 +330,32 @@ des maquettes (non conforme, aveugle, à vérifier, OK) : il est placé avant
 
 ## Codes de réponse
 
-| Code | Cas |
-| ---- | --- |
-| 200 | Succès, avec `Cache-Control: no-store`. |
-| 204 | `DELETE /api/v1/devices/self` réussi, corps vide. |
-| 401 | Code inconnu, expiré, déjà utilisé, corps illisible, trop gros ou trop lent ; jeton absent, mal formé, inconnu ou révoqué ; base absente ou antérieure au schéma 6. **Corps vide**, quelle qu'en soit la raison : le journal du veilleur seul dit laquelle. Toujours vérifié avant le 404 d'un site ou d'un incident : leur existence ne se devine pas sans jeton. |
-| 404 | Site absent de la configuration, incident inconnu ; route ou méthode inconnue. Corps vide (le même 404 que le reste du veilleur). |
-| 409 | Acquittement d'un incident fermé, corps vide. |
-| 500 | Erreur interne (base illisible, tirage aléatoire impossible), corps vide. |
+Toute réponse du veilleur porte un en-tête `X-Request-Id` : 32 caractères hex
+minuscules, tirés au hasard pour chaque requête. Le journal du veilleur cite le
+même identifiant entre crochets ; un `X-Request-Id` envoyé par le client est
+ignoré.
+
+Toute erreur de `/api/v1` porte le même corps, avec `Cache-Control: no-store` :
+
+```json
+{"error": {"code": "unauthorized", "message": "authentification requise", "request_id": "3f…"}}
+```
+
+`code` est stable et seul à lire par la console ; `message` n'est
+qu'indicatif et ne dit jamais la cause d'un refus ou d'une erreur interne.
+`request_id` est celui de l'en-tête.
+
+| Code | `error.code` | Cas |
+| ---- | ------------ | --- |
+| 200 | — | Succès, avec `Cache-Control: no-store`. |
+| 204 | — | `DELETE /api/v1/devices/self` réussi, corps vide. |
+| 401 | `unauthorized` | Code inconnu, expiré, déjà utilisé, corps illisible, trop gros ou trop lent ; jeton absent, mal formé, inconnu ou révoqué ; base absente ou antérieure au schéma 6. **Le même corps**, quelle qu'en soit la raison : le journal du veilleur seul dit laquelle. Toujours vérifié avant le 404 d'un site ou d'un incident : leur existence ne se devine pas sans jeton. |
+| 404 | `not_found` | Site absent de la configuration, incident inconnu, méthode refusée sur une route de l'API. |
+| 409 | `conflict` | Acquittement d'un incident fermé. |
+| 500 | `internal` | Erreur interne (base illisible, tirage aléatoire impossible). |
+
+Hors de ces routes, une route inconnue, y compris sous `/api/v1`, reçoit le 404
+sans corps du reste du veilleur, comme tout refus de `POST /r/v1/report`.
 
 ## Base de données
 

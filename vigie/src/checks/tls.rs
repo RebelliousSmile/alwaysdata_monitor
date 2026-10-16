@@ -43,7 +43,7 @@ pub fn run(site: &Site, ctx: &Ctx) -> Result<Outcome, CheckError> {
     let (_, cert) = x509_parser::parse_x509_certificate(&leaf)
         .map_err(|err| CheckError::new(format!("certificat illisible : {err}")))?;
     let not_after = cert.validity().not_after.timestamp();
-    let days = (not_after - crate::now()).div_euclid(86_400);
+    let days = (not_after - ctx.now).div_euclid(86_400);
     let detail = format!(
         "certificat valable jusqu'au {} ({days} j)",
         crate::iso_utc(not_after)

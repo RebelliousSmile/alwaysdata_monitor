@@ -78,6 +78,7 @@ pub fn run_with(
         trust: &options.trust,
         request_timeout: options.request_timeout,
         deadline: start + options.check_budget,
+        now,
     };
     let mut summary = Summary::default();
 
@@ -253,7 +254,7 @@ fn site_url<'a>(config: &'a Config, site: &str) -> &'a str {
 pub type Report = Vec<(CheckKind, Result<Vec<Finding>, CheckError>)>;
 
 /// Tous les contrôles d'un site, sans base ni e-mail.
-pub fn check_once(config: &Config, site_id: &str, options: &Options) -> Result<Report> {
+pub fn check_once(config: &Config, site_id: &str, options: &Options, now: i64) -> Result<Report> {
     let Some(site) = config.sites.iter().find(|s| s.id == site_id) else {
         bail!("aucun site « {site_id} » dans la configuration");
     };
@@ -263,6 +264,7 @@ pub fn check_once(config: &Config, site_id: &str, options: &Options) -> Result<R
         trust: &options.trust,
         request_timeout: options.request_timeout,
         deadline: Instant::now() + options.check_budget,
+        now,
     };
     let mut report = Vec::new();
     for kind in CheckKind::ALL.into_iter().filter(|k| k.applies(site)) {

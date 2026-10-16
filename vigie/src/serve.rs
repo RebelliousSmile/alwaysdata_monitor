@@ -28,9 +28,11 @@ use axum::http::header::CONTENT_LENGTH;
 use axum::routing::{get, post};
 use serde::Serialize;
 
+use crate::clock::{Clock, SystemClock};
 use crate::config::Config;
 use crate::ingest::{self, HEADER_SIGNATURE, HEADER_SITE, Reason, Refusal};
 use crate::store::Store;
+use crate::writer::Writer;
 
 /// Au-delà, `tick` est considéré comme arrêté (timer chaque minute).
 pub const TICK_MAX_AGE: i64 = 180;
@@ -76,15 +78,15 @@ pub fn health(last_tick: Option<i64>, now: i64) -> (StatusCode, Health) {
     }
 }
 
-/// Heure courante en secondes Unix ; remplaçable dans les tests.
-pub type Clock = Arc<dyn Fn() -> i64 + Send + Sync>;
-
 pub(crate) struct AppState {
     /// Configuration lue au démarrage : la console en publie une partie.
     pub(crate) config: Config,
     /// Identifiants des sites de la configuration, dans son ordre.
     pub(crate) site_ids: Vec<String>,
-    pub(crate) clock: Clock,
+    pub(crate) clock: Arc<dyn Clock>,
+    /// Seule connexion qui écrit dans `serve`. À n'appeler que depuis
+    /// `spawn_blocking` : `serve` tourne sur un runtime à un seul thread.
+    pub(crate) writer: Writer,
 }
 
 impl AppState {
@@ -94,11 +96,12 @@ impl AppState {
 }
 
 pub fn router(config: Config) -> Router {
-    router_with_clock(config, Arc::new(crate::now))
+    router_with_clock(config, Arc::new(SystemClock))
 }
 
-pub fn router_with_clock(config: Config, clock: Clock) -> Router {
+pub fn router_with_clock(config: Config, clock: Arc<dyn Clock>) -> Router {
     let site_ids = config.sites.iter().map(|s| s.id.clone()).collect();
+    let writer = Writer::new(&config.database);
     Router::new()
         .route("/health", get(health_handler).fallback(not_found))
         .route("/r/v1/report", post(report_handler).fallback(not_found))
@@ -108,7 +111,9 @@ pub fn router_with_clock(config: Config, clock: Clock) -> Router {
             config,
             site_ids,
             clock,
+            writer,
         }))
+        .layer(axum::middleware::from_fn(crate::request_id::layer))
 }
 
 pub(crate) async fn not_found() -> StatusCode {
@@ -124,15 +129,21 @@ async fn health_handler(State(state): State<Arc<AppState>>) -> (StatusCode, Json
     .await;
     match last {
         Ok(Ok(last)) => {
-            let (code, body) = health(last, (state.clock)());
+            let (code, body) = health(last, state.clock.unix());
             (code, Json(body))
         }
         Ok(Err(err)) => {
-            log::error!("/health : lecture de la base impossible : {err:#}");
+            log::error!(
+                "[{}] /health : lecture de la base impossible : {err:#}",
+                crate::request_id::current()
+            );
             unavailable()
         }
         Err(err) => {
-            log::error!("/health : tâche interrompue : {err}");
+            log::error!(
+                "[{}] /health : tâche interrompue : {err}",
+                crate::request_id::current()
+            );
             unavailable()
         }
     }
@@ -151,10 +162,11 @@ fn unavailable() -> (StatusCode, Json<Health>) {
 
 /// Journalise un refus et répond le 404 commun à tous les refus.
 fn refuse(refusal: Refusal) -> StatusCode {
+    let rid = crate::request_id::current();
     if matches!(refusal.reason, Reason::Internal(_)) {
-        log::error!("{refusal}");
+        log::error!("[{rid}] {refusal}");
     } else {
-        log::warn!("{refusal}");
+        log::warn!("[{rid}] {refusal}");
     }
     StatusCode::NOT_FOUND
 }
@@ -199,24 +211,34 @@ async fn report_handler(State(state): State<Arc<AppState>>, request: Request) ->
         Err(_) => return refuse(Refusal::new(site.as_deref(), Reason::TooSlow)),
     };
 
-    let now = (state.clock)();
+    let now = state.clock.unix();
     let task_site = site.clone();
     let task_state = Arc::clone(&state);
     let outcome = tokio::task::spawn_blocking(move || {
-        ingest::ingest(
-            task_state.database(),
-            &task_state.site_ids,
-            task_site.as_deref(),
-            signature.as_deref(),
-            &bytes,
-            now,
-        )
+        let refusal = |reason| Refusal::new(task_site.as_deref(), reason);
+        let written = task_state.writer.write(|store| {
+            Ok(ingest::ingest(
+                store,
+                &task_state.site_ids,
+                task_site.as_deref(),
+                signature.as_deref(),
+                &bytes,
+                now,
+            ))
+        });
+        match written {
+            Ok(Some(result)) => result,
+            // Sans base, aucune clé : refusé comme un site inconnu.
+            Ok(None) => Err(refusal(Reason::UnknownSite)),
+            Err(err) => Err(refusal(Reason::Internal(format!("{err:#}")))),
+        }
     })
     .await;
     match outcome {
         Ok(Ok(accepted)) => {
             log::info!(
-                "rapport accepté (site {}, seq {})",
+                "[{}] rapport accepté (site {}, seq {})",
+                crate::request_id::current(),
                 accepted.site,
                 accepted.seq
             );
@@ -407,13 +429,17 @@ mod tests {
             "/r/v1/report",
             "/r/v1",
             "/api/v1",
-            "/api/v1/pair",
             "/api/v1/inconnu",
         ] {
             let (status, body) = get(db.clone(), uri).await;
             assert_eq!(status, StatusCode::NOT_FOUND, "{uri}");
             assert!(body.is_empty(), "{uri}");
         }
+        // Méthode refusée sur une route de l'API : erreur au format commun.
+        let (status, body) = get(db.clone(), "/api/v1/pair").await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        let json: serde_json::Value = serde_json::from_slice(&body).expect("json");
+        assert_eq!(json["error"]["code"], "not_found");
         let post_health = Request::post("/health")
             .body(Body::empty())
             .expect("request");
