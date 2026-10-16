@@ -16,6 +16,7 @@ pub fn site_a() -> Site {
         keyword: None,
         interval: 300,
         agent_silence: 900,
+        logs: None,
     }
 }
 
@@ -32,6 +33,7 @@ pub fn config(database: PathBuf) -> Config {
         database,
         api: None,
         commands: None,
+        logs: Default::default(),
         sites: vec![site_a()],
     }
 }

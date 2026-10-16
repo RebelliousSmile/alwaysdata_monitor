@@ -187,6 +187,117 @@ function pulls_of(string $server): array
 const PING = ['id' => '01a1e2f3-0000-7000-8000-00000000000a', 'seq' => 1, 'name' => 'ping'];
 const ROTATE = ['id' => '01a1e2f3-0000-7000-8000-00000000000b', 'seq' => 2, 'name' => 'rotate-key'];
 
+// --- Logs ------------------------------------------------------------------
+//
+// Fichiers de logs générés par chaque test (gzencode pour les .gz) : hôtes
+// *.example.org, IP de documentation (RFC 5737), aucun binaire commité.
+
+/** 2026-10-16T12:00:00Z. */
+const LOG_NOW = 1_792_152_000;
+
+function log_line(string $host, int $at, string $path = '/', string $ua = 'Mozilla/5.0'): string
+{
+    return sprintf("%s 192.0.2.10 - - [%s] \"GET %s HTTP/1.1\" 200 512 \"-\" \"%s\"\n", $host, gmdate('d/M/Y:H:i:s +0000', $at), $path, $ua);
+}
+
+/** Écrit http-<date>.log (ou .log.gz) dans <logs>/<année>/ ; rend son chemin. */
+function write_log(string $logs, string $date, string $content, bool $gz = false): string
+{
+    $dir = $logs . '/' . substr($date, 0, 4);
+    if (!is_dir($dir)) {
+        mkdir($dir, 0755, true);
+    }
+    $path = "{$dir}/http-{$date}.log" . ($gz ? '.gz' : '');
+    file_put_contents($path, $gz ? gzencode($content) : $content);
+
+    return $path;
+}
+
+/** Compression d'Alwaysdata : le .log devient .log.gz (autre inode). */
+function compress_log(string $logs, string $date, string $append = ''): void
+{
+    $plain = $logs . '/' . substr($date, 0, 4) . "/http-{$date}.log";
+    write_log($logs, $date, file_get_contents($plain) . $append, true);
+    unlink($plain);
+}
+
+/**
+ * Routeur `php -S` du veilleur des logs : enregistre chaque lot reçu ; 204,
+ * ou 502 tant que le fichier `lose` existe (réponse perdue).
+ */
+function logs_router(string $dir): string
+{
+    $router = $dir . '/router.php';
+    file_put_contents($router, <<<'PHP'
+        <?php
+        if ($_SERVER['REQUEST_URI'] === '/r/v1/logs') {
+            file_put_contents(__DIR__ . '/logs.jsonl', json_encode([
+                'body' => file_get_contents('php://input'),
+                'signature' => $_SERVER['HTTP_X_VIGIE_SIGNATURE'] ?? '',
+            ]) . "\n", FILE_APPEND);
+            http_response_code(is_file(__DIR__ . '/lose') ? 502 : 204);
+            return true;
+        }
+        http_response_code(404);
+        PHP);
+
+    return $router;
+}
+
+/** Agent du site A avec une section logs, clé créée ; rend [Config, dossier, clé publique]. */
+function logs_agent(int $port, string $logs, array $hosts = ['site-a.example.org']): array
+{
+    $path = write_config(fixture(), [
+        'endpoint' => "http://127.0.0.1:{$port}/r/v1/report",
+        'logs' => ['dir' => $logs, 'hosts' => $hosts],
+    ]);
+    $public = base64_decode(\Vigie\Agent\init_key(\dirname($path)), true);
+
+    return [load_config($path), \dirname($path), $public];
+}
+
+/** Lots reçus par le routeur, corps décodé et chunk en clair. */
+function batches_of(string $server): array
+{
+    $lines = is_file("{$server}/logs.jsonl") ? file("{$server}/logs.jsonl", \FILE_IGNORE_NEW_LINES) : [];
+
+    return array_map(static function (string $line): array {
+        $received = json_decode($line, true);
+        $batch = json_decode($received['body'], true);
+        $batch['chunk'] = base64_decode($batch['chunk'], true);
+        $batch['raw'] = $received['body'];
+        $batch['signature'] = $received['signature'];
+
+        return $batch;
+    }, $lines);
+}
+
+/** Passage des logs ; rend le message d'un échec d'envoi, null sinon. */
+function logs_pass_at(\Vigie\Agent\Config $config, string $dir, int $now): ?string
+{
+    try {
+        \Vigie\Agent\send_logs($config, $dir, $now);
+    } catch (\Vigie\Agent\SendError $e) {
+        return $e->getMessage();
+    }
+
+    return null;
+}
+
+/** Lance $fn avec un faux veilleur des logs : fn(port, dossier du serveur, dossier des logs). */
+function with_logs_server(callable $fn): void
+{
+    $server = tmp_dir();
+    $logs = tmp_dir() . '/http';
+    mkdir($logs, 0755);
+    [$port, $stop] = php_server(logs_router($server), $server);
+    try {
+        $fn($port, $server, $logs);
+    } finally {
+        $stop();
+    }
+}
+
 
 return [
     'arborescence saine : aucun constat, faits complets' => function (): void {
@@ -575,5 +686,239 @@ return [
                 $stop();
             }
         }
+    },
+
+    'logs : seules les lignes des hôtes du site partent, état 0600 dans le dossier de l\'agent' => function (): void {
+        with_logs_server(static function (int $port, string $server, string $logs): void {
+            [$config, $dir, $public] = logs_agent($port, $logs);
+            same('http://127.0.0.1:' . $port . '/r/v1/logs', $config->logsEndpoint, 'point d\'entrée des lots');
+            $content = log_line('site-a.example.org', LOG_NOW - 60, '/1')
+                . log_line('site-b.example.org', LOG_NOW - 59, '/autre')
+                . log_line('site-a.example.org:443', LOG_NOW - 58, '/2?token=x')
+                . log_line('-', LOG_NOW - 57, '/sans-hote')
+                . log_line('SITE-A.example.org', LOG_NOW - 56, '/3')
+                . "[Fri Oct 16 11:59:00 2026] [error] ligne du journal d'erreurs\n";
+            $path = write_log($logs, '2026-10-16', $content);
+            $before = mtimes($logs);
+            same(null, logs_pass_at($config, $dir, LOG_NOW), 'passage');
+            $batches = batches_of($server);
+            same(1, \count($batches), 'un lot');
+            $batch = $batches[0];
+            same(['v', 'type', 'site', 'seq', 'sent_at', 'agent', 'file', 'gen', 'start', 'end', 'skipped_files', 'chunk', 'raw', 'signature'], array_keys($batch), 'champs');
+            same('logs', $batch['type'], 'type');
+            same('http-2026-10-16.log', $batch['file'], 'fichier');
+            same(0, $batch['start'], 'début');
+            same(filesize($path), $batch['end'], 'fin');
+            same(0, $batch['skipped_files'], 'aucun fichier sauté');
+            same(log_line('site-a.example.org', LOG_NOW - 60, '/1') . log_line('site-a.example.org:443', LOG_NOW - 58, '/2?token=x')
+                . log_line('SITE-A.example.org', LOG_NOW - 56, '/3'), $batch['chunk'], 'lignes gardées');
+            check(sodium_crypto_sign_verify_detached(base64_decode($batch['signature']), \Vigie\Agent\DOMAIN_LOGS . $batch['raw'], $public), 'signature sur vigie-logs-v1');
+            check(!sodium_crypto_sign_verify_detached(base64_decode($batch['signature']), $batch['raw'], $public), 'jamais une signature de rapport');
+            // État : dans le dossier de l'agent seulement, illisible par d'autres.
+            same($before, mtimes($logs), 'dossier des logs intact');
+            if (\DIRECTORY_SEPARATOR === '/') {
+                same(0600, fileperms("{$dir}/logs.json") & 0777, 'logs.json en 0600');
+            }
+            $names = scandir($dir);
+            sort($names);
+            same(['.', '..', 'config.json', 'logs.json', 'logs.lock', 'secret.key'], $names, 'fichiers du dossier de l\'agent');
+            $state = json_decode((string) file_get_contents("{$dir}/logs.json"), true);
+            same(null, $state['pending'], 'aucun lot en attente');
+            same(filesize($path), $state['offset'], 'position');
+            // Rien de neuf : aucun lot.
+            same(null, logs_pass_at($config, $dir, LOG_NOW + 60), 'second passage');
+            same(1, \count(batches_of($server)), 'toujours un lot');
+        });
+    },
+
+    'logs : une ligne de 100 Kio part coupée à 16 Kio' => function (): void {
+        with_logs_server(static function (int $port, string $server, string $logs): void {
+            [$config, $dir] = logs_agent($port, $logs);
+            $long = log_line('site-a.example.org', LOG_NOW - 60, '/long', str_repeat('A', 100 * 1024));
+            $after = log_line('site-a.example.org', LOG_NOW - 59, '/apres');
+            $path = write_log($logs, '2026-10-16', $long . $after);
+            same(null, logs_pass_at($config, $dir, LOG_NOW), 'passage');
+            $batch = batches_of($server)[0];
+            same(substr($long, 0, 16384) . "\n" . $after, $batch['chunk'], 'ligne coupée, suivante intacte');
+            same(filesize($path), $batch['end'], 'la suite jetée est comptée dans la plage');
+        });
+    },
+
+    'logs : la fin du .gz de la veille part avant le jour, du 31 décembre au 1er janvier, même génération' => function (): void {
+        with_logs_server(static function (int $port, string $server, string $logs): void {
+            [$config, $dir] = logs_agent($port, $logs);
+            $eve = gmmktime(23, 0, 0, 12, 31, 2026);
+            $first = log_line('site-a.example.org', $eve, '/a') . log_line('site-a.example.org', $eve + 1, '/b');
+            write_log($logs, '2026-12-31', $first);
+            same(null, logs_pass_at($config, $dir, $eve + 60), 'passage du 31');
+            $late = log_line('site-a.example.org', $eve + 3000, '/c');
+            compress_log($logs, '2026-12-31', $late);
+            $day = log_line('site-a.example.org', $eve + 4000, '/an');
+            write_log($logs, '2027-01-01', $day);
+            same(null, logs_pass_at($config, $dir, $eve + 11 * 3600), 'passage du 1er');
+            $batches = batches_of($server);
+            same(3, \count($batches), 'trois lots');
+            same([$first, $late, $day], array_column($batches, 'chunk'), 'aucune ligne en double, dans l\'ordre');
+            same(['http-2026-12-31.log', 'http-2026-12-31.log', 'http-2027-01-01.log'], array_column($batches, 'file'), 'fichiers');
+            same($batches[0]['gen'], $batches[1]['gen'], 'même génération après la compression');
+            same(\strlen($first), $batches[1]['start'], 'reprise à la position');
+            same([0, 0], [$batches[2]['gen'], $batches[2]['start']], 'nouveau fichier depuis le début');
+        });
+    },
+
+    'logs : trou de 3 jours et fichier de la position purgé' => function (): void {
+        with_logs_server(static function (int $port, string $server, string $logs): void {
+            [$config, $dir] = logs_agent($port, $logs);
+            $day = static fn (int $d): int => gmmktime(12, 0, 0, 10, $d, 2026);
+            $path = write_log($logs, '2026-10-10', log_line('site-a.example.org', $day(10), '/10'));
+            same(null, logs_pass_at($config, $dir, $day(10)), 'passage du 10');
+            unlink($path);
+            write_log($logs, '2026-10-11', log_line('site-a.example.org', $day(11), '/11'), true);
+            write_log($logs, '2026-10-12', log_line('site-a.example.org', $day(12), '/12'), true);
+            write_log($logs, '2026-10-13', log_line('site-a.example.org', $day(13), '/13'));
+            same(null, logs_pass_at($config, $dir, $day(13)), 'passage du 13');
+            $batches = \array_slice(batches_of($server), 1);
+            same(['http-2026-10-11.log', 'http-2026-10-12.log', 'http-2026-10-13.log'], array_column($batches, 'file'), 'les trois fichiers dans l\'ordre');
+            same([1, 0, 0], array_column($batches, 'skipped_files'), 'fichier purgé compté une fois');
+        });
+    },
+
+    'logs : un fichier qui grandit garde sa génération, un fichier remplacé prend la suivante' => function (): void {
+        with_logs_server(static function (int $port, string $server, string $logs): void {
+            [$config, $dir] = logs_agent($port, $logs);
+            $one = log_line('site-a.example.org', LOG_NOW - 60, '/1');
+            check(\strlen($one) < 256, 'petit fichier');
+            $path = write_log($logs, '2026-10-16', $one);
+            same(null, logs_pass_at($config, $dir, LOG_NOW), 'premier passage');
+            $two = log_line('site-a.example.org', LOG_NOW - 30, '/2');
+            file_put_contents($path, $two, \FILE_APPEND);
+            same(null, logs_pass_at($config, $dir, LOG_NOW + 60), 'second passage');
+            unlink($path);
+            $other = log_line('site-a.example.org', LOG_NOW + 70, '/remplace');
+            write_log($logs, '2026-10-16', $other . $other . $other);
+            same(null, logs_pass_at($config, $dir, LOG_NOW + 120), 'troisième passage');
+            [$a, $b, $c] = batches_of($server);
+            same($a['gen'], $b['gen'], 'même génération en grandissant');
+            same([\strlen($one), $two], [$b['start'], $b['chunk']], 'suite du fichier');
+            same($a['gen'] + 1, $c['gen'], 'génération suivante');
+            same([0, $other . $other . $other], [$c['start'], $c['chunk']], 'relu depuis le début');
+        });
+    },
+
+    'logs : 5 Mio d\'un autre hôte font deux lots, le premier vide' => function (): void {
+        with_logs_server(static function (int $port, string $server, string $logs): void {
+            [$config, $dir] = logs_agent($port, $logs);
+            $noise = log_line('site-b.example.org', LOG_NOW - 60, '/bruit');
+            $own = log_line('site-a.example.org', LOG_NOW - 30, '/a');
+            $path = write_log($logs, '2026-10-16', str_repeat($noise, intdiv(5 * 1024 * 1024, \strlen($noise)) + 1) . $own);
+            same(null, logs_pass_at($config, $dir, LOG_NOW), 'passage');
+            $batches = batches_of($server);
+            same(2, \count($batches), 'deux lots');
+            same('', $batches[0]['chunk'], 'premier lot vide');
+            check($batches[0]['end'] <= 4 * 1024 * 1024 && $batches[0]['end'] > 4 * 1024 * 1024 - 16384 - \strlen($noise), 'plage de 4 Mio au plus');
+            same([$batches[0]['end'], $own, filesize($path)], [$batches[1]['start'], $batches[1]['chunk'], $batches[1]['end']], 'second lot');
+            check(\strlen($batches[1]['raw']) <= \Vigie\Agent\MAX_BODY, 'corps sous 64 Kio');
+        });
+    },
+
+    'logs : 44 Kio gardés au plus par lot, corps sous 64 Kio' => function (): void {
+        with_logs_server(static function (int $port, string $server, string $logs): void {
+            [$config, $dir] = logs_agent($port, $logs);
+            $content = '';
+            for ($i = 0; \strlen($content) < 120 * 1024; ++$i) {
+                $content .= log_line('site-a.example.org', LOG_NOW - 600 + $i % 500, "/page-{$i}");
+            }
+            $path = write_log($logs, '2026-10-16', $content);
+            same(null, logs_pass_at($config, $dir, LOG_NOW), 'passage');
+            $batches = batches_of($server);
+            same(3, \count($batches), 'trois lots');
+            same($content, implode('', array_column($batches, 'chunk')), 'tout part, une fois');
+            foreach ($batches as $i => $batch) {
+                check(\strlen($batch['chunk']) <= 44 * 1024, "lot {$i} : 44 Kio au plus");
+                check(\strlen($batch['raw']) <= \Vigie\Agent\MAX_BODY, "lot {$i} : corps sous 64 Kio");
+                same($i === 0 ? 0 : $batches[$i - 1]['end'], $batch['start'], "lot {$i} : plages contiguës");
+            }
+            same(filesize($path), $batches[2]['end'], 'fin');
+        });
+    },
+
+    'logs : un fichier plus récent vu, la veille est close une heure plus tard' => function (): void {
+        with_logs_server(static function (int $port, string $server, string $logs): void {
+            [$config, $dir] = logs_agent($port, $logs);
+            $eve = gmmktime(23, 50, 0, 10, 15, 2026);
+            $complete = log_line('site-a.example.org', $eve, '/complete');
+            $partial = rtrim(log_line('site-a.example.org', $eve + 1, '/partielle'), "\n");
+            write_log($logs, '2026-10-15', $complete . $partial);
+            same(null, logs_pass_at($config, $dir, $eve + 300), 'passage de la veille');
+            $today = log_line('site-a.example.org', $eve + 700, '/jour');
+            write_log($logs, '2026-10-16', $today);
+            same(null, logs_pass_at($config, $dir, $eve + 600), 'fichier du jour vu');
+            same([$complete], array_column(batches_of($server), 'chunk'), 'ligne incomplète gardée, veille encore ouverte');
+            same(null, logs_pass_at($config, $dir, $eve + 600 + 3599), 'avant l\'heure');
+            same(1, \count(batches_of($server)), 'toujours ouverte');
+            same(null, logs_pass_at($config, $dir, $eve + 600 + 3600), 'une heure plus tard');
+            $batches = batches_of($server);
+            same([$complete, $partial, $today], array_column($batches, 'chunk'), 'dernière ligne telle quelle, puis le jour');
+        });
+    },
+
+    'logs : réponse perdue puis fichier qui grandit, la plage en attente repart à l\'identique' => function (): void {
+        with_logs_server(static function (int $port, string $server, string $logs): void {
+            [$config, $dir] = logs_agent($port, $logs);
+            $first = log_line('site-a.example.org', LOG_NOW - 60, '/1') . log_line('site-b.example.org', LOG_NOW - 59, '/b');
+            $path = write_log($logs, '2026-10-16', $first);
+            touch("{$server}/lose");
+            check(logs_pass_at($config, $dir, LOG_NOW) !== null, 'échec signalé');
+            $state = json_decode((string) file_get_contents("{$dir}/logs.json"), true);
+            same(0, $state['offset'], 'position inchangée');
+            same(['file' => 'http-2026-10-16.log', 'gen' => $state['gen'], 'start' => 0, 'end' => \strlen($first)], $state['pending'], 'lot en attente');
+            unlink("{$server}/lose");
+            $more = log_line('site-a.example.org', LOG_NOW - 10, '/2');
+            file_put_contents($path, $more, \FILE_APPEND);
+            same(null, logs_pass_at($config, $dir, LOG_NOW + 60), 'passage suivant');
+            [$lost, $resent, $next] = batches_of($server);
+            foreach (['file', 'gen', 'start', 'end', 'chunk'] as $field) {
+                same($lost[$field], $resent[$field], "renvoi identique : {$field}");
+            }
+            check($resent['seq'] > $lost['seq'], 'seq croissant');
+            same([\strlen($first), $more], [$next['start'], $next['chunk']], 'puis la suite');
+            same(null, json_decode((string) file_get_contents("{$dir}/logs.json"), true)['pending'], 'plus rien en attente');
+        });
+    },
+
+    'logs : configuration et état refusés' => function (): void {
+        $logs = ['dir' => '/home/compte/admin/logs/http', 'hosts' => ['site-a.example.org']];
+        refused_config(['logs' => $logs + ['x' => 1]], 'sans autre clé');
+        refused_config(['logs' => ['dir' => 'admin/logs/http'] + $logs], 'logs.dir');
+        refused_config(['logs' => ['hosts' => []] + $logs], 'logs.hosts');
+        refused_config(['logs' => ['hosts' => ['Site-A.example.org']] + $logs], 'logs.hosts');
+        refused_config(['logs' => ['hosts' => ['site-a.example.org:443']] + $logs], 'logs.hosts');
+        refused_config(['logs' => ['hosts' => ['a.example.org', 'a.example.org']] + $logs], 'double');
+        refused_config(['logs' => ['hosts' => array_map(static fn (int $i): string => "h{$i}.example.org", range(1, 21))] + $logs], 'logs.hosts');
+        refused_config(['logs' => $logs, 'endpoint' => 'https://vigie.invalid/autre'], '/r/v1/report');
+        same(null, load_config(write_config(fixture()))->logsDir, 'sans logs, rien ne change');
+        skip_unless(\DIRECTORY_SEPARATOR === '/', 'droits Unix');
+        with_logs_server(static function (int $port, string $server, string $logs): void {
+            [$config, $dir] = logs_agent($port, $logs);
+            write_log($logs, '2026-10-16', log_line('site-a.example.org', LOG_NOW - 60));
+            file_put_contents("{$dir}/logs.json", json_encode(\Vigie\Agent\empty_logs_state() + ['autre' => 1]));
+            chmod("{$dir}/logs.json", 0600);
+            try {
+                logs_pass_at($config, $dir, LOG_NOW);
+                throw new Failure('état forgé accepté');
+            } catch (UsageError $e) {
+                check(str_contains($e->getMessage(), 'illisible'), $e->getMessage());
+            }
+            unlink("{$dir}/logs.json");
+            same(null, logs_pass_at($config, $dir, LOG_NOW), 'état recréé');
+            chmod("{$dir}/logs.json", 0644);
+            try {
+                logs_pass_at($config, $dir, LOG_NOW);
+                throw new Failure('état ouvert accepté');
+            } catch (UsageError $e) {
+                check(str_contains($e->getMessage(), 'chmod 600'), $e->getMessage());
+            }
+            same([], glob("{$dir}/.state-*") ?: [], 'aucun fichier temporaire laissé');
+        });
     },
 ];
