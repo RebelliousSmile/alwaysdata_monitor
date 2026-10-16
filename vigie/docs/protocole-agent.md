@@ -168,3 +168,25 @@ $ ~/vigie/bin/vigie site remove site-a
   d'empreintes, après confirmation (taper
   l'identifiant du site) ou avec `--yes`. Les incidents de l'agent sont clos au
   passage suivant de `tick`.
+
+### Une clé par usage
+
+Règle du socle (issue #9) : une paire Ed25519 sert un seul usage, et une clé
+ne vérifie jamais ce qu'une autre a signé.
+
+| Usage | Signe | Vérifie | Clé privée |
+| --- | --- | --- | --- |
+| Rapports | l'agent | le veilleur, avec la clé publique de `site add` | sur le site, hors webroot, 0600 vérifié par l'agent |
+| Commandes | le veilleur | l'agent, avec la clé publique épinglée | sur le VPS, distincte de toute clé d'agent ; livrée avec les commandes (#10, #6) |
+
+- L'agent **épingle** la clé publique des commandes : il la reçoit une fois,
+  à `--init`, et refuse ensuite toute commande signée par une autre. Elle ne
+  se change que par une nouvelle installation de l'agent, jamais par une
+  commande.
+- La rotation d'une clé de rapport reste celle de `agent-php.md` et de
+  `site rotate-key` ci-dessus. Changer la clé des commandes demande de
+  réinstaller chaque agent : la procédure sera écrite avec #10.
+- Un webhook entrant éventuel aurait son propre secret, distinct de toutes les
+  clés Ed25519 (`decisions.md`, sonde UptimeRobot).
+- Les signatures restent en base64 standard avec remplissage (`decisions.md`).
+

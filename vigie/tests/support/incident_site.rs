@@ -121,6 +121,9 @@ fn serve(stream: TcpStream, tls: Arc<ServerConfig>, mode: &Mutex<Mode>) {
 }
 
 /// Autorité de test, et certificat du serveur signé par elle.
+/// `T0` de `replay_2026_09_07.rs`.
+const REPLAY_T0: u64 = 1_800_000_000;
+
 fn certificates() -> (
     CertificateDer<'static>,
     CertificateDer<'static>,
@@ -136,8 +139,10 @@ fn certificates() -> (
 
     let leaf_key = KeyPair::generate().expect("clé");
     let mut params = CertificateParams::new(vec!["127.0.0.1".to_owned()]).expect("paramètres");
+    // Valable à l'heure réelle, que rustls vérifie, et encore 90 jours après
+    // l'heure des passages du rejeu (son `T0`), que le contrôle tls décompte.
     params.not_before = (SystemTime::now() - Duration::from_secs(DAY)).into();
-    params.not_after = (SystemTime::now() + Duration::from_secs(90 * DAY)).into();
+    params.not_after = (SystemTime::UNIX_EPOCH + Duration::from_secs(REPLAY_T0 + 90 * DAY)).into();
     params.extended_key_usages = vec![ExtendedKeyUsagePurpose::ServerAuth];
     let leaf = params.signed_by(&leaf_key, &*ca).expect("certificat");
     (

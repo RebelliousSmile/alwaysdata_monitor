@@ -17,6 +17,7 @@ use tower::ServiceExt;
 #[path = "support/veilleur.rs"]
 mod veilleur;
 
+use vigie::clock::FakeClock;
 use vigie::ingest::{HEADER_SIGNATURE, HEADER_SITE};
 use vigie::serve;
 use vigie::store::Store;
@@ -84,7 +85,10 @@ async fn the_ingestion_accepts_the_php_report_as_is() {
         .add_key("site-a", &public_key(&fixture).to_bytes(), SENT_AT - 600)
         .expect("add_key");
 
-    let router = serve::router_with_clock(veilleur::config(database.clone()), Arc::new(|| SENT_AT));
+    let router = serve::router_with_clock(
+        veilleur::config(database.clone()),
+        Arc::new(FakeClock::new(SENT_AT)),
+    );
     let request = Request::post("/r/v1/report")
         .header(HEADER_SITE, "site-a")
         .header(HEADER_SIGNATURE, &fixture.signature)

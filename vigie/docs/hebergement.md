@@ -236,6 +236,27 @@ $ sudo -l -U vigie
     (root) NOPASSWD: /usr/bin/systemctl restart vigie-serve.service
 ```
 
+## Secrets
+
+Inventaire tenu par le socle (issue #9). Aucun secret ne passe par une variable
+d'environnement : celles d'un processus se lisent dans `/proc/<pid>/environ` et
+finissent dans les journaux de systemd. Les seules variables lues par `vigie`
+sont `VIGIE_CONFIG` (chemin de la configuration), `IP`, `PORT` et `RUST_LOG`.
+
+| Secret | Où | Protection |
+| --- | --- | --- |
+| Mot de passe SMTP | `~vigie/vigie/smtp-password` | 0600 au propriétaire de `vigie`, **vérifié par le code** avant chaque envoi (`alert.rs`) ; chemin absolu dans `config.toml` |
+| Jetons d'appareil de la console | base `vigie.db` | seule leur empreinte SHA-256 est stockée, comparée en temps constant ; le jeton n'est remis qu'une fois |
+| Codes d'appairage | base `vigie.db` | empreinte seule, usage unique, 10 min |
+| Clé privée de l'agent (rapports) | sur chaque site, hors webroot | 0600 vérifié par l'agent à chaque passage, dossier 0700, jamais de lien symbolique suivi |
+| Clés publiques des agents | base `vigie.db` | publiques, pas secrètes ; changées par `site rotate-key` |
+| Clé privée des commandes du veilleur | sur le VPS, à venir avec #10 | distincte de toute autre clé (`protocole-agent.md`, « Une clé par usage ») |
+| Accès FTP ou API d'un hébergeur | nulle part | demandé au moment d'agir, jamais stocké (`decisions.md`) |
+
+La CI lance gitleaks sur tout l'historique à chaque push
+(`.github/workflows/garde-fous.yml`) ; ses exceptions, par chemin et pour des
+faux positifs avérés, sont dans `.gitleaks.toml`.
+
 ## Plateforme du site A (Alwaysdata, 2026-10-15)
 
 Relevé en lecture seule sur le compte SSH d'un site déjà hébergé sur
@@ -284,3 +305,11 @@ ELF 64-bit LSB executable, x86-64, version 1 (SYSV), statically linked, stripped
 $ ./vigie --version
 vigie 0.1.0
 ```
+
+Depuis le socle (issue #9), la CI refait ce build à chaque push touchant
+`vigie/` (job `musl` de `.github/workflows/vigie.yml`, cargo-zigbuild 0.23.4 et
+zig 0.14.1 épinglés) et échoue si le binaire n'est pas statique. Le même build,
+lancé en local le 2026-10-16, rend `statically linked, stripped` et
+`vigie 0.3.0`. Le job `tls-deps` de `.github/workflows/garde-fous.yml` refuse
+tout `Cargo.lock` qui tirerait `aws-lc-sys`, `aws-lc-rs`, `openssl-sys` ou
+`native-tls` (`scripts/check-tls-deps.sh`).

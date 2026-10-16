@@ -4,9 +4,8 @@
 //! Les contrôles externes sont marqués comme faits à `T0`, avec un intervalle
 //! d'un jour : `tick` ne fait aucune requête HTTP et ne traite que les agents.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicI64, Ordering};
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
@@ -19,6 +18,7 @@ use tower::ServiceExt;
 
 use vigie::alert::MemoryNotifier;
 use vigie::checks::CheckKind;
+use vigie::clock::{Clock, FakeClock};
 use vigie::config::{Alerts, Config, Site, SiteKind};
 use vigie::ingest::{self, HEADER_SIGNATURE, HEADER_SITE, Reason};
 use vigie::store::{Agent, Store};
@@ -62,7 +62,7 @@ fn signing_key(seed: u8) -> SigningKey {
 
 struct Harness {
     config: Config,
-    clock: Arc<AtomicI64>,
+    clock: Arc<FakeClock>,
     mail: MemoryNotifier,
     _dir: tempfile::TempDir,
 }
@@ -83,29 +83,24 @@ impl Harness {
             .expect("add_key");
         Self {
             config,
-            clock: Arc::new(AtomicI64::new(T0)),
+            clock: Arc::new(FakeClock::new(T0)),
             mail: MemoryNotifier::new(),
             _dir: dir,
         }
     }
 
-    fn database(&self) -> PathBuf {
-        self.config.database.clone()
-    }
-
     fn set_now(&self, now: i64) {
-        self.clock.store(now, Ordering::SeqCst);
+        self.clock.set(now);
     }
 
     fn now(&self) -> i64 {
-        self.clock.load(Ordering::SeqCst)
+        self.clock.unix()
     }
 
     async fn post(&self, request: Request<Body>) -> (StatusCode, Vec<u8>) {
-        let clock = Arc::clone(&self.clock);
         let router = serve::router_with_clock(
             self.config.clone(),
-            Arc::new(move || clock.load(Ordering::SeqCst)),
+            Arc::clone(&self.clock) as Arc<dyn Clock>,
         );
         let response = router.oneshot(request).await.expect("réponse");
         let status = response.status();
@@ -454,7 +449,7 @@ fn a_refusal_never_quotes_the_body() {
     let body = serde_json::to_vec(&value).expect("json");
     let signature = STANDARD.encode(key.sign(&body).to_bytes());
     let refusal = ingest::ingest(
-        &h.database(),
+        &mut h.store(),
         &["site-a".into()],
         Some("site-a"),
         Some(&signature),
@@ -469,11 +464,11 @@ fn a_refusal_never_quotes_the_body() {
 }
 
 #[test]
-fn an_unknown_site_does_not_create_the_database() {
+fn a_site_without_a_key_is_unknown() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let database = dir.path().join("vigie.db");
+    let mut store = Store::open(&dir.path().join("vigie.db")).expect("base");
     let refusal = ingest::ingest(
-        &database,
+        &mut store,
         &["site-a".into()],
         Some("site-a"),
         None,
@@ -482,7 +477,22 @@ fn an_unknown_site_does_not_create_the_database() {
     )
     .expect_err("refusé");
     assert_eq!(refusal.reason, Reason::UnknownSite);
-    assert!(!database.exists());
+}
+
+#[tokio::test]
+async fn a_report_without_a_database_is_a_silent_404_and_creates_nothing() {
+    let key = signing_key(7);
+    let dir = tempfile::tempdir().expect("tempdir");
+    let config = config(dir.path());
+    let body = serde_json::to_vec(&report(1, T0, json!([]))).expect("json");
+    let response = serve::router_with_clock(config.clone(), Arc::new(FakeClock::new(T0)))
+        .oneshot(signed("site-a", &key, body))
+        .await
+        .expect("réponse");
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    let body = response.into_body().collect().await.expect("corps");
+    assert!(body.to_bytes().is_empty());
+    assert!(!config.database.exists());
 }
 
 fn hex(value: &str) -> Vec<u8> {

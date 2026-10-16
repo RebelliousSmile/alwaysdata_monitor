@@ -7,7 +7,6 @@
 //! 404 à tous. Une [`Refusal`] ne contient jamais le corps reçu.
 
 use std::fmt;
-use std::path::Path;
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
@@ -118,8 +117,10 @@ impl fmt::Display for Refusal {
 }
 
 /// Vérifie et enregistre un rapport. `sites` : identifiants de la configuration.
+/// `store` est la connexion d'écriture de `serve` (`writer.rs`) : l'appelant
+/// décide d'une base absente, qu'il refuse comme un site inconnu.
 pub fn ingest(
-    database: &Path,
+    store: &mut Store,
     sites: &[String],
     site_header: Option<&str>,
     signature_header: Option<&str>,
@@ -132,12 +133,10 @@ pub fn ingest(
     let site = site_header
         .filter(|s| is_valid_id(s))
         .ok_or_else(|| refuse(Reason::MissingSite))?;
-    if !sites.iter().any(|s| s == site) || !database.is_file() {
-        // Sans base, aucune clé : inutile de la créer pour refuser.
+    if !sites.iter().any(|s| s == site) {
         return Err(refuse(Reason::UnknownSite));
     }
     let internal = |e: anyhow::Error| refuse(Reason::Internal(format!("{e:#}")));
-    let mut store = Store::open(database).map_err(internal)?;
     let agent = store
         .agent(site)
         .map_err(internal)?
