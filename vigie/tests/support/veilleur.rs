@@ -11,6 +11,7 @@ pub fn site_a() -> Site {
         id: "site-a".into(),
         url: "https://site-a.example.org/".into(),
         kind: SiteKind::Generic,
+        runtime: None,
         keyword_url: None,
         keyword: None,
         interval: 300,

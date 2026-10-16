@@ -44,6 +44,7 @@ mod tests {
             id: "site-a".into(),
             url: "https://www.example.org/".into(),
             kind: SiteKind::Generic,
+            runtime: None,
             keyword_url: None,
             keyword: None,
             interval: 300,

@@ -159,6 +159,7 @@ Forme commune à toutes les routes qui renvoient un incident :
       "id": "site-a",
       "url": "https://site-a.example.org/",
       "kind": "wordpress",
+      "runtime": "php",
       "state": "non_compliant",
       "open_count": 2,
       "worst": { "...": "un incident" },
@@ -169,7 +170,8 @@ Forme commune à toutes les routes qui renvoient un incident :
 ```
 
 - `last_tick` : `null` tant qu'aucun tick n'a tourné.
-- `kind` : `generic`, `wordpress` ou `prestashop`.
+- `kind` : `generic`, `wordpress` ou `prestashop` (le CMS, qui filtre les contrôles).
+- `runtime` : `php`, `node`, `static` ou `null` ; runtime effectif, déclaré dans `config.toml` ou impliqué par le CMS (`php` pour `wordpress` et `prestashop`). Il filtre les commandes (`protocole-commandes.md`). Présent aussi dans `sites/{id}` et `settings`.
 - `open_count` : avertissements et critiques ouverts.
 - `worst` : le plus grave d'entre eux, le plus ancien à gravité égale ; `null`
   s'il n'y en a aucun.
@@ -185,6 +187,7 @@ Forme commune à toutes les routes qui renvoient un incident :
   "id": "site-a",
   "url": "https://site-a.example.org/",
   "kind": "wordpress",
+  "runtime": "php",
   "interval": 300,
   "agent_silence": 900,
   "state": "to_check",
@@ -269,6 +272,7 @@ automatique et son e-mail restent. Corps de la requête ignoré.
       "id": "site-a",
       "url": "https://site-a.example.org/",
       "kind": "wordpress",
+      "runtime": "php",
       "interval": 300,
       "agent_silence": 900,
       "agent": true,

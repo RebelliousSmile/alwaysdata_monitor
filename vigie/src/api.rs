@@ -25,7 +25,7 @@ use axum::routing::{delete, get, post};
 use serde::{Deserialize, Serialize};
 
 use crate::checks::{CheckKind, heartbeat};
-use crate::config::{Site, SiteKind};
+use crate::config::{Runtime, Site};
 use crate::device;
 use crate::error::{ApiError, not_found};
 use crate::finding::Severity;
@@ -419,14 +419,6 @@ impl SiteView {
     }
 }
 
-fn kind_name(kind: SiteKind) -> &'static str {
-    match kind {
-        SiteKind::Generic => "generic",
-        SiteKind::Wordpress => "wordpress",
-        SiteKind::Prestashop => "prestashop",
-    }
-}
-
 #[derive(Serialize)]
 struct IncidentJson {
     id: i64,
@@ -474,6 +466,8 @@ struct OverviewSite {
     id: String,
     url: String,
     kind: &'static str,
+    /// Runtime effectif : déclaré, sinon impliqué par le CMS ; `null` sinon.
+    runtime: Option<&'static str>,
     state: SiteState,
     /// Avertissements et critiques ouverts.
     open_count: usize,
@@ -508,7 +502,8 @@ async fn overview_handler(
                 let line = OverviewSite {
                     id: site.id.clone(),
                     url: site.url.clone(),
-                    kind: kind_name(site.kind),
+                    kind: site.kind.as_str(),
+                    runtime: site.effective_runtime().map(Runtime::as_str),
                     state: view.state(),
                     open_count: view.serious().count(),
                     worst: view.serious().next().map(IncidentJson::from),
@@ -574,6 +569,8 @@ struct SiteDetail {
     id: String,
     url: String,
     kind: &'static str,
+    /// Runtime effectif : déclaré, sinon impliqué par le CMS ; `null` sinon.
+    runtime: Option<&'static str>,
     interval: u64,
     agent_silence: u64,
     state: SiteState,
@@ -632,7 +629,8 @@ async fn site_handler(
         Ok(json(&SiteDetail {
             id: site.id.clone(),
             url: site.url.clone(),
-            kind: kind_name(site.kind),
+            kind: site.kind.as_str(),
+            runtime: site.effective_runtime().map(Runtime::as_str),
             interval: site.interval,
             agent_silence: site.agent_silence,
             state: view.state(),
@@ -732,6 +730,8 @@ struct SettingsSite {
     id: String,
     url: String,
     kind: &'static str,
+    /// Runtime effectif : déclaré, sinon impliqué par le CMS ; `null` sinon.
+    runtime: Option<&'static str>,
     interval: u64,
     agent_silence: u64,
     /// Un agent est déclaré pour ce site.
@@ -794,7 +794,8 @@ async fn settings_handler(
             .map(|site| SettingsSite {
                 id: site.id.clone(),
                 url: site.url.clone(),
-                kind: kind_name(site.kind),
+                kind: site.kind.as_str(),
+                runtime: site.effective_runtime().map(Runtime::as_str),
                 interval: site.interval,
                 agent_silence: site.agent_silence,
                 agent: agents.iter().any(|a| a.site == site.id),

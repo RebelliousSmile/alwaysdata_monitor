@@ -42,6 +42,11 @@ id = "exemple"
 url = "https://www.example.org/"
 # generic (défaut), wordpress ou prestashop : active le contrôle des installeurs.
 kind = "wordpress"
+# php, node ou static : ce que le site exécute, qui filtre les commandes que
+# le veilleur peut lui envoyer (docs/protocole-commandes.md). wordpress et
+# prestashop impliquent php ; un site generic sans runtime n'en admet aucune.
+# Déployer le binaire avant de poser cette clé (docs/hebergement.md).
+# runtime = "php"
 # Contrôle `content` : cette page doit répondre 200 et contenir ce texte.
 # Sans keyword_url, c'est `url` ; sans keyword, seul le code 200 compte.
 keyword_url = "https://www.example.org/kb/"

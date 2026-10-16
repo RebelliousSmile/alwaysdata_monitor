@@ -82,6 +82,7 @@ fn config(dir: &Path, base: &str) -> Config {
             id: "site-a".into(),
             url: format!("{base}/"),
             kind: SiteKind::Wordpress,
+            runtime: None,
             keyword_url: Some(format!("{base}/kb/")),
             keyword: Some("/problemes/".into()),
             interval: PERIOD.unsigned_abs(),
