@@ -147,7 +147,7 @@ conditions :
   configuration, ni la base, ni le mot de passe SMTP.
 - Les unités du veilleur sont durcies (`ProtectSystem=strict`,
   `ProtectHome=read-only`, seul `~/vigie/data` en écriture,
-  `NoNewPrivileges`), et `serve` a un `OOMScoreAdjust=-500`.
+  `NoNewPrivileges`), et `serve` comme `tick` ont `OOMScoreAdjust=-500`.
 - Si Hermes redevient inutilisé : le désinstaller et révoquer ses jetons.
 
 Mesuré le 2026-10-16, en `vigie` :
