@@ -25,7 +25,12 @@ export const TOKEN = 'jeton-fictif-0123456789abcdef'
 export const CODE = 'AAAAAAAAAAAAAAAAAAAAAA'
 export const PAIR_LINK = `vigie://pair?u=https://vigie.example.org&c=${CODE}`
 
-export const STATUS: Status = { device_id: 3, name: 'poste de test', url: 'https://vigie.example.org' }
+export const STATUS: Status = {
+  device_id: 3,
+  name: 'poste de test',
+  url: 'https://vigie.example.org',
+  token_storage: 'keyring',
+}
 
 function incident(fields: Partial<Incident> & Pick<Incident, 'id' | 'check' | 'severity' | 'detail' | 'opened_at'>): Incident {
   return {
@@ -204,6 +209,8 @@ export function fixture(): Fixture {
 /** État du faux veilleur, modifiable pendant un test. */
 export interface Veilleur {
   data: Fixture
+  /** Appareil rendu par `status` et `pair`. */
+  status: Status
   paired: boolean
   /** Le veilleur ne répond plus. */
   offline: boolean
@@ -217,7 +224,7 @@ const fail = (kind: ApiError['kind'], message: string): ApiError => ({ kind, mes
 
 /** Installe le faux veilleur ; `clearMocks()` le retire. */
 export function mockVeilleur(paired = true): Veilleur {
-  const state: Veilleur = { data: fixture(), paired, offline: false, revoked: false, calls: [] }
+  const state: Veilleur = { data: fixture(), status: { ...STATUS }, paired, offline: false, revoked: false, calls: [] }
 
   const reach = (): void => {
     if (!state.paired) throw fail('not_paired', 'cet appareil n’est pas appairé')
@@ -241,11 +248,11 @@ export function mockVeilleur(paired = true): Veilleur {
       case 'plugin:app|version':
         return '0.1.0'
       case 'status':
-        return state.paired ? STATUS : null
+        return state.paired ? state.status : null
       case 'pair':
         state.paired = true
         state.revoked = false
-        return STATUS
+        return state.status
       case 'unpair': {
         const revoked = !state.offline
         state.paired = false

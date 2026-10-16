@@ -14,6 +14,7 @@ use rusqlite::{Connection, ErrorCode, OpenFlags, OptionalExtension, TransactionB
 use crate::device::{self, Hash};
 use crate::facts;
 use crate::finding::{Finding, Severity};
+use crate::logs::Entry;
 
 /// Une entrée par version de schéma, jouée dans l'ordre. Le SQL vit dans
 /// `migrations/`, embarqué à la compilation. Ne jamais modifier une migration
@@ -46,7 +47,10 @@ const MIGRATIONS: &[&str] = &[
     // journal d'audit en ajout seul (déclencheurs) chaîné par site, et dernier
     // hash envoyé par e-mail comme ancre externe.
     include_str!("../migrations/0008.sql"),
-    // 9 : réservée aux logs reçus (#1) ; provisoire, sans objet.
+    // 9 : logs poussés par les agents (`logs/receive.rs`, issue #1) : `seq`
+    // des lots par site, limite haute par (site, fichier, génération), lots
+    // reçus et leurs rejets, entrées normalisées. AUTOINCREMENT : après une
+    // purge totale, un id n'est jamais redonné sous le curseur d'une source.
     include_str!("../migrations/0009.sql"),
     // 10 : agrégats de l'analyse de logs (`analysis/store.rs`) : seaux par
     // minute des règles, profils d'IP par heure (index couvrant du compte de
@@ -68,6 +72,8 @@ pub const SCHEMA_CHECK_RESULTS: usize = 6;
 pub const SCHEMA_META: usize = 7;
 /// Version de schéma à partir de laquelle le canal de commandes existe.
 pub const SCHEMA_COMMANDS: usize = 8;
+/// Version de schéma à partir de laquelle les logs reçus existent.
+pub const SCHEMA_LOGS: usize = 9;
 /// Version de schéma à partir de laquelle les agrégats de l'analyse de logs
 /// existent.
 pub const SCHEMA_ANALYSIS: usize = 10;
@@ -303,6 +309,44 @@ pub enum ReportOutcome {
     TooSoon {
         last_valid_at: i64,
     },
+}
+
+/// Lot de logs authentifié, à l'heure et normalisé (`logs/receive.rs`), prêt
+/// à écrire. Les octets reçus n'y sont plus : seulement des [`Entry`].
+#[derive(Debug, Clone, Copy)]
+pub struct LogBatch<'a> {
+    pub site: &'a str,
+    /// Clé qui a vérifié la signature.
+    pub pubkey: &'a [u8; 32],
+    pub seq: i64,
+    /// `http-AAAA-MM-JJ.log`.
+    pub file: &'a str,
+    pub generation: i64,
+    pub start: i64,
+    pub end: i64,
+    /// Octets du `chunk` décodé, comptés dans le plafond quotidien.
+    pub bytes: i64,
+    pub skipped_files: i64,
+    pub entries: &'a [Entry],
+    /// Rejets par motif, en JSON.
+    pub rejected: &'a str,
+}
+
+/// Issue de l'écriture d'un lot de logs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LogsOutcome {
+    /// Écrit ; `gap` : octets sautés depuis la limite haute (0 sans trou).
+    Accepted { gap: i64 },
+    /// Plage déjà couverte : rien d'écrit sauf le `seq`.
+    Duplicate,
+    /// Clé retirée ou remplacée entre la vérification et l'écriture.
+    UnknownSite,
+    /// `seq` inférieur ou égal au dernier lot accepté.
+    Replay { last_seq: i64 },
+    /// La plage commence sous la limite haute et finit au-delà.
+    Overlap { high: i64 },
+    /// Plafond quotidien du site atteint.
+    Quota { used: i64 },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -839,7 +883,8 @@ impl Store {
             Some(current) if current == pubkey.as_slice() => KeyOutcome::Unchanged,
             Some(_) => {
                 tx.execute(
-                    "UPDATE site_keys SET pubkey = ?2, rotated_at = ?3 WHERE site = ?1",
+                    "UPDATE site_keys SET pubkey = ?2, rotated_at = ?3, last_logs_seq = 0
+                     WHERE site = ?1",
                     params![site, pubkey.as_slice(), now],
                 )?;
                 tx.execute("UPDATE reports SET last_seq = 0 WHERE site = ?1", [site])?;
@@ -850,8 +895,9 @@ impl Store {
         Ok(outcome)
     }
 
-    /// Retire la clé et l'état des rapports. `false` si le site n'avait pas de
-    /// clé. Les incidents de l'agent sont clos par le `tick` suivant.
+    /// Retire la clé et l'état des rapports, et purge les logs reçus du site
+    /// (entrées, lots, limites hautes). `false` si le site n'avait pas de clé.
+    /// Les incidents de l'agent sont clos par le `tick` suivant.
     pub fn remove_key(&mut self, site: &str) -> Result<bool> {
         let tx = self
             .conn
@@ -859,6 +905,9 @@ impl Store {
         let removed = tx.execute("DELETE FROM site_keys WHERE site = ?1", [site])?;
         tx.execute("DELETE FROM reports WHERE site = ?1", [site])?;
         tx.execute("DELETE FROM baselines WHERE site = ?1", [site])?;
+        tx.execute("DELETE FROM log_entries WHERE site = ?1", [site])?;
+        tx.execute("DELETE FROM log_batches WHERE site = ?1", [site])?;
+        tx.execute("DELETE FROM log_marks WHERE site = ?1", [site])?;
         tx.commit()?;
         Ok(removed == 1)
     }
@@ -1190,6 +1239,177 @@ impl Store {
 }
 
 /// Empreinte lue en base, comparée en temps constant.
+impl Store {
+    /// Écrit un lot de logs, tout ou rien, sous verrou d'écriture : clé
+    /// inchangée, `seq` strictement croissant (avancé même quand le lot est un
+    /// doublon), limite haute de `(site, file, gen)`, plafond quotidien, puis
+    /// entrées, lot et nouvelle limite dans la même transaction.
+    pub fn accept_logs(&mut self, batch: &LogBatch<'_>, now: i64) -> Result<LogsOutcome> {
+        use crate::logs::receive::MAX_DAILY_BYTES;
+        let tx = self
+            .conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let current: Option<(Vec<u8>, i64)> = tx
+            .query_row(
+                "SELECT pubkey, last_logs_seq FROM site_keys WHERE site = ?1",
+                [batch.site],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
+        let last_seq = match current {
+            Some((key, last_seq)) if key == batch.pubkey.as_slice() => last_seq,
+            _ => return Ok(LogsOutcome::UnknownSite),
+        };
+        if batch.seq <= last_seq {
+            return Ok(LogsOutcome::Replay { last_seq });
+        }
+        let high: Option<i64> = tx
+            .query_row(
+                "SELECT high FROM log_marks WHERE site = ?1 AND file = ?2 AND gen = ?3",
+                params![batch.site, batch.file, batch.generation],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let high = high.unwrap_or(0);
+        let set_seq = |tx: &rusqlite::Transaction<'_>| {
+            tx.execute(
+                "UPDATE site_keys SET last_logs_seq = ?2 WHERE site = ?1",
+                params![batch.site, batch.seq],
+            )
+        };
+        if batch.end <= high {
+            set_seq(&tx)?;
+            tx.commit()?;
+            return Ok(LogsOutcome::Duplicate);
+        }
+        if batch.start < high {
+            return Ok(LogsOutcome::Overlap { high });
+        }
+        let day = now.div_euclid(86_400) * 86_400;
+        let used: i64 = tx.query_row(
+            "SELECT COALESCE(SUM(bytes), 0) FROM log_batches WHERE site = ?1 AND received_at >= ?2",
+            params![batch.site, day],
+            |row| row.get(0),
+        )?;
+        if used.saturating_add(batch.bytes) > MAX_DAILY_BYTES {
+            return Ok(LogsOutcome::Quota { used });
+        }
+        set_seq(&tx)?;
+        let gap = batch.start - high;
+        tx.execute(
+            "INSERT INTO log_batches (site, file, gen, range_start, range_end, bytes, gap,
+               skipped_files, received_at, accepted, rejected)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            params![
+                batch.site,
+                batch.file,
+                batch.generation,
+                batch.start,
+                batch.end,
+                batch.bytes,
+                gap,
+                batch.skipped_files,
+                now,
+                i64::try_from(batch.entries.len()).unwrap_or(i64::MAX),
+                batch.rejected
+            ],
+        )?;
+        let id = tx.last_insert_rowid();
+        {
+            let mut insert = tx.prepare(
+                "INSERT INTO log_entries (site, batch, timestamp_ms, host, ip, method, path,
+                   query_keys, status, size, referer_present, referer_host, user_agent, duration_us)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+            )?;
+            for e in batch.entries {
+                insert.execute(params![
+                    batch.site,
+                    id,
+                    e.timestamp_ms,
+                    e.host,
+                    e.ip.map(|ip| ip.to_string()),
+                    e.method,
+                    e.path,
+                    serde_json::to_string(&e.query_keys)?,
+                    e.status,
+                    e.size.and_then(|s| i64::try_from(s).ok()),
+                    e.referer_present,
+                    e.referer_host,
+                    e.user_agent,
+                    e.duration_us.and_then(|d| i64::try_from(d).ok()),
+                ])?;
+            }
+        }
+        tx.execute(
+            "INSERT INTO log_marks (site, file, gen, high, received_at) VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT (site, file, gen) DO UPDATE SET high = excluded.high,
+               received_at = excluded.received_at",
+            params![batch.site, batch.file, batch.generation, batch.end, now],
+        )?;
+        tx.commit()?;
+        Ok(LogsOutcome::Accepted { gap })
+    }
+
+    /// Conservation de 30 jours (`decisions.md`) : entrées datées d'avant
+    /// `now − 30 j`, lots et limites hautes reçus avant. Rend le nombre
+    /// d'entrées et de lots effacés.
+    pub fn purge_logs(&mut self, now: i64) -> Result<(usize, usize)> {
+        use crate::logs::receive::RETENTION;
+        let limit = now.saturating_sub(RETENTION);
+        let tx = self
+            .conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let entries = tx.execute(
+            "DELETE FROM log_entries WHERE timestamp_ms < ?1",
+            [limit.saturating_mul(1000)],
+        )?;
+        let batches = tx.execute("DELETE FROM log_batches WHERE received_at < ?1", [limit])?;
+        tx.execute("DELETE FROM log_marks WHERE received_at < ?1", [limit])?;
+        tx.commit()?;
+        Ok((entries, batches))
+    }
+
+    /// Entrées d'un site d'id supérieur à `after`, dans l'ordre des id (ordre
+    /// d'arrivée), `limit` au plus, avec leur id.
+    pub fn log_entries_after(
+        &self,
+        site: &str,
+        after: i64,
+        limit: usize,
+    ) -> Result<Vec<(i64, Entry)>> {
+        let mut stmt = self.conn.prepare_cached(
+            "SELECT id, timestamp_ms, host, ip, method, path, query_keys, status, size,
+               referer_present, referer_host, user_agent, duration_us
+             FROM log_entries WHERE site = ?1 AND id > ?2 ORDER BY id LIMIT ?3",
+        )?;
+        let limit = i64::try_from(limit).unwrap_or(i64::MAX);
+        let rows = stmt.query_map(params![site, after, limit], |row| {
+            let ip: Option<String> = row.get(3)?;
+            let keys: String = row.get(6)?;
+            let size: Option<i64> = row.get(8)?;
+            let duration: Option<i64> = row.get(12)?;
+            Ok((
+                row.get::<_, i64>(0)?,
+                Entry {
+                    timestamp_ms: row.get(1)?,
+                    host: row.get(2)?,
+                    ip: ip.and_then(|ip| ip.parse().ok()),
+                    method: row.get(4)?,
+                    path: row.get(5)?,
+                    query_keys: serde_json::from_str(&keys).unwrap_or_default(),
+                    status: row.get(7)?,
+                    size: size.and_then(|s| u64::try_from(s).ok()),
+                    referer_present: row.get(9)?,
+                    referer_host: row.get(10)?,
+                    user_agent: row.get(11)?,
+                    duration_us: duration.and_then(|d| u64::try_from(d).ok()),
+                },
+            ))
+        })?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+}
+
 fn same_hash(stored: &[u8], expected: &Hash) -> bool {
     <&Hash>::try_from(stored).is_ok_and(|stored| device::ct_eq(stored, expected))
 }
@@ -1999,8 +2219,13 @@ mod tests {
             ("index", "commands_one_open"),
             ("index", "incidents_open_key"),
             ("index", "incidents_site_check"),
+            ("index", "log_batches_received"),
+            ("index", "log_batches_site"),
             ("index", "log_buckets_key"),
             ("index", "log_buckets_minute"),
+            ("index", "log_entries_site"),
+            ("index", "log_entries_time"),
+            ("index", "log_marks_received"),
             ("index", "log_profiles_rank"),
             ("index", "ticks_at"),
             ("table", "audit_notified"),
@@ -2011,10 +2236,13 @@ mod tests {
             ("table", "commands"),
             ("table", "devices"),
             ("table", "incidents"),
+            ("table", "log_batches"),
             ("table", "log_bots"),
             ("table", "log_buckets"),
             ("table", "log_cursors"),
+            ("table", "log_entries"),
             ("table", "log_load"),
+            ("table", "log_marks"),
             ("table", "log_profiles"),
             ("table", "meta"),
             ("table", "pairings"),
@@ -2045,6 +2273,12 @@ mod tests {
             ["result", "severity", "detail", "duration_ms", "observed"]
         );
         assert_eq!(columns("reports").last().map(String::as_str), Some("files"));
+        // Migration 9 : `seq` des lots de logs, à côté de la clé.
+        assert_eq!(
+            columns("site_keys").last().map(String::as_str),
+            Some("last_logs_seq")
+        );
+        assert_eq!(columns("log_entries")[0], "id");
     }
 
     #[test]

@@ -16,7 +16,9 @@ use vigie::device::{self, PAIRING_TTL};
 use vigie::finding::{Finding, Severity as VSeverity};
 use vigie::serve;
 use vigie::store::{AcceptedReport, ReportOutcome, RunRecord, Store};
+use vigie_console_lib::Console;
 use vigie_console_lib::client::{Client, ErrorKind, IncidentState, Severity, SiteState};
+use vigie_console_lib::secret::{MemoryStore, TokenStorage};
 
 const T0: i64 = 1_792_000_000;
 const DAY: i64 = 86_400;
@@ -37,6 +39,7 @@ fn site_b() -> Site {
         keyword: None,
         interval: 600,
         agent_silence: 900,
+        logs: None,
     }
 }
 
@@ -165,6 +168,15 @@ impl Veilleur {
             .create_pairing(&device::hash(&code), name, T0, T0 + PAIRING_TTL)
             .expect("pairing");
         code
+    }
+
+    /// Lien `vigie://pair` vers ce veilleur, comme `vigie device pair`.
+    fn link(&self, name: &str) -> String {
+        let query = url::form_urlencoded::Serializer::new(String::new())
+            .append_pair("u", &self.base)
+            .append_pair("c", &self.code(name))
+            .finish();
+        format!("vigie://pair?{query}")
     }
 
     async fn paired(&self, name: &str) -> Client {
@@ -322,4 +334,68 @@ async fn an_unreachable_veilleur_is_offline() {
         .with_token("jeton".into());
     let err = client.overview().await.expect_err("injoignable");
     assert_eq!(err.kind, ErrorKind::Offline);
+}
+
+/// Appairage par la console : jeton dans le store, `device.json` sans lui,
+/// puis retrait qui efface les deux côtés.
+#[tokio::test]
+async fn the_console_keeps_the_token_in_its_store() {
+    let v = Veilleur::start().await;
+    let dir = tempfile::tempdir().expect("dossier");
+    let secrets = Arc::new(MemoryStore::new());
+    let console = Console::new(dir.path().to_path_buf(), secrets.clone());
+    let status = console.pair(&v.link("poste"), true).await.expect("appairé");
+    assert_eq!(status.token_storage, TokenStorage::Keyring);
+    let token = secrets.secret().expect("jeton rangé");
+    let file = std::fs::read_to_string(dir.path().join("device.json")).expect("fichier");
+    assert!(!file.contains(&token), "{file}");
+
+    // Relancée, la console relit le jeton du store et appelle le veilleur.
+    let console = Console::new(dir.path().to_path_buf(), secrets.clone());
+    assert_eq!(console.status(), Some(status));
+    console
+        .call(|client| async move { client.overview().await })
+        .await
+        .expect("overview");
+
+    let unpaired = console.unpair().await.expect("retiré");
+    assert!(unpaired.revoked);
+    assert_eq!(secrets.secret(), None);
+    assert!(!dir.path().join("device.json").exists());
+}
+
+/// Écriture refusée par le store pendant l'appairage : le jeton émis est
+/// révoqué, rien ne reste sur le poste, et l'erreur ne cite pas le jeton.
+#[tokio::test]
+async fn a_refused_store_revokes_the_new_token() {
+    let v = Veilleur::start().await;
+    for (name, secrets) in [
+        ("refusé", MemoryStore::failing_write()),
+        ("faussé", MemoryStore::altered_readback()),
+    ] {
+        let dir = tempfile::tempdir().expect("dossier");
+        let secrets = Arc::new(secrets);
+        let console = Console::new(dir.path().to_path_buf(), secrets.clone());
+        let err = console
+            .pair(&v.link(name), true)
+            .await
+            .expect_err("store refusé");
+        assert_eq!(err.kind, ErrorKind::Storage);
+        assert!(err.message.contains("révoqué"), "{err:?}");
+        assert_eq!(console.status(), None);
+        assert!(!dir.path().join("device.json").exists());
+        if let Some(kept) = secrets.secret() {
+            assert!(!err.message.contains(&kept), "{err:?}");
+        }
+    }
+    let witness = v.paired("témoin").await;
+    let settings = witness.settings().await.expect("settings");
+    for name in ["refusé", "faussé"] {
+        let device = settings
+            .devices
+            .iter()
+            .find(|d| d.name == name)
+            .expect("appareil");
+        assert!(device.revoked_at.is_some(), "{name} révoqué");
+    }
 }

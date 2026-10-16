@@ -84,6 +84,7 @@ jobs:
     runs-on: ubuntu-24.04
     env:
       NDK_VERSION: 27.0.12077973
+      BUILD_TOOLS_VERSION: 35.0.0
     defaults:
       run:
         working-directory: vigie/app
@@ -107,7 +108,8 @@ jobs:
         with:
           packages: platform-tools
           log-accepted-android-sdk-licenses: false
-      - run: sdkmanager "ndk;${{ env.NDK_VERSION }}"
+      # build-tools : aapt2, pour vérifier le manifeste de l'APK.
+      - run: sdkmanager "ndk;${{ env.NDK_VERSION }}" "build-tools;${{ env.BUILD_TOOLS_VERSION }}"
       - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master
         with:
           toolchain: "1.93.0" # même version que vigie/app/src-tauri/rust-toolchain.toml
@@ -120,6 +122,16 @@ jobs:
             vigie/app/src-tauri/target
           key: console-android-${{ hashFiles('vigie/app/src-tauri/Cargo.lock') }}
       - run: pnpm install --frozen-lockfile
+      # Le Credential Manager est propre à Windows : sous Android, le jeton
+      # vit dans un fichier privé (secret.rs) et keyring-core ne doit pas
+      # entrer dans le build.
+      - name: keyring-core sous Windows seulement
+        working-directory: vigie/app/src-tauri
+        run: |
+          set -euo pipefail
+          ANDROID_TREE=$(cargo tree --locked --target aarch64-linux-android -i keyring-core 2>/dev/null)
+          test -z "$ANDROID_TREE" || { echo "::error::keyring-core tiré sous Android :"; echo "$ANDROID_TREE"; exit 1; }
+          cargo tree --locked --target x86_64-pc-windows-msvc -i keyring-core
       # Sans keystore, Gradle en crée une à chaque run : l'APK suivant est
       # refusé (INSTALL_FAILED_UPDATE_INCOMPATIBLE) et il faut désinstaller,
       # ce qui efface l'appairage. Une keystore de debug fixe, tirée des
@@ -143,6 +155,9 @@ jobs:
       - run: pnpm exec tauri android init
         env:
           NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/${{ env.NDK_VERSION }}
+      # gen/android est régénéré : sauvegarde et transfert d'appareil coupés
+      # à chaque build (allowBackup, dataExtractionRules).
+      - run: scripts/android-no-backup.sh patch
       # Une seule ABI (arm64) et un profil dev allégé : sans cela, l'APK de
       # debug de lyremember pesait 746 Mo.
       - run: pnpm exec tauri android build --apk --debug --target aarch64
@@ -157,6 +172,7 @@ jobs:
           APK=$(find src-tauri/gen/android -path "*/debug/*.apk" -type f | head -1)
           test -n "$APK" || { echo "aucun APK produit"; exit 1; }
           ls -l "$APK"
+          scripts/android-no-backup.sh verify "$APK"
           echo "path=vigie/app/$APK" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:

@@ -93,8 +93,9 @@ Réponses :
   le journal du veilleur, avec le site et le `seq` quand ils sont lisibles,
   jamais avec le corps reçu.
 
-Pour un agent, seules `POST /r/v1/report` et `POST /r/v1/commands`
-(`protocole-commandes.md`) existent, avec `GET /health` ; toute autre route
+Pour un agent, seules `POST /r/v1/report`, `POST /r/v1/commands`
+(`protocole-commandes.md`) et `POST /r/v1/logs` (`logs.md`, « Transport
+Alwaysdata ») existent, avec `GET /health` ; toute autre route
 ou méthode hors de `/api/v1` reçoit le même 404.
 
 Un agent qui reçoit un 404 ne réessaie pas le même rapport : il enverra le
@@ -162,11 +163,12 @@ $ ~/vigie/bin/vigie site remove site-a
   `base64_encode(sodium_crypto_sign_publickey($pair))`.
 - `site add` refuse un site absent de la configuration ou qui a déjà une clé.
 - `site rotate-key` remplace la clé : un rapport signé avec l'ancienne est
-  refusé dès la rotation. La séquence repart de zéro, puisque l'ancienne clé ne
+  refusé dès la rotation. La séquence repart de zéro (celle des lots de logs
+  aussi), puisque l'ancienne clé ne
   peut plus rien faire accepter ; le silence reste mesuré depuis le dernier
   rapport accepté.
-- `site remove` retire la clé, l'état des rapports et la référence
-  d'empreintes, après confirmation (taper
+- `site remove` retire la clé, l'état des rapports, la référence
+  d'empreintes et les logs reçus du site, après confirmation (taper
   l'identifiant du site) ou avec `--yes`. Les incidents de l'agent sont clos au
   passage suivant de `tick`.
 
@@ -179,6 +181,7 @@ ne vérifie jamais ce qu'une autre a signé.
 | --- | --- | --- | --- |
 | Rapports | l'agent | le veilleur, avec la clé publique de `site add` | sur le site, hors webroot, 0600 vérifié par l'agent |
 | Retraits de commandes | l'agent, préfixe `vigie-pull-v1\n` | le veilleur, même clé que les rapports | idem rapports ; le préfixe sépare les deux usages |
+| Lots de logs (`/r/v1/logs`) | l'agent, préfixe `vigie-logs-v1\n` | le veilleur, même clé que les rapports | idem rapports ; le préfixe sépare les usages |
 | Commandes | le veilleur (`[commands] key_file`) | l'agent, avec la clé publique épinglée | sur le VPS, lue par `serve` seul (`protocole-commandes.md`) |
 | Audit des commandes | le veilleur (`[commands] audit_key_file`) | `vigie site audit --verify` | sur le VPS, lue par `serve`, `tick` et la CLI |
 
