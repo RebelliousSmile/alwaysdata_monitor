@@ -135,6 +135,25 @@ export interface ApiError {
   message: string
 }
 
+/**
+ * Texte lisible d'une erreur quelconque. Un plugin mobile rejette souvent un
+ * objet, que `String()` réduirait à « [object Object] ».
+ */
+export function errorText(err: unknown): string {
+  if (typeof err === 'string') return err
+  if (err instanceof Error) return err.message
+  if (typeof err === 'object' && err !== null) {
+    const { message } = err as { message?: unknown }
+    if (typeof message === 'string') return message
+    try {
+      return JSON.stringify(err)
+    } catch {
+      return 'erreur inconnue'
+    }
+  }
+  return String(err)
+}
+
 export function isApiError(value: unknown): value is ApiError {
   return (
     typeof value === 'object' &&
@@ -150,7 +169,7 @@ async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> 
   } catch (err) {
     if (isApiError(err)) throw err
     // Hors de Tauri (navigateur, tests sans mock) : aucune commande.
-    throw { kind: 'server', message: String(err) } satisfies ApiError
+    throw { kind: 'server', message: errorText(err) } satisfies ApiError
   }
 }
 
