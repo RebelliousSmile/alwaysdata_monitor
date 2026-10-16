@@ -53,7 +53,7 @@ fn tick_then_status_succeeds_and_migrations_rerun_cleanly() {
     let after = vigie(&config, &["status"]);
     assert!(after.status.success(), "{after:?}");
     let stdout = String::from_utf8_lossy(&after.stdout);
-    assert!(stdout.contains("schéma v6"), "{stdout}");
+    assert!(stdout.contains("schéma v7"), "{stdout}");
     assert!(stdout.contains("→ ok"), "{stdout}");
     assert!(stdout.contains("incidents ouverts : aucun"), "{stdout}");
     assert!(stdout.contains("notifications en attente : 0"), "{stdout}");
@@ -317,4 +317,45 @@ fn device_revoke_marks_a_paired_device_revoked() {
 
     let text = stdout(&vigie(&config, &["device", "list"]));
     assert!(text.contains(&format!("#{id}  pc  révoqué le")), "{text}");
+}
+
+#[test]
+fn a_site_without_runtime_warns_and_lists_a_dash() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let config = write_config(dir.path(), SITE_A);
+    let out = vigie(&config, &["site", "add", "site-a", "--pubkey", KEY_1]);
+    assert!(out.status.success(), "{out:?}");
+    assert!(stderr(&out).contains("n'admet aucune commande"), "{out:?}");
+    let out = vigie(&config, &["site", "list"]);
+    assert!(stdout(&out).trim_end().ends_with("\t-"), "{out:?}");
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let config = write_config(dir.path(), &format!("{SITE_A}kind = \"wordpress\"\n"));
+    let out = vigie(&config, &["site", "add", "site-a", "--pubkey", KEY_1]);
+    assert!(out.status.success(), "{out:?}");
+    assert!(!stderr(&out).contains("n'admet aucune commande"), "{out:?}");
+    let out = vigie(&config, &["site", "list"]);
+    assert!(stdout(&out).trim_end().ends_with("\tphp"), "{out:?}");
+}
+
+#[test]
+fn status_says_when_serve_has_not_seen_the_typology() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let config = write_config(dir.path(), SITE_A);
+    let out = vigie(&config, &["status"]);
+    assert!(
+        stdout(&out).contains("tick : inconnue ; serve : inconnue"),
+        "{out:?}"
+    );
+
+    // Base en v7 créée par une commande, sans passage de serve.
+    assert!(
+        vigie(&config, &["site", "add", "site-a", "--pubkey", KEY_1])
+            .status
+            .success()
+    );
+    let out = vigie(&config, &["status"]);
+    let text = stdout(&out);
+    assert!(text.contains("serve : aucune"), "{text}");
+    assert!(text.contains("serve à redémarrer"), "{text}");
 }

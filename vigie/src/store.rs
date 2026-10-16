@@ -38,6 +38,9 @@ const MIGRATIONS: &[&str] = &[
     // `ok`, `finding` ou `error`, gravité et détail du constat le plus grave,
     // durée, valeurs observées en JSON. NULL pour un passage antérieur.
     include_str!("../migrations/0006.sql"),
+    // 7 : valeurs isolées du veilleur (clé, valeur, date), dont l'empreinte de
+    // la typologie vue par `serve` et par `tick` (`config::typology_fingerprint`).
+    include_str!("../migrations/0007.sql"),
 ];
 
 /// Version de schéma à partir de laquelle les incidents existent.
@@ -50,6 +53,13 @@ pub const SCHEMA_BASELINE: usize = 4;
 pub const SCHEMA_DEVICES: usize = 5;
 /// Version de schéma à partir de laquelle le résultat des passages existe.
 pub const SCHEMA_CHECK_RESULTS: usize = 6;
+/// Version de schéma à partir de laquelle la table `meta` existe.
+pub const SCHEMA_META: usize = 7;
+
+/// Empreinte de la typologie chargée par `serve` à son démarrage.
+pub const META_TYPOLOGY_SERVE: &str = "typology.serve";
+/// Empreinte de la typologie vue par le dernier `tick`.
+pub const META_TYPOLOGY_TICK: &str = "typology.tick";
 
 /// « Vu le » d'un appareil n'est réécrit qu'après ce délai, en secondes.
 pub const SEEN_PERIOD: i64 = 60;
@@ -521,6 +531,31 @@ impl Store {
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
         tx.execute("INSERT INTO ticks (at) VALUES (?1)", [now])?;
         tx.execute("DELETE FROM ticks WHERE at < ?1", [now - TICK_RETENTION])?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Valeur et date d'écriture d'une clé de `meta`.
+    pub fn meta(&self, key: &str) -> Result<Option<(String, i64)>> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT value, updated_at FROM meta WHERE key = ?1",
+                [key],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?)
+    }
+
+    pub fn set_meta(&mut self, key: &str, value: &str, now: i64) -> Result<()> {
+        let tx = self
+            .conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        tx.execute(
+            "INSERT INTO meta (key, value, updated_at) VALUES (?1, ?2, ?3)
+             ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+            rusqlite::params![key, value, now],
+        )?;
         tx.commit()?;
         Ok(())
     }
@@ -1293,10 +1328,7 @@ mod tests {
             .expect("données v5");
         }
         let store = Store::open(&path).expect("open");
-        assert_eq!(
-            store.schema_version().expect("version"),
-            SCHEMA_CHECK_RESULTS
-        );
+        assert_eq!(store.schema_version().expect("version"), MIGRATIONS.len());
         let runs = store.check_results().expect("runs");
         assert_eq!(runs.len(), 1);
         assert_eq!(runs[0].last_run, 900);
@@ -1936,7 +1968,7 @@ mod tests {
             assert!(!migration.contains('\r'), "migration {} en CRLF", i + 1);
         }
         let (_dir, store) = temp_store();
-        assert_eq!(store.schema_version().expect("version"), 6);
+        assert_eq!(store.schema_version().expect("version"), 7);
         let mut stmt = store
             .conn
             .prepare("SELECT type, name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name")
@@ -1954,6 +1986,7 @@ mod tests {
             ("table", "check_runs"),
             ("table", "devices"),
             ("table", "incidents"),
+            ("table", "meta"),
             ("table", "pairings"),
             ("table", "reports"),
             ("table", "site_keys"),

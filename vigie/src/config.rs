@@ -80,6 +80,7 @@ fn default_smtp_port() -> u16 {
     587
 }
 
+/// Type de CMS : filtre les contrôles (`CheckKind::cms`).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SiteKind {
@@ -87,6 +88,37 @@ pub enum SiteKind {
     Generic,
     Wordpress,
     Prestashop,
+}
+
+impl SiteKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Generic => "generic",
+            Self::Wordpress => "wordpress",
+            Self::Prestashop => "prestashop",
+        }
+    }
+}
+
+/// Ce que le site exécute : filtre les commandes (`capability.rs`). Déclaré
+/// par l'exploitant, jamais détecté ni rapporté par l'agent. Pas de valeur
+/// par défaut : un site sans runtime n'admet aucune commande.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Runtime {
+    Php,
+    Node,
+    Static,
+}
+
+impl Runtime {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Php => "php",
+            Self::Node => "node",
+            Self::Static => "static",
+        }
+    }
 }
 
 /// Intervalle par défaut des contrôles d'un site, en secondes.
@@ -101,6 +133,9 @@ pub struct Site {
     pub url: String,
     #[serde(default)]
     pub kind: SiteKind,
+    /// `php`, `node` ou `static`. Facultatif : `wordpress` et `prestashop`
+    /// impliquent `php` ; un site `generic` sans runtime n'en a aucun.
+    pub runtime: Option<Runtime>,
     /// Page du contrôle `content`, `url` par défaut.
     pub keyword_url: Option<String>,
     /// Texte attendu dans cette page.
@@ -128,6 +163,14 @@ fn default_agent_silence() -> u64 {
 }
 
 impl Site {
+    /// Runtime déclaré, sinon celui qu'impose le CMS, sinon aucun.
+    pub fn effective_runtime(&self) -> Option<Runtime> {
+        self.runtime.or(match self.kind {
+            SiteKind::Wordpress | SiteKind::Prestashop => Some(Runtime::Php),
+            SiteKind::Generic => None,
+        })
+    }
+
     pub fn content_url(&self) -> &str {
         self.keyword_url.as_deref().unwrap_or(&self.url)
     }
@@ -137,6 +180,67 @@ impl Site {
     pub fn base_url(&self) -> Result<url::Url, url::ParseError> {
         url::Url::parse(&self.url)
     }
+}
+
+/// Version de la typologie (registre des capacités) : SHA-256 hex de la
+/// projection `id kind runtime` de chaque site, triée par `id`. Un commentaire,
+/// un intervalle ou l'ordre des blocs `[[sites]]` ne la changent pas.
+pub fn typology_fingerprint(config: &Config) -> String {
+    use sha2::{Digest, Sha256};
+    let mut lines = typology(config);
+    lines.sort();
+    let digest = Sha256::digest(lines.join("\n").as_bytes());
+    digest.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// Ce qu'on écrit en base pour une typologie : son empreinte et ses lignes,
+/// pour journaliser plus tard quels sites ont changé.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, Deserialize)]
+pub struct TypologyRecord {
+    pub fingerprint: String,
+    pub sites: Vec<String>,
+}
+
+impl TypologyRecord {
+    pub fn of(config: &Config) -> Self {
+        let mut sites = typology(config);
+        sites.sort();
+        Self {
+            fingerprint: typology_fingerprint(config),
+            sites,
+        }
+    }
+
+    /// Lignes `id kind runtime` apparues ou disparues entre `self` et `next`.
+    pub fn changes(&self, next: &Self) -> Vec<String> {
+        let removed = self
+            .sites
+            .iter()
+            .filter(|l| !next.sites.contains(l))
+            .map(|l| format!("- {l}"));
+        let added = next
+            .sites
+            .iter()
+            .filter(|l| !self.sites.contains(l))
+            .map(|l| format!("+ {l}"));
+        removed.chain(added).collect()
+    }
+}
+
+/// `id kind runtime` de chaque site, dans l'ordre de la configuration.
+pub fn typology(config: &Config) -> Vec<String> {
+    config
+        .sites
+        .iter()
+        .map(|site| {
+            format!(
+                "{} {} {}",
+                site.id,
+                site.kind.as_str(),
+                site.effective_runtime().map_or("-", Runtime::as_str)
+            )
+        })
+        .collect()
 }
 
 /// `--config`, sinon `VIGIE_CONFIG`, sinon `~/vigie/config.toml`.
@@ -308,6 +412,16 @@ impl Config {
                     site.id, site.interval
                 ));
             }
+            if matches!(site.kind, SiteKind::Wordpress | SiteKind::Prestashop)
+                && site.runtime.is_some_and(|r| r != Runtime::Php)
+            {
+                return Err(format!(
+                    "runtime du site « {} » : {} implique php (reçu : {})",
+                    site.id,
+                    site.kind.as_str(),
+                    site.runtime.map_or("-", Runtime::as_str)
+                ));
+            }
             if site.agent_silence < MIN_AGENT_SILENCE {
                 return Err(format!(
                     "agent_silence du site « {} » : {MIN_AGENT_SILENCE} s au moins (reçu : {})",
@@ -339,6 +453,48 @@ url = "https://www.example.org/"
 
     fn parse_str(raw: &str) -> Result<Config, ConfigError> {
         parse(Path::new("config.toml"), raw)
+    }
+
+    #[test]
+    fn a_cms_implies_php_and_refuses_another_runtime() {
+        let site = |extra: &str| parse_str(&format!("{VALID}{extra}"));
+        let wp = site("kind = \"wordpress\"\n").expect("valide");
+        assert_eq!(wp.sites[0].effective_runtime(), Some(Runtime::Php));
+        let generic = site("").expect("valide");
+        assert_eq!(generic.sites[0].effective_runtime(), None);
+        let node = site("runtime = \"node\"\n").expect("valide");
+        assert_eq!(node.sites[0].effective_runtime(), Some(Runtime::Node));
+        let declared = site("kind = \"prestashop\"\nruntime = \"php\"\n").expect("valide");
+        assert_eq!(declared.sites[0].effective_runtime(), Some(Runtime::Php));
+
+        let err = site("kind = \"wordpress\"\nruntime = \"node\"\n").unwrap_err();
+        assert!(matches!(err, ConfigError::Invalid { .. }), "{err}");
+        assert!(err.to_string().contains("« exemple »"), "{err}");
+        let err = site("runtime = \"python\"\n").unwrap_err();
+        assert!(matches!(err, ConfigError::Parse { .. }), "{err}");
+    }
+
+    #[test]
+    fn the_typology_fingerprint_ignores_order_and_unrelated_keys() {
+        let two = |first: &str, second: &str| {
+            parse_str(&format!(
+                "{VALID}{first}\n[[sites]]\nid = \"autre\"\nurl = \"https://autre.example.org/\"\n{second}"
+            ))
+            .expect("valide")
+        };
+        let a = two("kind = \"wordpress\"", "");
+        let interval = two("kind = \"wordpress\"\ninterval = 900", "# commentaire\n");
+        assert_eq!(typology_fingerprint(&a), typology_fingerprint(&interval));
+        let mut swapped = a.clone();
+        swapped.sites.reverse();
+        assert_eq!(typology_fingerprint(&a), typology_fingerprint(&swapped));
+        let runtime = two("kind = \"wordpress\"", "runtime = \"static\"");
+        assert_ne!(typology_fingerprint(&a), typology_fingerprint(&runtime));
+        assert_eq!(typology_fingerprint(&a).len(), 64);
+        assert_eq!(
+            TypologyRecord::of(&a).changes(&TypologyRecord::of(&runtime)),
+            ["- autre generic -", "+ autre generic static"]
+        );
     }
 
     #[test]

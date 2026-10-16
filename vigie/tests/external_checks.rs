@@ -222,6 +222,7 @@ fn site(base: &str) -> Site {
         id: "site-a".into(),
         url: format!("{base}/"),
         kind: SiteKind::Wordpress,
+        runtime: None,
         keyword_url: Some(format!("{base}/kb/")),
         keyword: Some("/problemes/".into()),
         interval: 300,

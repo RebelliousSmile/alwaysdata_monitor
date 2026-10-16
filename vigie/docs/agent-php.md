@@ -68,7 +68,7 @@ Les exemples visent le site A et le compte `<compte-site-a>`. Les commandes
    | `site` | Identifiant du site dans `config.toml` du veilleur |
    | `endpoint` | `https://<sous-domaine-du-veilleur>/r/v1/report` |
    | `root` | Racine absolue du site, par exemple `/home/<compte-site-a>/www` |
-   | `kind` | `wordpress` ou `generic` (défaut) |
+   | `kind` | `wordpress` ou `generic` (défaut) ; ne règle que les contrôles de l'agent. Ce qui compte pour les commandes est le `runtime` déclaré dans `config.toml` **du veilleur** : un site PHP déclaré `generic` y pose `runtime = "php"`, sinon il n'admet aucune commande (`protocole-commandes.md`) |
    | `critical` | 30 chemins relatifs au plus, présence et empreinte |
    | `must_contain` | 10 règles `{"file": …, "text": …}` au plus |
    | `uploads` | Dossier à parcourir, `wp-content/uploads` par défaut pour `wordpress`, `null` pour ne rien parcourir |

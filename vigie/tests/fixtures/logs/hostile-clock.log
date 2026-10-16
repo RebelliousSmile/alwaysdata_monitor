@@ -1,0 +1,5 @@
+site-a.example.org 192.0.2.10 - - [15/Oct/2026:14:50:00 +0200] "GET /1 HTTP/1.1" 200 1 "-" "ua"
+site-a.example.org 192.0.2.10 - - [15/Oct/2026:14:49:00 +0200] "GET /2-recul HTTP/1.1" 200 1 "-" "ua"
+site-a.example.org 192.0.2.10 - - [01/Oct/2026:00:00:00 +0200] "GET /3-rotation HTTP/1.1" 200 1 "-" "ua"
+site-a.example.org 192.0.2.10 - - [15/Mar/2027:00:00:00 +0200] "GET /4-futur HTTP/1.1" 200 1 "-" "ua"
+site-a.example.org 192.0.2.10 - - [31/Dec/1969:23:59:59 +0000] "GET /5-avant-1970 HTTP/1.1" 200 1 "-" "ua"

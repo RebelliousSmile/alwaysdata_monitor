@@ -11,3 +11,5 @@
 *.db
 *.db-wal
 *.db-shm
+# Fixtures de logs synthétiques des tests du veilleur (docs/logs.md).
+!vigie/tests/fixtures/logs/*.log

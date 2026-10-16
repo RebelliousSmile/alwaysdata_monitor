@@ -1,0 +1,10 @@
+site-a.example.org 192.0.2.10 - - [15/Oct/2026:14:32:10 +0200] "GET / HTTP/2.0" 200 15320 "-" "Mozilla/5.0 (X11; Linux x86_64; rv:131.0) Gecko/20100101 Firefox/131.0"
+site-a.example.org 2001:db8::7 - - [15/Oct/2026:14:32:11 +0200] "GET /produit?id=12&utm_source=x HTTP/2.0" 200 8800 "https://www.example.org/" "Mozilla/5.0 (X11; Linux x86_64; rv:131.0) Gecko/20100101 Firefox/131.0"
+site-b.example.org 198.51.100.23 - - [15/Oct/2026:14:32:12 +0200] "GET /" 200 512 "-" "-"
+site-a.example.org 192.0.2.10 - - [15/Oct/2026:14:32:13 +0200] "GET /style.css HTTP/2.0" 304 - "https://site-a.example.org/" "Mozilla/5.0 (X11; Linux x86_64; rv:131.0) Gecko/20100101 Firefox/131.0"
+site-b.example.org 203.0.113.99 - - [15/Oct/2026:14:32:14 +0200] "\x16\x03\x01\x02\x00\x01\x00\x01\xfc\x03\x03" 400 226 "-" "-"
+site-a.example.org 192.0.2.66 - - [15/Oct/2026:14:32:15 +0200] "GET /robots.txt HTTP/1.1" 200 67 "-" "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"
+site-b.example.org 203.0.113.5 - - [15/Oct/2026:14:32:16 +0200] "GET /.env HTTP/1.1" 404 196 "-" "python-requests/2.32.3"
+site-a.example.org 198.51.100.8 - - [15/Oct/2026:14:32:17 +0200] "POST /wp-admin/setup-config.php?step=2 HTTP/1.1" 500 0 "-" "curl/8.5.0"
+[Wed Oct 15 14:32:18.123456 2026] [core:error] [pid 1234] AH00126: Invalid URI in request
+site-a.example.org 192.0.2.10 - - [15/Oct/2026:14:32:19 +0200] "GET / HTTP/2.0" 999 1 "-" "Mozilla/5.0 (X11; Linux x86_64; rv:131.0) Gecko/20100101 Firefox/131.0"
