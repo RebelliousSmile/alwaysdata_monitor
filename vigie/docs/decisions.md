@@ -148,3 +148,20 @@ Plan : `aidd_docs/tasks/2026_10/2026_10_16_console-shell/plan.md`.
 | Sous Windows, le jeton d'appareil vit dans le Credential Manager (`keyring-core` et `windows-native-keyring-store`, store construit explicitement, persistance `Local`, cible `vigie-console/device`) ; `device.json` ne garde que l'URL, l'id et le nom. Un `device.json` 0.1.1 est migré au lancement ; en cas d'échec, l'appareil reste appairé sur l'ancien fichier (`file_legacy`, affiché dans Réglages) et la migration est retentée | Exigence « keyring OS » de l'issue, sans copie du jeton par le profil itinérant ni appareil bloqué par une migration ratée |
 | Sous Android, le jeton reste dans un fichier 0600 du dossier `no_backup` de l'application, et le manifeste coupe sauvegarde et transfert (`allowBackup`, `dataExtractionRules`, vérifiés sur l'APK). Un store Keystore existe (`android-native-keyring-store`) ; il est écarté par choix (crate jeune, appels JNI), pas faute d'existence | Le bac à sable par application tient lieu de trousseau ; sans les règles d'extraction, le transfert vers un nouveau téléphone copierait le jeton et rendrait deux appareils indiscernables pour la révocation |
 | Sous une stratégie de groupe qui interdit le trousseau, un appareil déjà appairé reste appairé (fichier hérité), mais un nouvel appairage est refusé et le jeton émis aussitôt révoqué | Ne pas casser l'existant, ne pas créer de jeton hors trousseau |
+
+## Analyseur de logs (issue #8)
+
+Plan : `aidd_docs/tasks/2026_10/2026_10_16_analyseur-logs/plan.md` ;
+fonctionnement : [`logs.md`](./logs.md#analyse-issue-8).
+
+| Décision du 2026-10-16 | Raison |
+| --- | --- |
+| Partage entre sites limité aux signatures d'UA de robots normalisées (`Seo`, `AiTraining`, `Unknown` à jeton de robot), jamais un UA d'outil générique, jamais d'IP ; 100 par site, 30 jours. Partager des IP entre clients demanderait une décision datée de l'exploitant : **refusé par défaut** | Un robot nuisible est connu de tous les sites sans transférer de données personnelles d'un client à l'autre |
+| Une signature notée ailleurs ajoute 15 points hors du score propre ; seul le score propre (≥ 70) note une signature | Pas de boucle d'auto-entretien entre sites |
+| Pas de « timeout par entrée » (issue) : le travail par entrée est borné (classement en cache, règles en nombre fini, glob borné à 256 × 2048) et un budget global de 10 s par passage, vérifié entre deux lots de 500, arrête le reste | Un délai par entrée n'a pas de sens pour un traitement en mémoire de coût constant ; le curseur opaque n'a pas de position partielle |
+| La protection porte sur le **niveau d'action**, pas sur le verdict : `SearchEngine`, `OtherEngine`, `SocialPreview`, `Browser` et `AiUser` sont protégés des actions robots.txt et UA de #13, mais une IP à UA de navigateur peut être suspecte | « Jamais de blocage d'un moteur, d'un navigateur ni d'un aperçu social » (#13) ; le scraper de facettes à UA Firefox est le cas principal du score |
+| `AiUser` protégé, écart au PHP où il n'a aucune protection | Il agit pour une personne qui a demandé la page |
+| Constats agrégés : un par règle, un seul `suspicious-ips` (5 pires IP), `bots-ai-training` en information, `load` ; clé = identifiant, jamais une valeur de log ; détail assaini à l'écriture | Un botnet de 1 000 IP ne fait pas 1 000 e-mails ; un chemin ou une IP d'attaquant n'entre jamais dans une clé |
+| Minimisation : profils et verdicts d'IP 48 h, résumés d'analyse sans IP et signatures 30 jours, détails des incidents `logs` clos masqués à 30 jours, y compris pour un site qui n'a plus de source | RGPD |
+| `close_unwatched` garde le contrôle `logs` d'un site qui a une source (prédicat provisoire dans `tick.rs`, repris par le registre de #4) | Sinon chaque passage clôt puis rouvre |
+| Les verdicts ne sont recalculés, et l'instantané écrit, que quand un passage a replié des entrées ; sinon ils sont repris du dernier instantané | Les profils ne bougent pas sans entrée nouvelle ; relire 10 000 profils chaque minute pour rien coûterait le budget |

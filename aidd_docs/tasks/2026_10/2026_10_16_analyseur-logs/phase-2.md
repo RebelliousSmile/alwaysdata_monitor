@@ -1,5 +1,5 @@
 ---
-status: pending
+status: done
 ---
 
 # Instruction: Repli incrémental : agrégats, profils, score, charge

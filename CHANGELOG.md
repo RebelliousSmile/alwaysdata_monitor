@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Two-axis site typology (CMS kind filters checks, runtime filters commands) and the closed command list (#2, 3477886)
 - Signed command channel `/r/v1/commands` with a hash-chained, signed audit log and its CLI (#10, 58bfa82)
 - PHP agent 0.2.0: signed pull, verified responses, `ping` and `rotate-key`, end-to-end test against the real watcher in CI (#6, 4fe9ba9)
-- Bot catalogue, bounded path globs and declarative log rules for the upcoming log analyzer (#8 phase 1)
+- Log analyzer wired into `tick`: bot catalogue, bounded path globs and declarative rules, incremental folding into persisted aggregates, IP suspicion score and load ported from the module, structured analysis snapshots, bounded `logs` findings, and robot user-agent signatures shared across sites without any IP (#8)
 - Alwaysdata log adapter: `/r/v1/logs` signed batches with high-water-mark idempotence, PHP agent 0.3.0 incremental reading across gz rotation, normalized entries only, 30-day purge, `AlwaysdataSource` (#1)
 
 ## [v1.11.2] - 2026-10-16

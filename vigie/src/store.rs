@@ -56,6 +56,10 @@ const MIGRATIONS: &[&str] = &[
     // minute des règles, profils d'IP par heure (index couvrant du compte de
     // classement), robots et charge par heure, curseur et heure de référence.
     include_str!("../migrations/0010.sql"),
+    // 11 : analyse de logs, phase 3 : signatures d'UA de robots partagées
+    // entre sites (jamais d'IP), instantanés de l'analyse (résumé sans IP) et
+    // verdicts d'IP moyens et élevés, index par score décroissant.
+    include_str!("../migrations/0011.sql"),
 ];
 
 /// Version de schéma à partir de laquelle les incidents existent.
@@ -77,6 +81,9 @@ pub const SCHEMA_LOGS: usize = 9;
 /// Version de schéma à partir de laquelle les agrégats de l'analyse de logs
 /// existent.
 pub const SCHEMA_ANALYSIS: usize = 10;
+/// Version de schéma à partir de laquelle les signatures partagées et les
+/// instantanés de l'analyse de logs existent.
+pub const SCHEMA_FINDINGS: usize = 11;
 
 /// Empreinte de la typologie chargée par `serve` à son démarrage.
 pub const META_TYPOLOGY_SERVE: &str = "typology.serve";
@@ -896,7 +903,8 @@ impl Store {
     }
 
     /// Retire la clé et l'état des rapports, et purge les logs reçus du site
-    /// (entrées, lots, limites hautes). `false` si le site n'avait pas de clé.
+    /// (entrées, lots, limites hautes) et son analyse (agrégats, curseur,
+    /// instantanés, signatures notées). `false` si le site n'avait pas de clé.
     /// Les incidents de l'agent sont clos par le `tick` suivant.
     pub fn remove_key(&mut self, site: &str) -> Result<bool> {
         let tx = self
@@ -908,6 +916,19 @@ impl Store {
         tx.execute("DELETE FROM log_entries WHERE site = ?1", [site])?;
         tx.execute("DELETE FROM log_batches WHERE site = ?1", [site])?;
         tx.execute("DELETE FROM log_marks WHERE site = ?1", [site])?;
+        // Agrégats, curseur, instantanés et signatures de l'analyse (#8).
+        for table in [
+            "log_buckets",
+            "log_profiles",
+            "log_bots",
+            "log_load",
+            "log_cursors",
+            "log_analysis",
+            "log_verdicts",
+            "log_signatures",
+        ] {
+            tx.execute(&format!("DELETE FROM {table} WHERE site = ?1"), [site])?;
+        }
         tx.commit()?;
         Ok(removed == 1)
     }
@@ -2204,7 +2225,7 @@ mod tests {
             assert!(!migration.contains('\r'), "migration {} en CRLF", i + 1);
         }
         let (_dir, store) = temp_store();
-        assert_eq!(store.schema_version().expect("version"), SCHEMA_ANALYSIS);
+        assert_eq!(store.schema_version().expect("version"), SCHEMA_FINDINGS);
         let mut stmt = store
             .conn
             .prepare("SELECT type, name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name")
@@ -2227,6 +2248,10 @@ mod tests {
             ("index", "log_entries_time"),
             ("index", "log_marks_received"),
             ("index", "log_profiles_rank"),
+            ("index", "log_signatures_expires"),
+            ("index", "log_signatures_site"),
+            ("index", "log_verdicts_generated"),
+            ("index", "log_verdicts_score"),
             ("index", "ticks_at"),
             ("table", "audit_notified"),
             ("table", "baselines"),
@@ -2236,6 +2261,7 @@ mod tests {
             ("table", "commands"),
             ("table", "devices"),
             ("table", "incidents"),
+            ("table", "log_analysis"),
             ("table", "log_batches"),
             ("table", "log_bots"),
             ("table", "log_buckets"),
@@ -2244,6 +2270,8 @@ mod tests {
             ("table", "log_load"),
             ("table", "log_marks"),
             ("table", "log_profiles"),
+            ("table", "log_signatures"),
+            ("table", "log_verdicts"),
             ("table", "meta"),
             ("table", "pairings"),
             ("table", "reports"),
