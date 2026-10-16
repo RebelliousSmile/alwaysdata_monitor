@@ -4,7 +4,7 @@
 //! Les contrôles externes sont marqués comme faits à `T0`, avec un intervalle
 //! d'un jour : `tick` ne fait aucune requête HTTP et ne traite que les agents.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
 
@@ -87,10 +87,6 @@ impl Harness {
             mail: MemoryNotifier::new(),
             _dir: dir,
         }
-    }
-
-    fn database(&self) -> PathBuf {
-        self.config.database.clone()
     }
 
     fn set_now(&self, now: i64) {
@@ -454,7 +450,7 @@ fn a_refusal_never_quotes_the_body() {
     let body = serde_json::to_vec(&value).expect("json");
     let signature = STANDARD.encode(key.sign(&body).to_bytes());
     let refusal = ingest::ingest(
-        &h.database(),
+        &mut h.store(),
         &["site-a".into()],
         Some("site-a"),
         Some(&signature),
@@ -469,11 +465,11 @@ fn a_refusal_never_quotes_the_body() {
 }
 
 #[test]
-fn an_unknown_site_does_not_create_the_database() {
+fn a_site_without_a_key_is_unknown() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let database = dir.path().join("vigie.db");
+    let mut store = Store::open(&dir.path().join("vigie.db")).expect("base");
     let refusal = ingest::ingest(
-        &database,
+        &mut store,
         &["site-a".into()],
         Some("site-a"),
         None,
@@ -482,7 +478,22 @@ fn an_unknown_site_does_not_create_the_database() {
     )
     .expect_err("refusé");
     assert_eq!(refusal.reason, Reason::UnknownSite);
-    assert!(!database.exists());
+}
+
+#[tokio::test]
+async fn a_report_without_a_database_is_a_silent_404_and_creates_nothing() {
+    let key = signing_key(7);
+    let dir = tempfile::tempdir().expect("tempdir");
+    let config = config(dir.path());
+    let body = serde_json::to_vec(&report(1, T0, json!([]))).expect("json");
+    let response = serve::router_with_clock(config.clone(), Arc::new(|| T0))
+        .oneshot(signed("site-a", &key, body))
+        .await
+        .expect("réponse");
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    let body = response.into_body().collect().await.expect("corps");
+    assert!(body.to_bytes().is_empty());
+    assert!(!config.database.exists());
 }
 
 fn hex(value: &str) -> Vec<u8> {

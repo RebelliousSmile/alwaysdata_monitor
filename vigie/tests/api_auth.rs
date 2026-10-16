@@ -302,6 +302,29 @@ async fn the_api_never_creates_the_database() {
     assert!(!v.db.exists());
 }
 
+/// Pendant un déploiement, l'ancien `serve` garde son binaire face à une base
+/// que le nouveau `tick` a déjà migrée : ses écritures doivent passer.
+#[tokio::test]
+async fn a_newer_schema_still_pairs_and_authenticates() {
+    let v = Veilleur::new();
+    let code = v.pairing("téléphone");
+    let conn = rusqlite::Connection::open(&v.db).expect("raw");
+    conn.pragma_update(None, "user_version", 7).expect("bump");
+    drop(conn);
+
+    let reply = v.pair_code(&code).await;
+    assert_eq!(reply.status, StatusCode::OK);
+    let token = reply.json()["token"].as_str().expect("token").to_owned();
+    let reply = v.overview(Some(&bearer(&token))).await;
+    assert_eq!(reply.status, StatusCode::OK);
+
+    let store = Store::open_read(&v.db).expect("open_read").expect("base");
+    assert_eq!(store.schema_version().expect("version"), 7);
+    let devices = store.devices().expect("devices");
+    assert_eq!(devices.len(), 1);
+    assert_eq!(devices[0].seen_at, Some(T0));
+}
+
 #[tokio::test]
 async fn health_and_report_routes_are_unchanged() {
     let v = Veilleur::new();

@@ -15,90 +15,29 @@ use crate::device::{self, Hash};
 use crate::facts;
 use crate::finding::{Finding, Severity};
 
-/// Une entrée par version de schéma, jouée dans l'ordre. Ne jamais modifier une
-/// migration déjà publiée : en ajouter une.
+/// Une entrée par version de schéma, jouée dans l'ordre. Le SQL vit dans
+/// `migrations/`, embarqué à la compilation. Ne jamais modifier une migration
+/// déjà publiée : en ajouter une.
 const MIGRATIONS: &[&str] = &[
     // 1 : passages de `tick`, en secondes Unix.
-    "CREATE TABLE ticks (
-        id INTEGER PRIMARY KEY,
-        at INTEGER NOT NULL
-    );
-    CREATE INDEX ticks_at ON ticks(at);",
+    include_str!("../migrations/0001.sql"),
     // 2 : dernier passage de chaque contrôle, et incidents. Un seul incident
     // ouvert par clé ; les dates sont en secondes Unix.
-    "CREATE TABLE check_runs (
-        site TEXT NOT NULL,
-        check_name TEXT NOT NULL,
-        last_run INTEGER NOT NULL,
-        PRIMARY KEY (site, check_name)
-    );
-    CREATE TABLE incidents (
-        id INTEGER PRIMARY KEY,
-        key TEXT NOT NULL,
-        site TEXT NOT NULL,
-        check_name TEXT NOT NULL,
-        severity TEXT NOT NULL,
-        detail TEXT NOT NULL,
-        opened_at INTEGER NOT NULL,
-        closed_at INTEGER,
-        acked_at INTEGER,
-        open_notified_at INTEGER,
-        close_notified_at INTEGER,
-        last_reminder_at INTEGER
-    );
-    CREATE UNIQUE INDEX incidents_open_key ON incidents(key) WHERE closed_at IS NULL;
-    CREATE INDEX incidents_site_check ON incidents(site, check_name);",
+    include_str!("../migrations/0002.sql"),
     // 3 : clé publique de l'agent de chaque site (Ed25519, 32 octets), et état
     // de ses rapports : dernier `seq` accepté, date de réception, dernier relevé.
-    "CREATE TABLE site_keys (
-        site TEXT PRIMARY KEY,
-        pubkey BLOB NOT NULL CHECK (length(pubkey) = 32),
-        added_at INTEGER NOT NULL,
-        rotated_at INTEGER
-    );
-    CREATE TABLE reports (
-        site TEXT PRIMARY KEY,
-        last_seq INTEGER NOT NULL,
-        last_valid_at INTEGER NOT NULL,
-        agent TEXT NOT NULL,
-        facts TEXT NOT NULL
-    );",
+    include_str!("../migrations/0003.sql"),
     // 4 : empreintes des fichiers critiques du dernier rapport, et référence
     // à laquelle elles sont comparées (`facts.rs`), en JSON.
-    "ALTER TABLE reports ADD COLUMN files TEXT NOT NULL DEFAULT '{}';
-    CREATE TABLE baselines (
-        site TEXT PRIMARY KEY,
-        files TEXT NOT NULL,
-        set_at INTEGER NOT NULL
-    );",
+    include_str!("../migrations/0004.sql"),
     // 5 : appareils de la console et codes d'appairage (`device.rs`). Seules
     // les empreintes SHA-256 sont gardées, jamais un jeton ni un code.
     // AUTOINCREMENT : l'id d'un appareil révoqué n'est jamais redonné.
-    "CREATE TABLE devices (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL,
-        token_hash BLOB NOT NULL UNIQUE CHECK (length(token_hash) = 32),
-        created_at INTEGER NOT NULL,
-        seen_at INTEGER,
-        revoked_at INTEGER
-    );
-    CREATE TABLE pairings (
-        id INTEGER PRIMARY KEY,
-        code_hash BLOB NOT NULL UNIQUE CHECK (length(code_hash) = 32),
-        name TEXT NOT NULL,
-        created_at INTEGER NOT NULL,
-        expires_at INTEGER NOT NULL,
-        used_at INTEGER,
-        device_id INTEGER REFERENCES devices(id)
-    );",
+    include_str!("../migrations/0005.sql"),
     // 6 : résultat du dernier passage de chaque contrôle, pour la console :
     // `ok`, `finding` ou `error`, gravité et détail du constat le plus grave,
     // durée, valeurs observées en JSON. NULL pour un passage antérieur.
-    "ALTER TABLE check_runs ADD COLUMN result TEXT;
-    ALTER TABLE check_runs ADD COLUMN severity TEXT;
-    ALTER TABLE check_runs ADD COLUMN detail TEXT;
-    ALTER TABLE check_runs ADD COLUMN duration_ms INTEGER;
-    ALTER TABLE check_runs ADD COLUMN observed TEXT;",
+    include_str!("../migrations/0006.sql"),
 ];
 
 /// Version de schéma à partir de laquelle les incidents existent.
@@ -484,6 +423,15 @@ impl Store {
     fn open_once(path: &Path) -> Result<Self> {
         let conn =
             Connection::open(path).with_context(|| format!("ouverture de {}", path.display()))?;
+        Self::tune_writer(&conn, path)?;
+        let mut store = Self { conn };
+        store.migrate()?;
+        Ok(store)
+    }
+
+    /// Réglages d'une connexion qui écrit : attente du verrou, WAL, durabilité
+    /// et clés étrangères.
+    fn tune_writer(conn: &Connection, path: &Path) -> Result<()> {
         conn.busy_timeout(Duration::from_secs(5))?;
         let mode: String = conn.query_row("PRAGMA journal_mode=WAL", [], |row| row.get(0))?;
         if !mode.eq_ignore_ascii_case("wal") {
@@ -493,15 +441,30 @@ impl Store {
             );
         }
         conn.execute_batch("PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON;")?;
-        let mut store = Self { conn };
-        store.migrate()?;
-        Ok(store)
+        Ok(())
     }
 
-    /// Ouverture en lecteur, pour `/health` et `status` : ne crée ni le fichier
-    /// ni son dossier, ne migre pas, ne change pas le mode de journal, et tolère
-    /// un schéma plus récent que le binaire (pendant un déploiement, `serve`
-    /// garde l'ancien binaire en mémoire). `None` si la base n'existe pas encore.
+    /// Ouverture en écrivain pour `serve` (`writer.rs`) : ne crée ni le fichier
+    /// ni son dossier, ne migre pas, et tolère un schéma plus récent que le
+    /// binaire, comme [`Store::open_read`]. La base est créée et migrée par
+    /// `tick` ou la CLI, et migrée au démarrage de `serve`. `None` si la base
+    /// n'existe pas encore.
+    pub fn open_write(path: &Path) -> Result<Option<Self>> {
+        if !path.is_file() {
+            return Ok(None);
+        }
+        let flags = OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX;
+        let conn = Connection::open_with_flags(path, flags)
+            .with_context(|| format!("ouverture de {}", path.display()))?;
+        Self::tune_writer(&conn, path)?;
+        Ok(Some(Self { conn }))
+    }
+
+    /// Ouverture en lecteur, pour `/health`, `status` et les lectures de l'API :
+    /// ne crée ni le fichier ni son dossier, ne migre pas, ne change pas le mode
+    /// de journal, refuse toute écriture (`query_only`), et tolère un schéma plus
+    /// récent que le binaire (pendant un déploiement, `serve` garde l'ancien
+    /// binaire en mémoire). `None` si la base n'existe pas encore.
     pub fn open_read(path: &Path) -> Result<Option<Self>> {
         if !path.is_file() {
             return Ok(None);
@@ -512,6 +475,7 @@ impl Store {
         let conn = Connection::open_with_flags(path, flags)
             .with_context(|| format!("ouverture de {}", path.display()))?;
         conn.busy_timeout(Duration::from_secs(5))?;
+        conn.execute_batch("PRAGMA foreign_keys=ON; PRAGMA query_only=ON;")?;
         Ok(Some(Self { conn }))
     }
 
@@ -552,7 +516,9 @@ impl Store {
     }
 
     pub fn record_tick(&mut self, now: i64) -> Result<()> {
-        let tx = self.conn.transaction()?;
+        let tx = self
+            .conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
         tx.execute("INSERT INTO ticks (at) VALUES (?1)", [now])?;
         tx.execute("DELETE FROM ticks WHERE at < ?1", [now - TICK_RETENTION])?;
         tx.commit()?;
@@ -632,7 +598,9 @@ impl Store {
         findings: &[Finding],
         now: i64,
     ) -> Result<()> {
-        let tx = self.conn.transaction()?;
+        let tx = self
+            .conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
         reconcile_in(&tx, site, check, findings, now)?;
         tx.commit()?;
         Ok(())
@@ -652,7 +620,9 @@ impl Store {
             .filter(|i| !is_watched(&i.site, &i.check_name))
             .map(|i| i.id)
             .collect();
-        let tx = self.conn.transaction()?;
+        let tx = self
+            .conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
         for id in &stale {
             tx.execute(
                 "UPDATE incidents SET closed_at = ?2 WHERE id = ?1",
@@ -832,7 +802,9 @@ impl Store {
     /// Retire la clé et l'état des rapports. `false` si le site n'avait pas de
     /// clé. Les incidents de l'agent sont clos par le `tick` suivant.
     pub fn remove_key(&mut self, site: &str) -> Result<bool> {
-        let tx = self.conn.transaction()?;
+        let tx = self
+            .conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
         let removed = tx.execute("DELETE FROM site_keys WHERE site = ?1", [site])?;
         tx.execute("DELETE FROM reports WHERE site = ?1", [site])?;
         tx.execute("DELETE FROM baselines WHERE site = ?1", [site])?;
@@ -1955,5 +1927,113 @@ mod tests {
             Some(400)
         );
         assert_eq!(store.check_runs().expect("runs").len(), 1);
+    }
+
+    #[test]
+    fn migration_files_build_the_expected_schema() {
+        // `include_str!` donne le même texte sous Windows et sous Linux.
+        for (i, migration) in MIGRATIONS.iter().enumerate() {
+            assert!(!migration.contains('\r'), "migration {} en CRLF", i + 1);
+        }
+        let (_dir, store) = temp_store();
+        assert_eq!(store.schema_version().expect("version"), 6);
+        let mut stmt = store
+            .conn
+            .prepare("SELECT type, name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name")
+            .expect("prepare");
+        let objects: Vec<(String, String)> = stmt
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .expect("query")
+            .collect::<rusqlite::Result<_>>()
+            .expect("rows");
+        let expected = [
+            ("index", "incidents_open_key"),
+            ("index", "incidents_site_check"),
+            ("index", "ticks_at"),
+            ("table", "baselines"),
+            ("table", "check_runs"),
+            ("table", "devices"),
+            ("table", "incidents"),
+            ("table", "pairings"),
+            ("table", "reports"),
+            ("table", "site_keys"),
+            ("table", "ticks"),
+        ];
+        let objects: Vec<(&str, &str)> = objects
+            .iter()
+            .map(|(kind, name)| (kind.as_str(), name.as_str()))
+            .collect();
+        assert_eq!(objects, expected);
+        // Colonnes ajoutées par ALTER TABLE (migrations 4 et 6).
+        let columns = |table: &str| -> Vec<String> {
+            let mut stmt = store
+                .conn
+                .prepare(&format!("SELECT name FROM pragma_table_info('{table}')"))
+                .expect("prepare");
+            stmt.query_map([], |row| row.get(0))
+                .expect("query")
+                .collect::<rusqlite::Result<_>>()
+                .expect("rows")
+        };
+        assert_eq!(
+            columns("check_runs")[3..],
+            ["result", "severity", "detail", "duration_ms", "observed"]
+        );
+        assert_eq!(columns("reports").last().map(String::as_str), Some("files"));
+    }
+
+    #[test]
+    fn open_read_refuses_writes_and_enforces_foreign_keys() {
+        let (_dir, store) = temp_store();
+        let path = store.conn.path().expect("chemin").to_owned();
+        let reader = Store::open_read(Path::new(&path))
+            .expect("open_read")
+            .expect("présente");
+        let err = reader
+            .conn
+            .execute("INSERT INTO ticks (at) VALUES (1)", [])
+            .expect_err("écriture refusée");
+        assert!(err.to_string().contains("readonly"), "{err}");
+        assert_eq!(foreign_keys(&reader), 1);
+        assert_eq!(reader.last_tick().expect("lecture"), None);
+    }
+
+    fn foreign_keys(store: &Store) -> i64 {
+        store
+            .conn
+            .query_row("PRAGMA foreign_keys", [], |row| row.get(0))
+            .expect("foreign_keys")
+    }
+
+    #[test]
+    fn every_kind_of_connection_enforces_foreign_keys() {
+        let (_dir, store) = temp_store();
+        let path = store.conn.path().expect("chemin").to_owned();
+        assert_eq!(foreign_keys(&store), 1);
+        let writer = Store::open_write(Path::new(&path))
+            .expect("open_write")
+            .expect("présente");
+        assert_eq!(foreign_keys(&writer), 1);
+        let reader = Store::open_read(Path::new(&path))
+            .expect("open_read")
+            .expect("présente");
+        assert_eq!(foreign_keys(&reader), 1);
+    }
+
+    #[test]
+    fn open_write_does_not_create_or_migrate() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("absent").join("vigie.db");
+        assert!(Store::open_write(&path).expect("open_write").is_none());
+        assert!(!path.exists());
+        assert!(!dir.path().join("absent").exists());
+
+        // Un fichier sans schéma reste sans schéma : `open_write` ne migre pas.
+        let empty = dir.path().join("vide.db");
+        Connection::open(&empty).expect("raw");
+        let store = Store::open_write(&empty)
+            .expect("open_write")
+            .expect("présente");
+        assert_eq!(store.schema_version().expect("version"), 0);
     }
 }
