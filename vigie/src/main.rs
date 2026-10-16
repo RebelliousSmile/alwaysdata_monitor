@@ -159,7 +159,7 @@ fn run(cli: Cli) -> anyhow::Result<()> {
     // Une seule lecture de l'heure par commande (`clock.rs`).
     let now = SystemClock.unix();
     match cli.command {
-        Command::Serve { ip, port } => serve::run(config, ip, port),
+        Command::Serve { ip, port } => serve::run(config, path, ip, port),
         Command::Tick => tick::run(&config, now),
         Command::Check { site, once: _ } => check(&config, &site, now),
         Command::Status => status(&config, now),

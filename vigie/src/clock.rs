@@ -20,6 +20,10 @@ pub trait Clock: Send + Sync {
     /// Instant monotone, pour mesurer un écart sans subir un réglage de
     /// l'heure système.
     fn monotonic(&self) -> Instant;
+    /// Heure courante, en millisecondes Unix (horodatage des UUIDv7).
+    fn unix_ms(&self) -> i64 {
+        self.unix().saturating_mul(1000)
+    }
 }
 
 /// Horloge du système.
@@ -36,6 +40,13 @@ impl Clock for SystemClock {
 
     fn monotonic(&self) -> Instant {
         Instant::now()
+    }
+
+    fn unix_ms(&self) -> i64 {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))
+            .unwrap_or(0)
     }
 }
 

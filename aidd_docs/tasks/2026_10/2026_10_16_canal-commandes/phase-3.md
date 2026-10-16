@@ -11,12 +11,13 @@ status: pending
 └── vigie/
     ├── src/main.rs                 ✏️ commands init-keys|pubkey ; site commands enable|disable ; site command <site> <name> [--force] [--apply] ; site command-cancel ; site audit <site> [--verify [--head <hash>]]
     ├── src/serve.rs                ✏️ commentaire d'en-tête : routes
+    ├── src/tick.rs                 ✏️ expiration, unknown, e-mails d'ancre de l'audit (audit_notified)
     ├── tests/cli.rs                ✏️ aperçu sans écriture, --apply, refus, audit
-    ├── tests/fixtures/commands-vectors.json ✅ vecteurs : valide, préfixe faux, horodatage altéré, autre site, commande expirée, nonce différent
+    ├── tests/fixtures/commands-vectors.json ✅ vecteurs : réponse valide, préfixe faux, horodatage altéré, autre site, commande expirée, nonce différent ; réponses avec acked et accepted vrai/faux ; retrait signé avec le préfixe vigie-pull-v1 et sans (refusé) ; preuve vigie-rotate-v1
     └── docs/
         ├── protocole-commandes.md  ✏️ contrat complet : retrait, réponse, signatures, états, résultat et accusé, rotate-key, audit, ce que le canal ne protège pas, rotation de la clé de commandes
         ├── protocole-agent.md      ✏️ routes existantes, renvoi
-        ├── hebergement.md          ✏️ secrets : clés de commandes et d'audit
+        ├── hebergement.md          ✏️ secrets : clés de commandes et d'audit ; ordre de déploiement de [commands]
         └── decisions.md            ✏️ section #10
 ```
 

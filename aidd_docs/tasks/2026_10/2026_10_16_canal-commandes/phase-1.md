@@ -1,5 +1,5 @@
 ---
-status: pending
+status: done
 ---
 
 # Instruction: Clés, file et audit en base
@@ -9,7 +9,7 @@ status: pending
 ```txt
 .
 └── vigie/
-    ├── migrations/0008.sql   ✅ command_sites (site, enabled, last_pull_seq, last_command_seq), commands (+ index unique partiel des commandes non closes), command_audit (+ déclencheurs append-only)
+    ├── migrations/0008.sql   ✅ command_sites (site, enabled, last_pull_seq, last_command_seq), commands (+ index unique partiel des commandes non closes), command_audit (+ déclencheurs append-only), audit_notified (site, last_hash)
     └── src/
         ├── clock.rs          ✏️ Clock::unix_ms
         ├── capability.rs     ✏️ CommandKind::available() : htaccess-* indisponibles jusqu'à #13 ; non_idempotent()
@@ -44,7 +44,7 @@ journey
 ## Tasks to do
 
 1. `Clock::unix_ms` (SystemClock en ms, FakeClock en ms) ; UUIDv7 : 48 bits d'heure, version 7, variante RFC 9562, 74 bits de `getrandom`.
-2. États : `pending → served → done | failed | refused` ; `pending → expired | cancelled` ; `served → unknown` ; toute autre transition est une erreur.
+2. États : `pending → served → done | failed | refused` ; `pending → expired | refused` (refusée à la délivrance : la configuration ne l'admet plus) ; `pending | served → cancelled` ; `served → unknown → done | failed` (résultat tardif) ; toute autre transition est une erreur.
 3. Migration 0008 tolérée par l'ancien `serve` (aucune exigence nouvelle de version pour l'API de la console).
 4. Clés : 32 octets de graine Ed25519 en base64, une par fichier ; vérifications Unix (droits, propriétaire, dossier), refus sous Windows hors tests.
 5. Audit : entrées `{site, at, event, command_id, detail, typology}` sérialisées une fois, octets stockés tels quels ; premier `prev_hash` à 32 zéros par site.

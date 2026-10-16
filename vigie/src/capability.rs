@@ -49,6 +49,25 @@ impl CommandKind {
         Self::ALL.into_iter().find(|kind| kind.name() == name)
     }
 
+    /// Commande disponible dans ce binaire. `htaccess-*` attend la liste
+    /// fermée de directives vérifiée côté agent (#13) : un bloc `.htaccess`
+    /// libre donnerait l'exécution de code sur le site.
+    pub fn available(self) -> bool {
+        match self {
+            Self::Ping | Self::RotateKey => true,
+            Self::HtaccessApply | Self::HtaccessRollback => false,
+        }
+    }
+
+    /// Écriture qui ne se rejoue pas à l'aveugle : remettre en file après une
+    /// issue inconnue exige `--force`.
+    pub fn non_idempotent(self) -> bool {
+        match self {
+            Self::Ping => false,
+            Self::RotateKey | Self::HtaccessApply | Self::HtaccessRollback => true,
+        }
+    }
+
     /// Runtimes qui admettent la commande. `match` sans joker : une variante
     /// nouvelle oblige à décider. Tant qu'aucun agent Node n'existe, aucune
     /// commande n'admet `node`.
@@ -73,6 +92,8 @@ pub enum Refusal {
     RuntimeNotAllowed {
         runtime: Runtime,
     },
+    /// Commande de la liste, pas encore disponible dans ce binaire.
+    Unavailable,
 }
 
 impl fmt::Display for Refusal {
@@ -86,6 +107,7 @@ impl fmt::Display for Refusal {
                     runtime.as_str()
                 )
             }
+            Self::Unavailable => f.write_str("commande pas encore disponible (#13)"),
         }
     }
 }
@@ -94,11 +116,13 @@ impl fmt::Display for Refusal {
 /// de nouveau à la délivrance : la configuration a pu changer entre-temps.
 pub fn permit(command: CommandKind, site: &Site) -> Result<(), Refusal> {
     let runtime = site.effective_runtime().ok_or(Refusal::NoRuntime)?;
-    if command.runtimes().contains(&runtime) {
-        Ok(())
-    } else {
-        Err(Refusal::RuntimeNotAllowed { runtime })
+    if !command.runtimes().contains(&runtime) {
+        return Err(Refusal::RuntimeNotAllowed { runtime });
     }
+    if !command.available() {
+        return Err(Refusal::Unavailable);
+    }
+    Ok(())
 }
 
 /// Commandes admises pour ce site, dans l'ordre de [`CommandKind::ALL`].
@@ -135,8 +159,9 @@ mod tests {
         let table = [
             (Ping, false, true, false, false),
             (RotateKey, false, true, false, false),
-            (HtaccessApply, false, true, false, false),
-            (HtaccessRollback, false, true, false, false),
+            // Admises pour php, indisponibles jusqu'à #13.
+            (HtaccessApply, false, false, false, false),
+            (HtaccessRollback, false, false, false, false),
         ];
         assert_eq!(table.len(), CommandKind::ALL.len());
         for (command, none, php, node, stat) in table {
@@ -158,7 +183,12 @@ mod tests {
     #[test]
     fn a_php_command_is_refused_for_static_and_node() {
         let php = site(SiteKind::Generic, Some(Runtime::Php));
-        assert_eq!(permit(CommandKind::HtaccessApply, &php), Ok(()));
+        assert_eq!(permit(CommandKind::RotateKey, &php), Ok(()));
+        // Le runtime est vérifié d'abord ; pour php, htaccess-apply attend #13.
+        assert_eq!(
+            permit(CommandKind::HtaccessApply, &php),
+            Err(Refusal::Unavailable)
+        );
         for runtime in [Runtime::Static, Runtime::Node] {
             assert_eq!(
                 permit(
@@ -178,7 +208,10 @@ mod tests {
     #[test]
     fn a_cms_implies_php() {
         for kind in [SiteKind::Wordpress, SiteKind::Prestashop] {
-            assert_eq!(allowed(&site(kind, None)), CommandKind::ALL);
+            assert_eq!(
+                allowed(&site(kind, None)),
+                [CommandKind::Ping, CommandKind::RotateKey]
+            );
         }
     }
 
