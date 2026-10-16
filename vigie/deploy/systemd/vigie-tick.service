@@ -14,6 +14,8 @@ User=vigie
 Group=vigie
 ExecStart=/home/vigie/vigie/bin/vigie tick
 TimeoutStartSec=120
+# Comme serve : en manque de mémoire, le noyau tue d'abord un autre processus du VPS.
+OOMScoreAdjust=-500
 
 # Durcissement : seule la base est accessible en écriture, pas le binaire.
 NoNewPrivileges=yes
