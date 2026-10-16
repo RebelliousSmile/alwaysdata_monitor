@@ -10,16 +10,26 @@
 //! d'IP glissants sur 24 h plafonnés par Space-Saving ([`profile`]), score
 //! de suspicion porté du module ([`score`]), robots et charge par heure
 //! ([`load`]).
+//!
+//! Phase 3 : l'[`findings::Analysis`] structurée tirée des agrégats, ses
+//! instantanés et les constats agrégés et bornés du contrôle `logs`
+//! ([`findings`]) ; les signatures d'UA de robots partagées entre sites,
+//! jamais d'IP ([`shared`]). `tick.rs` replie les sources à tour de rôle et
+//! réconcilie les constats.
 
 pub mod catalog;
+pub mod findings;
 pub mod fold;
 pub mod glob;
 pub mod load;
 pub mod profile;
 pub mod rules;
 pub mod score;
+pub mod shared;
 pub mod store;
 
+#[cfg(test)]
+mod findings_tests;
 #[cfg(test)]
 mod fold_tests;
 #[cfg(test)]

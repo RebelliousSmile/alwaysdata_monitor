@@ -379,6 +379,25 @@ pub fn purge(store: &mut Store, now_ms: i64) -> Result<()> {
     Ok(())
 }
 
+/// Efface les agrégats et le curseur d'un site : sa source repart de son
+/// début (curseur invalide) sans rien compter deux fois.
+pub fn reset_site(store: &mut Store, site: &str) -> Result<()> {
+    let tx = store
+        .conn
+        .transaction_with_behavior(TransactionBehavior::Immediate)?;
+    for table in [
+        "log_buckets",
+        "log_profiles",
+        "log_bots",
+        "log_load",
+        "log_cursors",
+    ] {
+        tx.execute(&format!("DELETE FROM {table} WHERE site = ?1"), [site])?;
+    }
+    tx.commit()?;
+    Ok(())
+}
+
 // --- Lectures ----------------------------------------------------------------
 
 /// Profils des IP d'un site sur les 24 h qui finissent à `reference_ms`,

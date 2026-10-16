@@ -15,7 +15,11 @@ use std::fmt;
 use std::sync::OnceLock;
 
 /// Famille d'un user-agent, qui décide de ce que #13 peut proposer contre lui.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+/// Sérialisée comme [`BotClass::as_str`].
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
+#[serde(rename_all = "snake_case")]
 pub enum BotClass {
     /// Les quatre moteurs du bénéfice du doute du PHP (Googlebot, bingbot,
     /// Applebot, DuckDuckBot) : jamais pénalisés au score.

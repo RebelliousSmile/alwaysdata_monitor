@@ -5,7 +5,11 @@
 //! 2. lance les contrôles dus, les sites les plus en retard d'abord, sans
 //!    commencer de requête après 40 s ;
 //! 3. ouvre ou clôt le silence de chaque agent déclaré ;
-//! 4. réconcilie les incidents, puis envoie les e-mails en attente (ouvertures,
+//! 4. replie les logs nouveaux des sites qui ont une source, à tour de rôle,
+//!    par lots de 500, sous un budget global de 10 s vérifié entre deux lots
+//!    (`analysis/`, issue #8), puis réconcilie les constats `logs` de chacun
+//!    sur ses agrégats ;
+//! 5. réconcilie les incidents, puis envoie les e-mails en attente (ouvertures,
 //!    clôtures, rappels) jusqu'à 50 s, y compris ceux des rapports d'agent
 //!    acceptés par `serve`. Ce qui n'a pas pu partir reste en attente pour le
 //!    passage suivant.
@@ -15,10 +19,16 @@ use std::time::{Duration, Instant};
 use anyhow::{Result, bail};
 
 use crate::alert::{self, Email, Notifier, SmtpNotifier};
+use crate::analysis::findings::{self as log_findings, CHECK as LOGS_CHECK};
+use crate::analysis::fold::{BATCH_SIZE, SiteState, secs_to_ms};
+use crate::analysis::rules::{self as log_rules, RuleSet};
+use crate::analysis::{shared, store as agg};
 use crate::checks::{self, CheckError, CheckKind, Ctx, heartbeat};
-use crate::config::{Config, Site, TypologyRecord};
+use crate::config::{Config, LogSourceKind, Site, TypologyRecord};
 use crate::finding::Finding;
 use crate::http::{Http, REQUEST_TIMEOUT, Trust};
+use crate::logs::alwaysdata::AlwaysdataSource;
+use crate::logs::source::{Cursor, LogSource, SourceError};
 use crate::store::{AGENT_PREFIX, META_TYPOLOGY_TICK, RunRecord, Store};
 
 #[derive(Debug, Clone)]
@@ -29,6 +39,13 @@ pub struct Options {
     pub check_budget: Duration,
     /// Aucun envoi ne commence au-delà, depuis le début du passage.
     pub send_budget: Duration,
+    /// Budget global du repli des logs, pris sur celui du passage : aucun lot
+    /// ne commence au-delà.
+    pub analysis_budget: Duration,
+    /// Lots de logs repliés au plus par passage, tous sites confondus :
+    /// illimité en production, borné par les tests pour épuiser le budget à
+    /// un lot près.
+    pub analysis_max_batches: usize,
 }
 
 impl Default for Options {
@@ -38,6 +55,8 @@ impl Default for Options {
             request_timeout: REQUEST_TIMEOUT,
             check_budget: Duration::from_secs(40),
             send_budget: Duration::from_secs(50),
+            analysis_budget: Duration::from_secs(10),
+            analysis_max_batches: usize::MAX,
         }
     }
 }
@@ -47,17 +66,40 @@ impl Default for Options {
 pub struct Summary {
     pub checks_run: usize,
     pub inconclusive: usize,
+    /// Entrées de logs repliées, tous sites confondus.
+    pub logs_folded: usize,
     pub emails_sent: usize,
     pub emails_pending: usize,
+}
+
+/// Source des logs d'un site, ou `None` s'il n'en a pas. Injectée par les
+/// tests (`MemorySource`).
+pub type Sources<'a> = dyn Fn(&Site) -> Option<Box<dyn LogSource>> + 'a;
+
+/// Source déclarée par `[sites.logs] source`.
+pub fn default_source(config: &Config, site: &Site) -> Option<Box<dyn LogSource>> {
+    match site.logs.as_ref()?.source? {
+        LogSourceKind::Alwaysdata => Some(Box::new(AlwaysdataSource::new(
+            site.id.clone(),
+            config.database.clone(),
+        ))),
+    }
+}
+
+/// Le site a une source de logs : son contrôle `logs` est surveillé.
+/// Provisoire : #4 reprendra ce prédicat dans le registre des contrôles.
+fn has_log_source(site: &Site) -> bool {
+    site.logs.as_ref().is_some_and(|l| l.source.is_some())
 }
 
 pub fn run(config: &Config, now: i64) -> Result<()> {
     let notifier = SmtpNotifier::new(config.alerts.clone());
     let summary = run_with(config, now, &Options::default(), &notifier)?;
     log::info!(
-        "tick : {} contrôle(s), {} non concluant(s), {} e-mail(s) envoyé(s), {} en attente",
+        "tick : {} contrôle(s), {} non concluant(s), {} entrée(s) de logs repliée(s), {} e-mail(s) envoyé(s), {} en attente",
         summary.checks_run,
         summary.inconclusive,
+        summary.logs_folded,
         summary.emails_sent,
         summary.emails_pending
     );
@@ -154,6 +196,19 @@ pub fn run_with(
     options: &Options,
     notifier: &dyn Notifier,
 ) -> Result<Summary> {
+    run_with_sources(config, now, options, notifier, &|site| {
+        default_source(config, site)
+    })
+}
+
+/// [`run_with`], avec les sources de logs données.
+pub fn run_with_sources(
+    config: &Config,
+    now: i64,
+    options: &Options,
+    notifier: &dyn Notifier,
+    sources: &Sources<'_>,
+) -> Result<Summary> {
     let start = Instant::now();
     let mut store = Store::open(&config.database)?;
     store.record_tick(now)?;
@@ -166,6 +221,7 @@ pub fn run_with(
         }
         Err(err) => log::error!("purge des logs : {err:#}"),
     }
+    purge_analysis(&mut store, now);
     let http = Http::new(&options.trust, options.request_timeout);
     let ctx = Ctx {
         http: &http,
@@ -225,6 +281,17 @@ pub fn run_with(
         }
     }
 
+    let analysis_deadline =
+        (Instant::now() + options.analysis_budget).min(start + options.send_budget);
+    summary.logs_folded = analyse_logs(
+        &mut store,
+        config,
+        now,
+        sources,
+        analysis_deadline,
+        options.analysis_max_batches,
+    );
+
     let closed = store.close_unwatched(
         |site_id, check| {
             let Some(site) = config.sites.iter().find(|s| s.id == site_id) else {
@@ -232,6 +299,9 @@ pub fn run_with(
             };
             if check == heartbeat::NAME || check.starts_with(AGENT_PREFIX) {
                 return agents.iter().any(|a| a.site == site_id);
+            }
+            if check == LOGS_CHECK {
+                return has_log_source(site);
             }
             CheckKind::ALL
                 .into_iter()
@@ -259,6 +329,237 @@ pub fn run_with(
     );
     summary.emails_pending = store.pending_notifications(now)?;
     Ok(summary)
+}
+
+/// Purges de l'analyse de logs, pour tous les sites, y compris ceux qui
+/// n'ont plus de source : profils et verdicts à 48 h, seaux, robots et
+/// charge à 24 h, signatures et résumés à 30 jours, détails des incidents
+/// `logs` clos masqués à 30 jours. Un échec n'arrête pas le passage.
+fn purge_analysis(store: &mut Store, now: i64) {
+    if let Err(err) = agg::purge(store, now.saturating_mul(1000)) {
+        log::error!("purge des agrégats de logs : {err:#}");
+    }
+    if let Err(err) = log_findings::purge(store, now) {
+        log::error!("purge des analyses de logs : {err:#}");
+    }
+    match shared::purge(store, now) {
+        Ok(0) => {}
+        Ok(n) => log::info!("{n} signature(s) d'UA expirée(s)"),
+        Err(err) => log::error!("purge des signatures d'UA : {err:#}"),
+    }
+}
+
+/// Repli en cours d'un site qui a une source.
+struct LogRun<'a> {
+    site: &'a Site,
+    rules: RuleSet,
+    source: Box<dyn LogSource>,
+    /// Curseur enregistré au début du passage ; ensuite celui de `state`.
+    cursor: Cursor,
+    /// Ouvert au premier lot non vide.
+    state: Option<SiteState>,
+    more: bool,
+    folded: usize,
+    /// Une reprise au début (curseur invalide) au plus par passage.
+    restarted: bool,
+    failed: bool,
+}
+
+/// Replie les logs nouveaux des sites qui ont une source, un lot par site à
+/// tour de rôle, sans commencer de lot après `deadline` ni au-delà de
+/// `max_batches` ; puis réconcilie les constats `logs` de chacun, complets
+/// par construction sur les agrégats. Rend le nombre d'entrées repliées.
+fn analyse_logs(
+    store: &mut Store,
+    config: &Config,
+    now: i64,
+    sources: &Sources<'_>,
+    deadline: Instant,
+    max_batches: usize,
+) -> usize {
+    let now_ms = now.saturating_mul(1000);
+    let mut runs = Vec::new();
+    for site in &config.sites {
+        let Some(source) = sources(site) else {
+            continue;
+        };
+        let rules = match log_rules::for_site(config, site) {
+            Ok(rules) => rules,
+            Err(err) => {
+                log::error!("{} : règles de logs : {err}", site.id);
+                continue;
+            }
+        };
+        let cursor = match agg::cursor(store, &site.id) {
+            Ok(cursor) => cursor.map(|(cursor, _)| cursor).unwrap_or_default(),
+            Err(err) => {
+                log::error!("{} : curseur de logs illisible : {err:#}", site.id);
+                continue;
+            }
+        };
+        runs.push(LogRun {
+            site,
+            rules,
+            source,
+            cursor,
+            state: None,
+            more: true,
+            folded: 0,
+            restarted: false,
+            failed: false,
+        });
+    }
+    if runs.is_empty() {
+        return 0;
+    }
+    // `tick` est synchrone ; appelé depuis un runtime (tests asynchrones), il
+    // attend chaque lot sur un fil à part (`block_on`).
+    let runtime = if tokio::runtime::Handle::try_current().is_ok() {
+        None
+    } else {
+        match tokio::runtime::Builder::new_current_thread().build() {
+            Ok(runtime) => Some(runtime),
+            Err(err) => {
+                log::error!("analyse des logs : runtime indisponible : {err}");
+                return 0;
+            }
+        }
+    };
+
+    let mut batches = 0usize;
+    'rounds: loop {
+        let mut progressed = false;
+        for run in runs.iter_mut().filter(|r| r.more && !r.failed) {
+            // Budget vérifié entre deux lots, jamais au milieu.
+            if batches >= max_batches || Instant::now() >= deadline {
+                log::warn!("analyse des logs : budget atteint, la suite au passage suivant");
+                break 'rounds;
+            }
+            batches += 1;
+            progressed = true;
+            if let Err(err) = fold_next(store, run, runtime.as_ref(), now_ms) {
+                log::error!("{} : repli des logs : {err:#}", run.site.id);
+                run.failed = true;
+                // Le repli a pu avancer l'état avant l'échec de l'écriture.
+                run.state = None;
+            }
+        }
+        if !progressed {
+            break;
+        }
+    }
+
+    let mut folded = 0;
+    for run in &runs {
+        folded += run.folded;
+        if let Err(err) = reconcile_logs(store, run, now) {
+            log::error!("{} : constats de logs : {err:#}", run.site.id);
+        }
+    }
+    folded
+}
+
+/// Attend `future` sur `runtime`, ou, sans lui (appel depuis un runtime, qui
+/// ne peut en bloquer un autre ni en détruire un), sur un runtime créé et
+/// détruit sur un fil à part.
+fn block_on<F>(runtime: Option<&tokio::runtime::Runtime>, future: F) -> Result<F::Output>
+where
+    F: std::future::Future + Send,
+    F::Output: Send,
+{
+    if let Some(runtime) = runtime {
+        return Ok(runtime.block_on(future));
+    }
+    std::thread::scope(|scope| {
+        scope
+            .spawn(|| {
+                let runtime = tokio::runtime::Builder::new_current_thread().build()?;
+                Ok(runtime.block_on(future))
+            })
+            .join()
+            .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
+    })
+}
+
+/// Lit et replie le lot suivant d'un site.
+fn fold_next(
+    store: &mut Store,
+    run: &mut LogRun<'_>,
+    runtime: Option<&tokio::runtime::Runtime>,
+    now_ms: i64,
+) -> Result<()> {
+    let from = run
+        .state
+        .as_ref()
+        .map_or_else(|| run.cursor.clone(), |s| s.cursor.clone());
+    match block_on(runtime, run.source.fetch(&from, BATCH_SIZE))? {
+        Ok(fetched) => {
+            if fetched.entries.is_empty() && fetched.next == from {
+                run.more = false;
+                return Ok(());
+            }
+            run.more = fetched.more;
+            let state = match &mut run.state {
+                Some(state) => state,
+                state @ None => state.insert(agg::open_site(
+                    store,
+                    &run.site.id,
+                    run.site.agent_silence,
+                    now_ms,
+                )?),
+            };
+            let delta = agg::fold_batch(store, state, &run.rules, &fetched, now_ms)?;
+            run.folded += delta.folded;
+            Ok(())
+        }
+        Err(SourceError::CursorInvalid { restart }) if !run.restarted => {
+            // Reprendre au début sur des agrégats vidés : rien n'est compté
+            // deux fois.
+            log::warn!(
+                "{} : curseur de logs invalide, reprise de {} depuis « {} »",
+                run.site.id,
+                run.source.id(),
+                restart.0
+            );
+            agg::reset_site(store, &run.site.id)?;
+            run.restarted = true;
+            run.state = None;
+            run.cursor = restart;
+            run.more = true;
+            Ok(())
+        }
+        Err(err) => Err(err.into()),
+    }
+}
+
+/// Analyse d'un site et réconciliation de ses constats `logs`. Les verdicts
+/// ne sont recalculés, et l'instantané écrit, que si le passage a replié
+/// des entrées.
+fn reconcile_logs(store: &mut Store, run: &LogRun<'_>, now: i64) -> Result<()> {
+    let site = run.site.id.as_str();
+    let now_ms = now.saturating_mul(1000);
+    let reference = agg::cursor(store, site)?
+        .and_then(|(_, reference)| reference)
+        .map(|r| r.min(now_ms));
+    let findings = match reference {
+        None => Vec::new(),
+        Some(reference) => {
+            let analysis = if run.folded > 0 {
+                let elsewhere = shared::elsewhere(store, site, now)?;
+                let (analysis, to_note) =
+                    log_findings::analyse(store, site, &run.rules, reference, now, &elsewhere)?;
+                shared::note(store, site, &to_note, now)?;
+                log_findings::persist(store, &analysis)?;
+                analysis
+            } else {
+                log_findings::refresh(store, site, &run.rules, reference, now)?
+            };
+            log_findings::findings(&analysis, now_ms, secs_to_ms(run.site.agent_silence))
+        }
+    };
+    store.record_result(site, LOGS_CHECK, now, &RunRecord::concluded(&findings))?;
+    store.reconcile(site, LOGS_CHECK, &findings, now)?;
+    Ok(())
 }
 
 /// Contrôles dus de chaque site, les sites les plus en retard d'abord. Un

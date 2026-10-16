@@ -140,12 +140,19 @@ pub struct Stats {
     pub peak_minute: u64,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+/// Sérialisé comme [`Level::as_str`].
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
 pub enum Level {
     /// Moteur de recherche du bénéfice du doute : ne pas bloquer.
+    #[serde(rename = "moteur")]
     Engine,
+    #[serde(rename = "faible")]
     Low,
+    #[serde(rename = "moyen")]
     Medium,
+    #[serde(rename = "eleve")]
     High,
 }
 
@@ -169,7 +176,8 @@ impl Level {
         }
     }
 
-    fn of(score: u8) -> Self {
+    /// Niveau d'un score (élevé ≥ 70, moyen ≥ 40).
+    pub fn of(score: u8) -> Self {
         if score >= LEVEL_HIGH {
             Self::High
         } else if score >= LEVEL_MEDIUM {
@@ -205,7 +213,7 @@ impl Network {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Reason {
     pub points: i32,
     pub label: String,

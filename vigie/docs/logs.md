@@ -6,7 +6,8 @@ c'est écrire un adaptateur et une fixture, sans toucher une ligne de
 l'analyseur (#8). Le code : `src/logs/`. Les tests : `src/logs/tests.rs`,
 `tests/logs_contract.rs`, `tests/logs_receive.rs`, `tests/fixtures/logs/`.
 Le premier adaptateur, Alwaysdata (#1), est décrit plus bas :
-[Transport Alwaysdata](#transport-alwaysdata-issue-1).
+[Transport Alwaysdata](#transport-alwaysdata-issue-1) ; l'analyseur aussi :
+[Analyse](#analyse-issue-8).
 
 ## Modèle
 
@@ -257,3 +258,195 @@ Chaque `tick` purge les entrées dont l'heure est antérieure à `now − 30 j`,
 les lots et limites hautes reçus avant (`received_at`). `site remove` purge
 les entrées, lots et limites du site. Une limite haute purgée ne gêne pas :
 l'agent ignore les fichiers de plus de 30 jours.
+
+## Analyse (issue #8)
+
+Code : `src/analysis/` (catalogue, glob, règles, repli, profils, score,
+charge, constats, partage) et `src/tick.rs`. Tests :
+`src/analysis/tests.rs`, `fold_tests.rs`, `findings_tests.rs`. Plan :
+`aidd_docs/tasks/2026_10/2026_10_16_analyseur-logs/plan.md`.
+
+L'analyseur ne voit que des `Entry` : il ne contient aucun code propre à une
+source. Il remplace à terme le classement des robots, le score de suspicion,
+les erreurs 500 et la charge du module PrestaShop.
+
+```text
+tick (chaque minute)
+  pour chaque site qui a une source, à tour de rôle :
+    LogSource.fetch(curseur, 500) ──▶ fold (en mémoire, le lot entier)
+                                       ──▶ agrégats + curseur (une transaction IMMEDIATE)
+  puis pour chaque site : agrégats ──▶ Analysis ──▶ constats `logs` ──▶ reconcile
+```
+
+### Règles
+
+Purement déclaratives : glob de chemin, méthodes, statuts (liste ou plage),
+portée, seuil, IP distinctes au moins, fenêtre, gravité. Ni expression ni
+regex. Règles par défaut :
+
+| Identifiant | Filtre | Portée | Seuil (fenêtre 10 min) | Gravité |
+| --- | --- | --- | --- | --- |
+| `spike-404` | statut 404 | site | 100 | avertissement |
+| `spike-403` | statut 403 | site | 100 | avertissement |
+| `errors-5xx` | statuts 500-599 | site | 10 | critique |
+| `sensitive-path` | `/**/.env`, `/**/.git/**`, `/**/wp-config.php.*`, `/**/*.sql`, `/**/*.bak`, `/**/phpinfo.php`, `/server-status` | site | 1 | information |
+| `sensitive-path-many` | mêmes chemins | site | 5, et 5 IP distinctes | avertissement |
+| `brute-force` | POST `/wp-login.php`, `/connexion`, `/xmlrpc.php` | ip | 30 | avertissement |
+| `repeated-ip` | tout | ip | 600 | avertissement |
+
+```toml
+[logs]
+disable = ["spike-403"]           # règles par défaut retirées
+[[logs.rules]]                    # ajoutées pour tous les sites
+id = "panier-500"
+path = "/panier/**"
+statuses = ["500-599"]
+scope = "site"
+min_count = 3
+severity = "critical"
+
+[[sites]]
+# …
+[sites.logs]
+behind_proxy = true               # Entry.ip est le proxy : ni portée ip ni score
+exclude = ["/admin-*/**"]         # back-office retiré de l'analyse
+```
+
+Identifiants `[a-z0-9-]`, uniques ; `suspicious-ips`, `bots-ai-training` et
+`load` sont réservés aux constats qui ne viennent pas d'une règle. Fenêtre de
+60 s à 1 h. Une règle invalide est une erreur de configuration.
+
+### Ordre
+
+Pour chaque entrée, dans l'ordre du `LogSource` (id croissant pour
+`AlwaysdataSource`, déterministe) : chemin exclu → ignorée ; classement de
+l'UA (en cache par lot), charge, robots, profil de son IP, puis **toutes**
+les règles, dans l'ordre déclaré : un 404 sur `/.env` nourrit `spike-404` et
+`sensitive-path`. Le classement d'un UA retient la correspondance la plus
+longue du catalogue (« Applebot-Extended » avant « Applebot ») ; la classe
+d'une IP est celle du premier robot vu.
+
+### Heure de référence
+
+Référence = min(dernière `timestamp_ms` repliée, heure du veilleur). Les
+fenêtres se lisent dans ce qui précède la référence, pas l'heure du veilleur :
+l'agent pousse avec retard, un pic arrivé 15 minutes après son heure est vu.
+Une entrée datée dans le futur ne pousse pas la référence au-delà de `now`.
+Quand `now − référence` dépasse fenêtre + `agent_silence` du site, le
+constat de la fenêtre se résout : plus de données, plus de pic. Fenêtres :
+celle de la règle ; 1 h pour `load` ; 24 h pour `suspicious-ips` et
+`bots-ai-training`.
+
+### Agrégats
+
+Repliés lot par lot, jamais relus depuis les entrées (migration 10) :
+
+| Table | Contenu | Garde |
+| --- | --- | --- |
+| `log_buckets` | comptes par minute de chaque règle ; portée `site` : IP distinctes plafonnées au plus grand `min_ips` ; portée `ip` : un seau par IP | `site` : 24 h ; `ip` : fenêtre maximale (1 h) + `agent_silence`, et supprimés avec l'IP évincée |
+| `log_profiles` | profil d'IP par heure : requêtes, statiques, facettes, refus, pages sans referer, 20 UA, pic par minute, premier robot, erreur héritée | 24 h vivantes, purgées à 48 h ; 10 000 IP par site (Space-Saving) |
+| `log_bots` | requêtes des robots du catalogue par heure | 24 h |
+| `log_load` | volume, refus, temps de service, part des facettes et des robots par heure | 24 h |
+| `log_cursors` | curseur opaque et référence | tant que le site existe |
+
+Le budget de l'analyse est de 10 s par passage, tous sites confondus, pris
+sur celui du passage, vérifié **entre deux lots** de 500 : le curseur opaque
+n'a pas de position partielle. Le lot suivant est lu au passage suivant ;
+les constats sont réconciliés à chaque passage, sur des agrégats complets
+par construction. Un curseur invalide (`CursorInvalid`) vide les agrégats du
+site avant de reprendre à `restart` : rien n'est compté deux fois.
+
+### Analyse et instantanés
+
+`Analysis` (`findings.rs`) est la sortie structurée que lisent #13 et la
+console (#5) : robots vus (éditeur, finalité, `robots_only`,
+`honours_robots`, `protected`, volume), verdicts d'IP (score, score propre,
+niveau, raisons, classe, robot, signature partagée), règles sur leur fenêtre
+(comptes, IP distinctes, dépassement), charge des 24 heures.
+
+- Un instantané n'est écrit que quand le passage a replié des entrées ; sinon
+  les règles, robots et charge sont relus et les verdicts repris du dernier
+  instantané (les profils n'ont pas bougé).
+- Le dernier instantané d'un site est toujours gardé ; les précédents partent
+  dès qu'ils ont plus de 15 minutes de moins que lui.
+- `log_analysis` : le résumé, sans aucune IP (les IP des règles ne servent
+  qu'au détail des constats), gardé 30 jours.
+- `log_verdicts` : niveaux moyen et élevé seulement, index (site,
+  `generated_at`, score décroissant, IP), purgés 48 heures après leur calcul,
+  le dernier compris.
+
+### Constats
+
+Contrôle `logs`. La clé est l'identifiant de la règle ou du constat, jamais
+une valeur lue dans un log : un chemin ou une IP venus d'un attaquant
+n'entrent jamais dans une clé d'incident.
+
+| Clé | Gravité | Ouvert quand | Détail |
+| --- | --- | --- | --- |
+| identifiant de règle | celle de la règle | la règle dépasse son seuil sur sa fenêtre | comptes, seuil, 5 IP au plus |
+| `suspicious-ips` | avertissement | au moins une IP au score élevé (≥ 70) sur 24 h | nombre d'IP, les 5 pires (score, classe) |
+| `bots-ai-training` | information | un robot d'entraînement IA vu sur 24 h | 5 robots au plus, éditeur et volume |
+| `load` | avertissement | l'heure qui finit à la référence (ou la précédente) dépasse 1 800 s de service | temps, seuil, part des facettes et des robots |
+
+Un botnet de 1 000 IP fait un seul `suspicious-ips`, jamais un incident par
+IP. Tout le détail est assaini à l'écriture : contrôles C0, C1, DEL,
+U+2028, U+2029 et contrôles bidirectionnels remplacés par U+FFFD ; un chemin
+cité perd sa query string et est tronqué à 100 caractères
+(`findings::detail_path`).
+
+### Partage entre sites
+
+Seulement des signatures d'UA de robots (`shared.rs`, table
+`log_signatures`) : UA normalisé (minuscules, numéros de version retirés,
+blancs réduits) de classe `Seo`, `AiTraining`, ou `Unknown` avec un jeton
+`bot`, `crawler`, `spider` ou `scraper`. Jamais d'IP : un UA où il reste une
+adresse après normalisation n'est pas partagé. Jamais d'UA d'outil générique
+(`curl`, `python-requests`, `wget`…).
+
+- Un site note une signature quand le score **propre** d'une IP qui la porte
+  est ≥ 70. 100 signatures au plus par site (les plus récentes) ; chacune
+  expire 30 jours après sa dernière note.
+- Une signature notée par un autre site ajoute 15 points au score, hors du
+  score propre : un bonus seul ne note jamais, rien ne s'entretient.
+
+### Conservation de l'analyse
+
+| Donnée | Durée |
+| --- | --- |
+| Seaux de portée `site`, robots, charge | 24 h avant la référence (et l'heure du veilleur) |
+| Profils d'IP, verdicts d'IP | 48 h, y compris pour un site qui n'a plus de source |
+| Résumés d'analyse, signatures | 30 jours |
+| Détail d'un incident `logs` clos | masqué 30 jours après sa clôture |
+
+`site remove` purge aussi les agrégats, le curseur, les instantanés et les
+signatures notées du site.
+
+### Latence
+
+- Règles de portée `site` (dont `errors-5xx`) : retard de l'agent + une
+  minute (un passage de `tick`), tant que le budget suffit.
+- Retard rattrapé : les lots en attente se replient au rythme du budget
+  (10 s par passage) ; les constats suivent la référence.
+- Une signature notée sur un site n'ajoute ses points ailleurs qu'au prochain
+  passage qui y replie des entrées.
+
+### Limites et approximations
+
+- Pic par minute approché : maximum des minutes vues dans un même lot, puis
+  maximum des lots. Une minute coupée entre deux lots est sous-estimée.
+- Une IP fraîchement admise après éviction (Space-Saving) reste sans score
+  tant que l'erreur héritée dépasse le dixième de ses requêtes observées, ce
+  qui n'est **pas** un verdict de trafic sain (`Analysis.unscored`).
+- IP distinctes d'une règle de portée `site` : exactes jusqu'au plus grand
+  `min_ips` des règles, minute par minute ; au-delà, « au moins ».
+- Sans durée dans les logs (format autre que « Advanced »), seul le volume
+  horaire est relevé et `load` ne s'ouvre jamais.
+- Sans reverse DNS en V1 : réseau « inconnu » (+5) pour toutes les IP, et le
+  bénéfice du doute des quatre moteurs repose sur leur seul UA.
+- `behind_proxy` : ni profils, ni score, ni règles de portée `ip`.
+- Une entrée plus vieille que 24 h avant la référence n'est plus comptée.
+- Le détail d'une règle ne cite que des IP : les agrégats ne gardent aucun
+  chemin.
+- Le temps de travail par entrée est borné (classement en cache, règles en
+  nombre fini, glob borné) ; il n'y a pas de délai par entrée, seulement le
+  budget par passage (`decisions.md`).

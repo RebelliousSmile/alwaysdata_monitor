@@ -13,7 +13,7 @@ use crate::logs::Entry;
 pub const DEFAULT_THRESHOLD_US: u64 = 1_800 * 1_000_000;
 
 /// Charge d'une heure (tranche `timestamp_ms / 3 600 000`).
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct HourLoad {
     pub hour: i64,
     pub requests: u64,

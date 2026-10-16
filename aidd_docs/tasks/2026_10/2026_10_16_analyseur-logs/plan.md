@@ -1,6 +1,6 @@
 ---
 objective: "Un analyseur unique, sans code propre à une source, replie à chaque passage les entrées nouvelles d'un LogSource dans des agrégats par minute persistés avec le curseur, et en tire, sur l'heure des données bornée par l'heure du veilleur, des constats déterministes et bornés : robots classés avec leurs métadonnées, score de suspicion par IP porté du module, pics 403/404/500, chemins sensibles, force brute, IP à répétition, charge ; à partir de règles purement déclaratives, avec une sortie structurée pour #13 et un partage entre sites limité aux signatures qui ne sont pas des données personnelles."
-status: pending
+status: done
 issue_number: 8
 ---
 
