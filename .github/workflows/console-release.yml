@@ -183,9 +183,20 @@ jobs:
             vigie/app/src-tauri/target
           key: console-release-android-${{ hashFiles('vigie/app/src-tauri/Cargo.lock') }}
       - run: pnpm install --frozen-lockfile
+      # Sous Android, le jeton vit dans un fichier privé (secret.rs) :
+      # keyring-core ne doit pas entrer dans le build.
+      - name: keyring-core absent du build Android
+        working-directory: vigie/app/src-tauri
+        run: |
+          set -euo pipefail
+          ANDROID_TREE=$(cargo tree --locked --target aarch64-linux-android -i keyring-core 2>/dev/null)
+          test -z "$ANDROID_TREE" || { echo "::error::keyring-core tiré sous Android :"; echo "$ANDROID_TREE"; exit 1; }
       - run: pnpm exec tauri android init
         env:
           NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/${{ env.NDK_VERSION }}
+      # gen/android est régénéré : sauvegarde et transfert d'appareil coupés
+      # (allowBackup, dataExtractionRules), vérifiés sur l'APK signé.
+      - run: scripts/android-no-backup.sh patch
       # Une seule ABI (arm64) ; le profil release de Cargo.toml (lto, strip)
       # garde l'APK léger.
       - run: pnpm exec tauri android build --apk --target aarch64
@@ -215,6 +226,7 @@ jobs:
           # Empreinte du certificat : la même d'une release à l'autre, sinon le
           # téléphone refuse la mise à jour.
           "$TOOLS/apksigner" verify --print-certs "$NAME" | grep -E 'SHA-256'
+          scripts/android-no-backup.sh verify "$NAME"
           ls -l "$NAME"
           echo "path=vigie/app/$NAME" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

@@ -107,11 +107,20 @@ export interface Settings {
   devices: Device[]
 }
 
-/** Ce que le webview sait de l'appareil appairé. */
+/**
+ * Où vit le jeton de l'appareil : Credential Manager (Windows), fichier
+ * privé hors sauvegarde (Android), ou encore dans le fichier de l'appareil
+ * parce que sa migration a échoué (seul état dégradé, retenté à chaque
+ * lancement).
+ */
+export type TokenStorage = 'keyring' | 'file_legacy' | 'private_file'
+
+/** Ce que le webview sait de l'appareil appairé : jamais le jeton. */
 export interface Status {
   device_id: number
   name: string
   url: string
+  token_storage: TokenStorage
 }
 
 export interface Unpaired {
