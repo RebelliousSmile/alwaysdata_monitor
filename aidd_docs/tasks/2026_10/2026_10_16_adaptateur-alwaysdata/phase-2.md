@@ -13,21 +13,21 @@ status: pending
     ├── config.example.json   ✏️ "logs": {"dir": …, "hosts": […]}
     └── tests/
         ├── run.php           ✏️ cas des logs
-        └── fixtures/logs/    ✅ arborescence admin/logs/http/<année>/ avec un .log du jour et un .log.gz de la veille
+        └── fixtures générées par le test (gzencode), hôtes *.example.org, IP RFC 5737/3849 : aucun binaire commité
 ```
 
 ## Tasks to do
 
 1. Configuration : `logs.dir` absolu (lu sans suivre de lien hors de lui), `logs.hosts` (1 à 20 hôtes), facultative ; sans elle, rien ne change.
-2. État `logs.json` dans le dossier d'état de l'agent (#6 : 0700, fichier 0600, `flock`, écriture atomique par renommage) : `{file, offset}`.
-3. Lecture depuis `offset` par blocs, lignes entières seulement (une ligne sans fin de ligne attend le passage suivant), coupe à 16 Kio, filtre par hôte (premier jeton, minuscules, sans port), lots de 48 Kio, 20 lots et 20 s au plus.
-4. Rotation : fichier de la position différent du fichier du jour → le finir (`.log`, sinon `.log.gz` par `gzopen`, en sautant `offset` octets), puis passer au jour ; taille inférieure à la position → `restarted`, offset 0.
-5. Envoi de chaque lot ; position avancée et écrite après chaque 204 seulement ; au premier refus, arrêt du passage.
+2. État `logs.json` dans le dossier d'état de l'agent (#6 : 0700, fichier 0600, écriture atomique par renommage), verrou `logs.lock` en `LOCK_NB` : `{seq, file, gen, offset, inode, head_sha256, pending}`.
+3. Lecture depuis `offset` par `fgets($h, 16385)` (suite jetée jusqu'au `\n`), lignes entières seulement dans un fichier ouvert (une ligne finale incomplète part telle quelle dans un fichier clos), filtre par hôte (premier jeton, minuscules, sans port ; sans hôte → écartée), lots de 44 Kio et corps ≤ 65 536 octets, 20 lots et 20 s au plus.
+4. Fichiers : liste des dossiers de l'année courante et précédente, ordre des noms, 30 jours au plus ; fichier clos (`.gz` seul, ou plus récent présent depuis 1 h) → fini puis suivant ; introuvable → suivant, `skipped_files` ; remplacé (taille, inode, empreinte des 256 premiers octets) → `gen + 1`, offset 0. Un `.gz` ouvert une fois par passage.
+5. Avant l'envoi, `pending` écrit ; au passage suivant, la plage `pending` est renvoyée à l'identique d'abord ; après un 204, position avancée et `pending` effacé ; au premier refus, arrêt du passage. Repli `pending_new_secret` comme `send_report`.
 
 ## Test acceptance criteria
 
 | Task | Acceptance criteria |
 | ---- | ------------------- |
 | 2 | L'état n'est jamais écrit hors du dossier d'état, ni lisible par d'autres |
-| 3-4 | Sur la fixture : les lignes d'un autre hôte ne partent pas ; la fin du `.gz` de la veille part avant le jour ; une ligne de 100 Kio part coupée à 16 Kio |
-| 5 | Une réponse perdue (serveur de test qui coupe) : le lot est renvoyé au passage suivant, le veilleur ne le compte qu'une fois |
+| 3-4 | Les lignes d'un autre hôte ne partent pas ; la fin du `.gz` de la veille part avant le jour ; une ligne de 100 Kio part coupée à 16 Kio ; trou de 3 jours : les 3 fichiers partent dans l'ordre ; fichier de position purgé : passage au suivant ; 31 décembre → 1er janvier ; fichier remplacé : `gen` suivante |
+| 5 | Réponse perdue (serveur de test qui coupe) puis fichier qui grandit : le passage suivant renvoie exactement la plage `pending` (vérifié côté PHP) ; la déduplication est vérifiée en Rust et dans `agent_e2e.rs` |
