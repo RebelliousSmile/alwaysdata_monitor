@@ -79,6 +79,7 @@ fn site(id: &str, kind: SiteKind, interval: u64) -> Site {
         keyword: None,
         interval,
         agent_silence: 900,
+        logs: None,
     }
 }
 

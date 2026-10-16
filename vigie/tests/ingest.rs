@@ -38,6 +38,7 @@ fn site() -> Site {
         keyword: None,
         interval: 86_400,
         agent_silence: 900,
+        logs: None,
     }
 }
 
@@ -46,6 +47,7 @@ fn config(dir: &Path) -> Config {
         database: dir.join("vigie.db"),
         api: None,
         commands: None,
+        logs: Default::default(),
         alerts: Alerts {
             to: "alertes@example.org".into(),
             from: "vigie@example.org".into(),

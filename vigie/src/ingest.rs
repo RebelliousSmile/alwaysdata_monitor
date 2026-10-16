@@ -50,6 +50,18 @@ pub enum Reason {
     TooSoon {
         last_valid_at: i64,
     },
+    /// Lot de logs pour un site sans `[sites.logs] source`.
+    LogsClosed,
+    /// Lot de logs qui commence sous la limite haute et finit au-delà.
+    Overlap {
+        start: i64,
+        end: i64,
+        high: i64,
+    },
+    /// Plafond quotidien des logs du site atteint.
+    Quota {
+        used: i64,
+    },
     Internal(String),
 }
 
@@ -74,6 +86,17 @@ impl fmt::Display for Reason {
                 "débit : rapport accepté à {}",
                 crate::iso_utc(*last_valid_at)
             ),
+            Self::LogsClosed => {
+                f.write_str("réception des logs fermée ([sites.logs] source absent)")
+            }
+            Self::Overlap { start, end, high } => write!(
+                f,
+                "plage {start}..{end} à cheval sur la limite haute {high}"
+            ),
+            Self::Quota { used } => write!(
+                f,
+                "plafond quotidien des logs atteint ({used} octets reçus aujourd'hui)"
+            ),
             Self::Internal(reason) => write!(f, "erreur interne : {reason}"),
         }
     }
@@ -96,7 +119,7 @@ impl Refusal {
         }
     }
 
-    fn with_seq(mut self, seq: i64) -> Self {
+    pub(crate) fn with_seq(mut self, seq: i64) -> Self {
         self.seq = Some(seq);
         self
     }

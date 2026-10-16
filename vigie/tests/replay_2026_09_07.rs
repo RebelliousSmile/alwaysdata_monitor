@@ -71,6 +71,7 @@ fn config(dir: &Path, base: &str) -> Config {
         database: dir.join("vigie.db"),
         api: None,
         commands: None,
+        logs: Default::default(),
         alerts: Alerts {
             to: "alertes@example.org".into(),
             from: "vigie@example.org".into(),
@@ -88,6 +89,7 @@ fn config(dir: &Path, base: &str) -> Config {
             keyword: Some("/problemes/".into()),
             interval: PERIOD.unsigned_abs(),
             agent_silence: 900,
+            logs: None,
         }],
     }
 }

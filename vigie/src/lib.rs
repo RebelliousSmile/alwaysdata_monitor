@@ -3,6 +3,7 @@
 //! autorité de certification de test.
 
 pub mod alert;
+pub mod analysis;
 pub mod api;
 pub mod capability;
 pub mod checks;

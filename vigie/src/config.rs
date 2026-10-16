@@ -8,6 +8,8 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
+use crate::analysis::rules::{self, Rule};
+
 pub const ENV_CONFIG: &str = "VIGIE_CONFIG";
 
 #[derive(Debug, thiserror::Error)]
@@ -41,8 +43,95 @@ pub struct Config {
     /// commande n'est créée ni servie.
     pub commands: Option<Commands>,
     pub alerts: Alerts,
+    /// Règles de l'analyse de logs communes à tous les sites.
+    #[serde(default)]
+    pub logs: Logs,
     #[serde(default)]
     pub sites: Vec<Site>,
+}
+
+/// `[logs]` : règles par défaut à désactiver et règles ajoutées
+/// (`analysis/rules.rs`).
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Logs {
+    /// Identifiants de règles par défaut à ne pas appliquer.
+    #[serde(default)]
+    pub disable: Vec<String>,
+    #[serde(default)]
+    pub rules: Vec<Rule>,
+}
+
+/// `[sites.logs]` : réception (#1) et analyse (#8) des logs propres au site.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SiteLogs {
+    /// Source des logs ; sans elle, `/r/v1/logs` refuse le site (fail-closed).
+    pub source: Option<LogSourceKind>,
+    /// Fuseau IANA des horodatages sans décalage écrit (`docs/logs.md`).
+    pub tz: Option<String>,
+    /// Hôtes du site, en minuscules : une entrée d'un autre hôte est rejetée
+    /// à la réception. Obligatoire et non vide quand `source` est posé.
+    #[serde(default)]
+    pub hosts: Vec<String>,
+    /// Le site est derrière un proxy (Cloudflare…) : `Entry.ip` est celle du
+    /// proxy, les règles de portée `ip` et le score par IP sont coupés.
+    #[serde(default)]
+    pub behind_proxy: bool,
+    /// Globs de chemins retirés de l'analyse (back-office).
+    #[serde(default)]
+    pub exclude: Vec<String>,
+    /// Règles ajoutées pour ce site seulement.
+    #[serde(default)]
+    pub rules: Vec<Rule>,
+}
+
+/// Hôtes de `[sites.logs]` au plus.
+pub const MAX_LOG_HOSTS: usize = 20;
+
+/// Source des logs d'un site.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum LogSourceKind {
+    /// L'agent PHP pousse les lignes du log HTTP du compte (`docs/logs.md`).
+    Alwaysdata,
+}
+
+impl SiteLogs {
+    /// Fuseau de la source, déjà validé au chargement.
+    pub fn time_zone(&self) -> Option<jiff::tz::TimeZone> {
+        self.tz
+            .as_deref()
+            .and_then(|tz| jiff::tz::TimeZone::get(tz).ok())
+    }
+
+    fn validate(&self) -> Result<(), String> {
+        if self.source.is_none() && (self.tz.is_some() || !self.hosts.is_empty()) {
+            return Err("tz et hosts sont sans effet sans source".into());
+        }
+        if let Some(tz) = &self.tz
+            && jiff::tz::TimeZone::get(tz).is_err()
+        {
+            return Err(format!("tz « {tz} » n'est pas un fuseau IANA connu"));
+        }
+        if self.source.is_some() && self.hosts.is_empty() {
+            return Err("hosts est obligatoire et non vide quand source est posé".into());
+        }
+        if self.hosts.len() > MAX_LOG_HOSTS {
+            return Err(format!("hosts : {MAX_LOG_HOSTS} hôtes au plus"));
+        }
+        for host in &self.hosts {
+            if !is_plausible_host(host)
+                || host.len() > 253
+                || host.bytes().any(|b| b.is_ascii_uppercase())
+            {
+                return Err(format!(
+                    "hosts : « {host} » n'est pas un nom d'hôte en minuscules"
+                ));
+            }
+        }
+        Ok(())
+    }
 }
 
 /// API de la console (`docs/api-console.md`).
@@ -162,6 +251,8 @@ pub struct Site {
     /// Sans effet tant que le site n'a pas de clé.
     #[serde(default = "default_agent_silence")]
     pub agent_silence: u64,
+    /// `[sites.logs]`, facultatif.
+    pub logs: Option<SiteLogs>,
 }
 
 fn default_interval() -> u64 {
@@ -409,6 +500,8 @@ impl Config {
                 api.public_url
             ));
         }
+        rules::compile_rules(&self.logs.disable, &self.logs.rules, &[])
+            .map_err(|err| format!("logs : {err}"))?;
         let mut seen = HashSet::new();
         for site in &self.sites {
             if !is_valid_id(&site.id) {
@@ -458,6 +551,12 @@ impl Config {
                     "agent_silence du site « {} » : {MIN_AGENT_SILENCE} s au moins (reçu : {})",
                     site.id, site.agent_silence
                 ));
+            }
+            if let Some(logs) = &site.logs {
+                logs.validate()
+                    .map_err(|err| format!("logs du site « {} » : {err}", site.id))?;
+                rules::for_site(self, site)
+                    .map_err(|err| format!("logs du site « {} » : {err}", site.id))?;
             }
         }
         Ok(())
@@ -676,6 +775,43 @@ url = "https://www.example.org/"
     fn refuses_a_recipient_list() {
         let raw = VALID.replace("alertes@example.org", "a@example.org, b@example.org");
         assert!(parse_str(&raw).is_err());
+    }
+
+    #[test]
+    fn reads_the_log_source_of_a_site() {
+        let logs = |body: &str| parse_str(&format!("{VALID}\n[sites.logs]\n{body}\n"));
+        let config = logs(
+            "source = \"alwaysdata\"\ntz = \"Europe/Paris\"\nhosts = [\"www.example.org\", \"example.org\"]",
+        )
+        .expect("valide");
+        let site_logs = config.sites[0].logs.as_ref().expect("logs");
+        assert_eq!(site_logs.source, Some(LogSourceKind::Alwaysdata));
+        assert_eq!(site_logs.hosts, ["www.example.org", "example.org"]);
+        assert!(site_logs.time_zone().is_some());
+        // Sans source, la réception reste fermée : tz et hosts seuls sont refusés.
+        assert!(logs("behind_proxy = true").is_ok());
+        for bad in [
+            "source = \"alwaysdata\"",
+            "source = \"alwaysdata\"\nhosts = []",
+            "source = \"ftp\"\nhosts = [\"example.org\"]",
+            "source = \"alwaysdata\"\nhosts = [\"Example.org\"]",
+            "source = \"alwaysdata\"\nhosts = [\"example.org:443\"]",
+            "source = \"alwaysdata\"\nhosts = [\"example.org\"]\ntz = \"Mars/Olympus\"",
+            "hosts = [\"example.org\"]",
+            "tz = \"Europe/Paris\"",
+        ] {
+            assert!(logs(bad).is_err(), "{bad}");
+        }
+        let many: Vec<String> = (0..=MAX_LOG_HOSTS)
+            .map(|i| format!("\"h{i}.example.org\""))
+            .collect();
+        assert!(
+            logs(&format!(
+                "source = \"alwaysdata\"\nhosts = [{}]",
+                many.join(", ")
+            ))
+            .is_err()
+        );
     }
 
     #[test]
