@@ -1,0 +1,13 @@
+# BEGIN site-a installer lock
+<Files "install.php">
+  Require all denied
+</Files>
+# END site-a installer lock
+
+# BEGIN WordPress
+RewriteEngine On
+RewriteRule ^index\.php$ - [L]
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule . /index.php [L]
+# END WordPress
