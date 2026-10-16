@@ -1,6 +1,6 @@
 ---
 objective: "Un veilleur Rust hébergé sur un VPS surveille le site A de l'extérieur et via un agent PHP signé, et une reprise de l'incident du 2026-09-07 déclenche un e-mail d'alerte en moins de 10 minutes, sans que le module PrestaShop actuel change."
-status: blocked
+status: done
 ---
 
 <!-- Fill or omit these sections; never add, rename, or reorder one. -->
