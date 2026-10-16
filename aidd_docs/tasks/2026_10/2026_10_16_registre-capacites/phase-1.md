@@ -15,7 +15,7 @@ status: pending
     │   ├── report.rs         ✏️ familles fermées ; constat hors registre écarté et compté
     │   ├── ingest.rs         ✏️ reçoit &Site, filtre, compte des écartés
     │   ├── serve.rs          ✏️ configuration typée des sites dans l'état
-    │   ├── store.rs          ✏️ migration 0011 ; accept_report filtré par watched ; reports.dropped ; e-mail « plus surveillé »
+    │   ├── store.rs          ✏️ prochaine migration libre ; accept_report filtré par watched ; reports.dropped ; e-mail « plus surveillé »
     │   ├── alert.rs          ✏️ e-mail « plus surveillé »
     │   ├── tick.rs           ✏️ close_unwatched par watched
     │   ├── api.rs            ✏️ contrôles affichés par allowed_controls
@@ -29,8 +29,8 @@ status: pending
 1. Registre et `match` sans joker ; suppression de `CheckKind::cms`.
 2. Familles fermées `Root`, `CriticalFile`, `MustContain`, `UploadsPhp` ; `integrity` réservé (rapport refusé) ; écart compté à l'ingestion ; test contre les `finding('…'` de l'agent et la fixture signée.
 3. `watched` utilisé par tick, ingestion, API, CLI.
-3bis. Migration 0011 (`dropped`, `close_reason`) ; e-mail selon la raison ; incident `typology` pour une clé d'agent sur un site sans runtime `php` ; `site add`/`rotate-key` refusés pour un tel site.
-4. Tests : migration d'une base v10 ; e-mail de `close_unwatched` sans « rétabli » ; site `generic` sans runtime avec clé : incident `typology` ouvert ; matrice complète ; même verdict API / tick / ingestion ; base avec un incident ouvert `agent:<famille-retirée>` : clos « plus surveillé », jamais rouvert ; famille écartée : ni « rétabli » ni passage « ok » ; clé d'agent sur un site `static` : rien d'ouvert ; une commande valide pour `php` refusée pour `static` et `node` ; `installer` seulement WordPress et PrestaShop ; `agent:uploads-php` d'un site `generic` écarté ; un incident `agent:*` clos quand la clé d'agent est retirée ; `logs` gardé seulement avec une source.
+3bis. Migration (prochaine libre) (`dropped`, `close_reason`) ; e-mail selon la raison ; incident `typology` pour une clé d'agent sur un site sans runtime `php` ; `site add`/`rotate-key` refusés pour un tel site.
+4. Tests : migration d'une base v10 ; e-mail de `close_unwatched` sans « rétabli » ; site `generic` sans runtime avec clé : incident `typology` ouvert, toujours ouvert après deux `tick`, clos « rétabli » après `runtime = "php"` ; matrice complète ; même verdict API / tick / ingestion ; base avec un incident ouvert `agent:<famille-retirée>` : clos « plus surveillé », jamais rouvert ; famille écartée : ni « rétabli » ni passage « ok » ; clé d'agent sur un site `static` : rien d'ouvert ; une commande valide pour `php` refusée pour `static` et `node` ; `installer` seulement WordPress et PrestaShop ; `agent:uploads-php` d'un site `generic` écarté ; un incident `agent:*` clos quand la clé d'agent est retirée ; `logs` gardé seulement avec une source.
 
 ## Test acceptance criteria
 
