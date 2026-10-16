@@ -4,5 +4,10 @@
   "description": "Scan du QR code d'appairage, mobile seulement",
   "windows": ["main"],
   "platforms": ["android", "iOS"],
-  "permissions": ["barcode-scanner:allow-scan", "barcode-scanner:allow-cancel"]
+  "permissions": [
+    "barcode-scanner:allow-check-permissions",
+    "barcode-scanner:allow-request-permissions",
+    "barcode-scanner:allow-scan",
+    "barcode-scanner:allow-cancel"
+  ]
 }

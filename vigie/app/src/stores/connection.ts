@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
-import { api, isApiError, type ApiError, type Status } from '@/lib/api'
+import { api, errorText, isApiError, type ApiError, type Status } from '@/lib/api'
 
 // Appairage et joignabilité du veilleur. Le jeton reste côté Rust : le
 // webview ne connaît que l'appareil (nom, numéro, adresse du veilleur).
@@ -10,7 +10,7 @@ export type Trouble = 'offline' | 'server'
 const nowSeconds = (): number => Math.floor(Date.now() / 1000)
 
 export const asApiError = (err: unknown): ApiError =>
-  isApiError(err) ? err : { kind: 'server', message: String(err) }
+  isApiError(err) ? err : { kind: 'server', message: errorText(err) }
 
 export const useConnection = defineStore('connection', () => {
   /** `null` tant que la session enregistrée n'a pas été lue. */
