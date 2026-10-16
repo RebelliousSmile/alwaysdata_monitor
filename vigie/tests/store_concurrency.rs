@@ -3,6 +3,7 @@
 //! Toutes les transactions d'écriture sont IMMEDIATE : elles attendent le
 //! verrou (`busy_timeout`) au lieu d'échouer en SQLITE_BUSY.
 
+use std::sync::{Arc, Barrier};
 use std::time::{Duration, Instant};
 
 use anyhow::{Result, ensure};
@@ -15,8 +16,14 @@ const DURATION: Duration = Duration::from_secs(3);
 
 const KEY: [u8; 32] = [7; 32];
 
-/// Boucle sur `step` jusqu'à l'échéance ; rend le nombre de tours.
-fn spin(deadline: Instant, mut step: impl FnMut(i64) -> Result<()>) -> Result<i64> {
+/// Attend que les quatre connexions soient ouvertes, puis boucle sur `step`
+/// pendant `DURATION` ; rend le nombre de tours. La fenêtre ne part qu'une
+/// fois toutes les connexions ouvertes : sous contention, une ouverture peut
+/// attendre le verrou plusieurs secondes (`OPEN_PATIENCE`), et ce test mesure
+/// les écritures, pas l'ouverture.
+fn spin(start: &Barrier, mut step: impl FnMut(i64) -> Result<()>) -> Result<i64> {
+    start.wait();
+    let deadline = Instant::now() + DURATION;
     let mut round = 0;
     while Instant::now() < deadline {
         round += 1;
@@ -33,22 +40,24 @@ fn four_connections_write_in_parallel_without_sqlite_busy() {
         .expect("open")
         .add_key("site-a", &KEY, 0)
         .expect("add_key");
-    let deadline = Instant::now() + DURATION;
+    let start = Arc::new(Barrier::new(4));
 
     // Passages de `tick`, comme le timer systemd.
     let ticks = {
         let path = path.clone();
+        let start = Arc::clone(&start);
         std::thread::spawn(move || -> Result<i64> {
             let mut store = Store::open(&path)?;
-            spin(deadline, |round| store.record_tick(1_000 + round))
+            spin(&start, |round| store.record_tick(1_000 + round))
         })
     };
     // Résultats des contrôles et incidents ouverts, mis à jour, clos.
     let results = {
         let path = path.clone();
+        let start = Arc::clone(&start);
         std::thread::spawn(move || -> Result<i64> {
             let mut store = Store::open(&path)?;
-            spin(deadline, |round| {
+            spin(&start, |round| {
                 let finding = Finding::new(
                     "site-a",
                     "content",
@@ -70,9 +79,10 @@ fn four_connections_write_in_parallel_without_sqlite_busy() {
     // La CLI ou la console acquittent un incident ouvert, puis il se clôt.
     let acks = {
         let path = path.clone();
+        let start = Arc::clone(&start);
         std::thread::spawn(move || -> Result<i64> {
             let mut store = Store::open(&path)?;
-            spin(deadline, |round| {
+            spin(&start, |round| {
                 let finding = Finding::new(
                     "site-b",
                     "exposed",
@@ -93,9 +103,10 @@ fn four_connections_write_in_parallel_without_sqlite_busy() {
     // Rapports d'agent : chacun espacé du précédent de `REPORT_MIN_GAP`.
     let reports = {
         let path = path.clone();
+        let start = Arc::clone(&start);
         std::thread::spawn(move || -> Result<i64> {
             let mut store = Store::open(&path)?;
-            spin(deadline, |round| {
+            spin(&start, |round| {
                 let findings = [Finding::new(
                     "site-a",
                     "agent:php",

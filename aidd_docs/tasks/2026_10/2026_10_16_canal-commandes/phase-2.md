@@ -10,10 +10,10 @@ status: pending
 .
 └── vigie/
     ├── src/
-    │   ├── command/pull.rs   ✅ schéma du retrait, vérifications dans l'ordre, réponse signée
-    │   └── serve.rs          ✏️ route POST /r/v1/commands, mêmes limites de taille et de délai que /r/v1/report
+    │   ├── command/pull.rs   ✅ schéma du retrait et de la réponse, vérifications dans l'ordre, résultat, réponse signée
+    │   └── serve.rs          ✏️ route POST /r/v1/commands, mêmes limites que /r/v1/report ; chemin de la configuration pour la relire
     └── tests/
-        └── commands.rs       ✅ curl-équivalents : retrait, rejeu, horloge, clé absente, attaquant installé sur le site
+        └── commands.rs       ✅ retrait, résultat et accusé, rejeu, horloge, clés absentes, configuration modifiée, attaquant installé sur le site
 ```
 
 ## User Journey
@@ -22,11 +22,11 @@ status: pending
 sequenceDiagram
   participant A as Agent (site)
   participant V as Veilleur
-  A->>V: POST /r/v1/commands {v,type:pull,site,seq,sent_at,nonce,result?} + X-Vigie-Site + X-Vigie-Signature (clé de l'agent)
-  V->>V: taille, site connu, signature, schéma, horloge ±300 s, seq de retrait croissant
-  V->>V: result ? accepté une fois pour la commande served du site, audit
-  V->>V: site activé ? clé de commandes ? runtime admis ? commande pending ?
-  V-->>A: 200 {v,site,nonce,command|null} + X-Vigie-Timestamp + X-Vigie-Signature (clé de commandes)
+  A->>V: POST /r/v1/commands {v,type:pull,site,seq,sent_at,nonce,agent,result?} + X-Vigie-Site + X-Vigie-Signature (clé de l'agent, préfixe vigie-pull-v1)
+  V->>V: taille, site connu, signature, schéma, horloge ±300 s, seq de retrait croissant, débit
+  V->>V: result ? enregistré une fois (identique déjà vu : sans effet), audit, e-mail avec la tête de chaîne
+  V->>V: configuration relue ; [commands], clé, site activé, permit, disponible, non expirée ?
+  V-->>A: 200 {v,site,nonce,server_time,acked,command|null} + X-Vigie-Timestamp + X-Vigie-Signature (clé de commandes)
 ```
 
 ## Test Scope
@@ -34,31 +34,34 @@ sequenceDiagram
 ```mermaid
 journey
   section Happy path
-    ping en file, retrait signé => 200, commande signée, état served: 5: api
-    retrait suivant avec result ok => done, audit, command null: 5: api
-  section Edge case - rejeu
-    même retrait rejoué => 404, état inchangé: 1: api
-    result pour un command_id d'un autre site ou déjà acquitté => ignoré et journalisé, audit « result-rejected »: 1: api
+    ping en file, retrait => 200, enveloppe signée, served: 5: api
+    retrait suivant avec result ok => done, acked = id, command null: 5: api
+    même résultat renvoyé (accusé perdu) => acked de nouveau, aucune nouvelle entrée d'audit: 5: api
+  section Edge case - rejeu et contrat
+    retrait rejoué => 404 ; retrait signé sans préfixe ou rapport sur cette route => 404: 1: api
+    X-Vigie-Site B avec la clé de A => 404 ; résultat pour la commande d'un autre site => refusé, audit: 1: api
+    réponse : signature vérifiée sur préfixe, horodatage et octets ; X-Vigie-Timestamp = server_time: 1: api
   section Edge case - fail-closed
-    clé de commandes absente => 404 ; site désactivé => command null signé: 1: api
-    runtime retiré de la configuration après enqueue => refused, jamais servie: 1: api
-  section Edge case - attaquant sur le site (clé de l'agent volée)
-    retrait avec un champ command ou params forgé => 404 (schéma): 1: api
-    rapport valide envoyé sur /r/v1/commands ou retrait sur /r/v1/report => 404: 1: api
+    [commands] absent ou clé absente => 404 ; site désactivé => command null signé: 1: api
+    runtime retiré de config.toml après enqueue, sans relancer serve => refused, jamais servie: 1: api
+    commande expirée non encore purgée par tick => non servie: 1: api
+  section Edge case - attaquant sur le site
+    champ command ou params ajouté au retrait => 404 (schéma): 1: api
+    rotate-key avec une preuve signée par une autre clé que celle annoncée => refused, clé inchangée: 1: api
     aucun chemin ne crée une commande: 1: api
 ```
 
 ## Tasks to do
 
-1. Schéma du retrait (`deny_unknown_fields`) : `v`=1, `type`=`pull`, `site`, `seq`, `sent_at`, `nonce` (16 à 64 caractères base64url), `agent`, `result` facultatif.
-2. Ordre des vérifications calqué sur `ingest.rs` ; refus → 404 commun, raison au journal avec request_id.
-3. Réponse : JSON `{v, site, nonce, server_time, command}` ; `command` = l'enveloppe figée par #2 dans `protocole-commandes.md` (`v`, `site`, `id`, `seq`, `name`, `runtime`, `params`, `issued_at`, `expires_at`, schéma strict) ; en-têtes `X-Vigie-Timestamp`, `X-Vigie-Signature`, `Cache-Control: no-store`. `permit` est revérifié à chaque délivrance.
-4. Une commande servie et non acquittée est re-servie telle quelle (même `id`, même `seq`) au retrait suivant, jusqu'à expiration : un agent qui a planté avant d'exécuter la reçoit encore ; c'est à lui de ne pas la rejouer (#6, `seq` persisté).
-5. Débit : au plus un retrait accepté par site et par 30 s.
+1. Retrait (`deny_unknown_fields`) : `v`=1, `type`=`pull`, `site`, `seq`, `sent_at`, `nonce` (22 à 64 caractères base64url), `agent`, `result` facultatif (`command_id`, `status` `ok`/`failed`/`refused`, `detail`, `data` typé par commande).
+2. Ordre des vérifications calqué sur `ingest.rs` ; refus → 404 commun, raison au journal avec request_id. Un retrait refusé ne consomme rien côté agent.
+3. Réponse `{v, site, nonce, server_time, acked, command}` (`command` : enveloppe de `protocole-commandes.md`) ; `X-Vigie-Timestamp`, `X-Vigie-Signature`, `Cache-Control: no-store`. Signature calculée dans `spawn_blocking`.
+4. Commande `served` non close et non expirée : re-servie identique (même `id`, même `seq`).
+5. `rotate-key` : preuve de possession vérifiée, bascule de la clé et remise à zéro des `seq` dans la transaction qui clôt la commande.
+6. Débit : un retrait accepté par site et par 30 s.
 
 ## Test acceptance criteria
 
 | Task | Acceptance criteria |
 | ---- | ------------------- |
-| 1-3  | Chaque cas de la section Edge case est un test ; la signature de la réponse se vérifie avec la clé publique de commandes sur le préfixe, l'horodatage et les octets bruts |
-| 4    | Re-servie identique ; jamais deux `seq` pour une même commande |
+| 1-6 | Chaque cas du Test Scope est un test d'intégration sur le routeur de `serve` |
