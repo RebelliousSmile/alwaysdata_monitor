@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Vigie — trafic, blocages</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0F1214}
+a{color:#7FC4F5}a:hover{color:#B5DDFA}
+:focus-visible{outline:2px solid #5FD3BE;outline-offset:2px}
+</style>
+</helmet>
+<div style="position: relative; width: 390px; min-height: 844px; box-sizing: border-box; background: #0F1214; color: #E6E8EA; font-family: 'IBM Plex Sans', system-ui, sans-serif; font-size: 15px; line-height: 1.45">
+
+  <header style="position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 4px; padding: 8px; background: #13171A; border-bottom: 1px solid #262C32">
+    <a href="Main.dc.html" aria-label="Retour à mes sites" style="width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; color: #B8C0C7"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"></path></svg></a>
+    <div style="flex: 1; min-width: 0">
+      <div style="font-family: 'IBM Plex Mono', monospace; font-size: 15px">[client-1].fr</div>
+      <div style="font-size: 12px; color: #9AA3AB">PrestaShop 8 · lu il y a 2 min</div>
+    </div>
+    <button type="button" aria-label="Relire maintenant" style="width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; background: transparent; border: 0; color: #5FD3BE; cursor: pointer"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.6-6.4"></path><path d="M21 3v6h-6"></path></svg></button>
+    <a href="Parametres.dc.html" aria-label="Paramètres du site" style="width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; color: #B8C0C7"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12"></path><circle cx="16" cy="6" r="2"></circle><circle cx="10" cy="12" r="2"></circle><circle cx="18" cy="18" r="2"></circle></svg></a>
+  </header>
+
+  <main style="padding: 16px 16px 24px; display: flex; flex-direction: column; gap: 18px">
+    <h1 style="margin: 0; font-size: 22px; font-weight: 600">Trafic</h1>
+    <nav aria-label="Trafic" style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); background: #171B1F; border: 1px solid #262C32; border-radius: 10px; padding: 3px; margin-top: -4px">
+      <a href="Site.dc.html" style="height: 44px; display: flex; align-items: center; justify-content: center; border-radius: 8px; color: #B8C0C7; text-decoration: none">Visiteurs</a>
+      <a href="Journal.dc.html" style="height: 44px; display: flex; align-items: center; justify-content: center; border-radius: 8px; color: #B8C0C7; text-decoration: none">Journal</a>
+      <a href="Blocages.dc.html" aria-current="page" style="height: 44px; display: flex; align-items: center; justify-content: center; border-radius: 8px; background: #2A3138; color: #E6E8EA; font-weight: 600; text-decoration: none">Blocages</a>
+    </nav>
+
+    <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px">
+      <div style="background: #171B1F; border: 1px solid #262C32; border-radius: 12px; padding: 12px"><div style="font-family: 'IBM Plex Mono', monospace; font-size: 22px">318</div><div style="font-size: 12px; color: #9AA3AB">requêtes refusées aujourd'hui</div></div>
+      <div style="background: #171B1F; border: 1px solid #262C32; border-radius: 12px; padding: 12px"><div style="font-family: 'IBM Plex Mono', monospace; font-size: 22px">18</div><div style="font-size: 12px; color: #9AA3AB">règles en place · 17 robots, 1 IP</div></div>
+    </div>
+
+    <section aria-labelledby="h-rules" style="display: flex; flex-direction: column; gap: 8px">
+      <h2 id="h-rules" style="margin: 0; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: #9AA3AB">Règles en place · refus aujourd'hui</h2>
+      <div style="background: #171B1F; border: 1px solid #262C32; border-radius: 12px">
+        <sc-for list="{{rules}}" as="r" hint-placeholder-count="7">
+          <div style="display: flex; align-items: center; gap: 10px; min-height: 60px; padding: 8px 14px; border-top: {{r.sep}}">
+            <div style="flex: 1; min-width: 0">
+              <div style="font-family: 'IBM Plex Mono', monospace; font-size: 13px; word-break: break-all">{{r.v}}</div>
+              <div style="font-size: 12px; color: #9AA3AB">{{r.meta}}</div>
+              <sc-if value="{{r.locked}}" hint-placeholder-val="{{false}}"><div style="font-size: 12px; color: #F5BC62">aussi dans une règle combinée écrite à la main</div></sc-if>
+            </div>
+            <sc-if value="{{r.canUnblock}}" hint-placeholder-val="{{true}}">
+              <button type="button" onClick="{{r.unblock}}" style="flex: none; height: 44px; padding: 0 12px; background: transparent; border: 1px solid #626C76; border-radius: 10px; color: #E6E8EA; font: inherit; font-size: 13px; cursor: pointer">Débloquer</button>
+            </sc-if>
+            <sc-if value="{{r.locked}}" hint-placeholder-val="{{false}}">
+              <a href="Controles.dc.html" style="flex: none; height: 44px; padding: 0 12px; display: flex; align-items: center; border: 1px solid #626C76; border-radius: 10px; color: #E6E8EA; text-decoration: none; font-size: 13px">Voir</a>
+            </sc-if>
+            <sc-if value="{{r.queued}}" hint-placeholder-val="{{false}}">
+              <button type="button" onClick="{{r.undo}}" style="flex: none; height: 44px; padding: 0 10px; background: transparent; border: 1px dashed #F5BC62; border-radius: 10px; color: #F5BC62; font: inherit; font-size: 13px; cursor: pointer">En attente ×</button>
+            </sc-if>
+          </div>
+        </sc-for>
+        <button type="button" style="width: 100%; min-height: 48px; background: transparent; border: 0; border-top: 1px solid #22282D; color: #7FC4F5; font: inherit; font-size: 13px; cursor: pointer">Voir les 11 autres règles</button>
+      </div>
+    </section>
+
+    <section aria-labelledby="h-add" style="display: flex; flex-direction: column; gap: 8px">
+      <h2 id="h-add" style="margin: 0; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: #9AA3AB">Bloquer à la main</h2>
+      <div style="background: #171B1F; border: 1px solid #262C32; border-radius: 12px; padding: 12px; display: flex; flex-direction: column; gap: 8px">
+        <div style="display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.6fr); gap: 8px">
+          <label for="btype" style="position: absolute; left: -9999px">Type</label>
+          <select id="btype" style="height: 44px; padding: 0 8px; background: #0F1214; border: 1px solid #626C76; border-radius: 10px; color: #E6E8EA; font: inherit; font-size: 13px"><option>Robot</option><option>IP</option><option>Abonnement IPv6</option></select>
+          <label for="bval" style="position: absolute; left: -9999px">Valeur</label>
+          <input id="bval" type="text" placeholder="ex. MJ12bot" style="height: 44px; padding: 0 10px; background: #0F1214; border: 1px solid #626C76; border-radius: 10px; color: #E6E8EA; font-family: 'IBM Plex Mono', monospace; font-size: 13px; min-width: 0">
+        </div>
+        <button type="button" style="height: 44px; border: 1px solid #626C76; border-radius: 10px; background: transparent; color: #E6E8EA; font: inherit; cursor: pointer">Ajouter à la file</button>
+      </div>
+    </section>
+
+    <section aria-labelledby="h-allow" style="display: flex; flex-direction: column; gap: 8px">
+      <h2 id="h-allow" style="margin: 0; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: #9AA3AB">Liste blanche</h2>
+      <div style="font-size: 13px; color: #B8C0C7">Jamais signalés à trier, jamais d'alerte, jamais bloqués par une règle automatique. N'écrit rien dans les fichiers.</div>
+      <div style="background: #171B1F; border: 1px solid #262C32; border-radius: 12px">
+        <div style="display: flex; align-items: center; gap: 10px; min-height: 56px; padding: 8px 14px">
+          <div style="flex: 1"><div>Googlebot, bingbot</div><div style="font-size: 12px; color: #9AA3AB">garde-fou permanent · vérifiés par DNS inverse</div></div>
+        </div>
+        <div style="display: flex; align-items: center; gap: 10px; min-height: 56px; padding: 8px 14px; border-top: 1px solid #22282D">
+          <div style="flex: 1; min-width: 0"><div style="font-family: 'IBM Plex Mono', monospace; font-size: 13px">2001:db8:33d0::/64</div><div style="font-size: 12px; color: #9AA3AB">Toi · back-office · ajouté le 02/10</div></div>
+          <button type="button" style="flex: none; height: 44px; padding: 0 12px; background: transparent; border: 1px solid #626C76; border-radius: 10px; color: #E6E8EA; font: inherit; font-size: 13px; cursor: pointer">Retirer</button>
+        </div>
+      </div>
+    </section>
+
+    <section aria-labelledby="h-bak" style="display: flex; flex-direction: column; gap: 8px">
+      <h2 id="h-bak" style="margin: 0; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: #9AA3AB">Sauvegardes du .htaccess · 10</h2>
+      <div style="background: #171B1F; border: 1px solid #262C32; border-radius: 12px">
+        <sc-for list="{{backups}}" as="b" hint-placeholder-count="4">
+          <div style="border-top: {{b.sep}}">
+            <button type="button" onClick="{{b.toggle}}" aria-expanded="{{b.aria}}" style="width: 100%; display: flex; align-items: center; gap: 10px; min-height: 52px; padding: 6px 14px; background: transparent; border: 0; color: #E6E8EA; font: inherit; text-align: left; cursor: pointer">
+              <span style="flex: 1; font-family: 'IBM Plex Mono', monospace; font-size: 13px">{{b.date}}</span>
+              <span style="font-size: 12px; color: #9AA3AB">{{b.effect}}</span>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#9AA3AB" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="{{b.chev}}"><path d="M6 9l6 6 6-6"></path></svg>
+            </button>
+            <sc-if value="{{b.open}}" hint-placeholder-val="{{false}}">
+              <div style="padding: 0 14px 12px; display: flex; flex-direction: column; gap: 8px">
+                <div style="font-size: 12px; color: #9AA3AB">Restaurer cette sauvegarde changerait le fichier actuel ainsi :</div>
+                <pre style="margin: 0; padding: 10px; background: #0B0E10; border: 1px solid #22282D; border-radius: 8px; font-family: 'IBM Plex Mono', monospace; font-size: 12px; line-height: 1.6; color: #B8C0C7; overflow-x: auto; white-space: pre">{{b.diff}}</pre>
+                <button type="button" onClick="{{b.restore}}" style="height: 44px; border: 1px solid #626C76; border-radius: 10px; background: transparent; color: #E6E8EA; font: inherit; cursor: pointer">{{b.restoreLabel}}</button>
+              </div>
+            </sc-if>
+          </div>
+        </sc-for>
+      </div>
+    </section>
+  </main>
+
+  <div style="position: sticky; bottom: 0; z-index: 2">
+    <sc-if value="{{hasQueue}}" hint-placeholder-val="{{false}}">
+      <div style="background: #1C2227; border-top: 1px solid #626C76; padding: 12px 16px; display: flex; flex-direction: column; gap: 10px">
+        <sc-if value="{{review}}" hint-placeholder-val="{{false}}">
+          <div style="font-size: 12px; color: #9AA3AB; font-family: 'IBM Plex Mono', monospace">www/prestashop/.htaccess</div>
+          <pre style="margin: 0; padding: 10px; background: #0B0E10; border: 1px solid #22282D; border-radius: 8px; font-family: 'IBM Plex Mono', monospace; font-size: 12px; line-height: 1.6; color: #B8C0C7; overflow-x: auto; white-space: pre; max-height: 220px; overflow-y: auto">{{diffText}}</pre>
+          <div style="font-size: 12px; color: #9AA3AB">Sauvegarde datée, écriture, test de l'accueil et de /commande. Retour arrière automatique si un test échoue.</div>
+        </sc-if>
+        <div style="display: flex; gap: 8px; align-items: center">
+          <span style="flex: 1; font-size: 13px">{{queueLabel}}</span>
+          <sc-if value="{{notReview}}" hint-placeholder-val="{{true}}">
+            <button type="button" onClick="{{openReview}}" style="height: 44px; padding: 0 18px; border: 0; border-radius: 10px; background: #3FB8A4; color: #0B1F1B; font: inherit; font-weight: 600; cursor: pointer">Vérifier</button>
+          </sc-if>
+          <sc-if value="{{review}}" hint-placeholder-val="{{false}}">
+            <button type="button" onClick="{{clear}}" style="height: 44px; padding: 0 12px; background: transparent; border: 1px solid #626C76; border-radius: 10px; color: #B8C0C7; font: inherit; cursor: pointer">Tout retirer</button>
+            <button type="button" onClick="{{apply}}" style="height: 44px; padding: 0 18px; border: 0; border-radius: 10px; background: #3FB8A4; color: #0B1F1B; font: inherit; font-weight: 600; cursor: pointer">Appliquer</button>
+          </sc-if>
+        </div>
+      </div>
+    </sc-if>
+    <sc-if value="{{toast}}" hint-placeholder-val="{{false}}">
+      <div role="status" style="display: flex; align-items: center; gap: 10px; background: #12302B; border-top: 1px solid #3FB8A4; padding: 10px 16px">
+        <span style="flex: 1; font-size: 13px; color: #5FD3BE">Appliqué à 21:51 · sauvegarde créée · tests OK</span>
+        <button type="button" onClick="{{undoApply}}" style="height: 44px; padding: 0 12px; background: transparent; border: 1px solid #3FB8A4; border-radius: 10px; color: #5FD3BE; font: inherit; cursor: pointer; white-space: nowrap">Annuler · 30 s</button>
+      </div>
+    </sc-if>
+    <nav aria-label="Navigation du site" style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); background: #13171A; border-top: 1px solid #2F363D; padding: 4px 4px 16px">
+      <a href="ATraiter.dc.html" style="position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-height: 56px; color: #B8C0C7; text-decoration: none; font-size: 12px"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 11l3 3 8-8"></path><path d="M20 12v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h9"></path></svg>À traiter<span style="position: absolute; top: 2px; left: 52%; min-width: 20px; height: 20px; padding: 0 6px; box-sizing: border-box; border-radius: 10px; background: #FF8B7D; color: #2A0E0A; font-size: 12px; font-weight: 600; line-height: 20px; text-align: center">5</span></a>
+      <a href="Site.dc.html" aria-current="page" style="position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-height: 56px; color: #5FD3BE; text-decoration: none; font-size: 12px; font-weight: 600"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h4l3-8 4 16 3-8h4"></path></svg>Trafic<span style="position: absolute; top: 2px; left: 52%; min-width: 20px; height: 20px; padding: 0 6px; box-sizing: border-box; border-radius: 10px; background: #F5BC62; color: #2A1E05; font-size: 12px; font-weight: 600; line-height: 20px; text-align: center">3</span></a>
+      <a href="Erreurs.dc.html" style="position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-height: 56px; color: #B8C0C7; text-decoration: none; font-size: 12px"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l9.5 17h-19z"></path><path d="M12 10v4M12 17v.5"></path></svg>Erreurs<span style="position: absolute; top: 2px; left: 52%; min-width: 20px; height: 20px; padding: 0 6px; box-sizing: border-box; border-radius: 10px; background: #FF8B7D; color: #2A0E0A; font-size: 12px; font-weight: 600; line-height: 20px; text-align: center">2</span></a>
+      <a href="Dispo.dc.html" style="position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-height: 56px; color: #B8C0C7; text-decoration: none; font-size: 12px"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.8 5.6a5.5 5.5 0 0 0-7.8 0L12 6.6l-1-1a5.5 5.5 0 0 0-7.8 7.8L12 22l8.8-8.6a5.5 5.5 0 0 0 0-7.8z"></path></svg>Santé<span style="position: absolute; top: 2px; left: 52%; min-width: 20px; height: 20px; padding: 0 6px; box-sizing: border-box; border-radius: 10px; background: #FF8B7D; color: #2A0E0A; font-size: 12px; font-weight: 600; line-height: 20px; text-align: center">3</span></a>
+    </nav>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":2100}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { queue: {}, open: { b1: true }, review: false, toast: false, last: null };
+  }
+  renderVals() {
+    var self = this;
+    var st = this.state;
+    var sep = function (l) { return l.map(function (x, i) { x.sep = i === 0 ? '0' : '1px solid #22282D'; return x; }); };
+    var setQ = function (id, v) { var q = Object.assign({}, self.state.queue); if (v) q[id] = v; else delete q[id]; self.setState({ queue: q, toast: false }); };
+    var R = [
+      { id: 'ip', v: '203.0.113.209', meta: 'IP · 41 refus · depuis le 02/10', line: '  Require not ip 203.0.113.209' },
+      { id: 'byte', v: 'Bytespider', meta: 'robot · 88 refus · depuis le 25/09', locked: true },
+      { id: 'gpt', v: 'GPTBot', meta: 'robot · 42 refus · depuis le 25/09', line: 'SetEnvIfNoCase User-Agent "GPTBot" vigie_bot' },
+      { id: 'meta', v: 'meta-externalagent', meta: 'robot · 31 refus · depuis le 25/09', locked: true },
+      { id: 'claude', v: 'ClaudeBot', meta: 'robot · 12 refus · depuis le 25/09', line: 'SetEnvIfNoCase User-Agent "ClaudeBot" vigie_bot' },
+      { id: 'mj', v: 'MJ12bot', meta: 'robot · 0 refus aujourd’hui · depuis le 25/09', line: 'SetEnvIfNoCase User-Agent "MJ12bot" vigie_bot' },
+      { id: 'cc', v: 'CCBot', meta: 'robot · 6 refus · depuis le 25/09', line: 'SetEnvIfNoCase User-Agent "CCBot" vigie_bot' }
+    ];
+    var rules = sep(R.map(function (r) {
+      var q = st.queue[r.id];
+      return { v: r.v, meta: r.meta, locked: !!r.locked, queued: !!q, canUnblock: !r.locked && !q,
+        unblock: function () { setQ(r.id, { label: 'Débloquer ' + r.v, diff: '- ' + r.line }); },
+        undo: function () { setQ(r.id, null); } };
+    }));
+    var B = [
+      { id: 'b1', date: '26/09 00:57', effect: '−5 lignes', diff: '- SetEnvIfNoCase User-Agent "Diffbot" vigie_bot\n- SetEnvIfNoCase User-Agent "PanguBot" vigie_bot\n- SetEnvIfNoCase User-Agent "Timpibot" vigie_bot\n- SetEnvIfNoCase User-Agent "ImagesiftBot" vigie_bot\n- SetEnvIfNoCase User-Agent "omgili" vigie_bot' },
+      { id: 'b2', date: '26/09 00:57', effect: '−2 +2 lignes', diff: '- Require not ip 203.0.113.209\n+ Require not ip 203.0.113.0/24' },
+      { id: 'b3', date: '26/09 00:08', effect: '−2 +4 lignes', diff: '…' },
+      { id: 'b4', date: '25/09 23:36', effect: '−30 +6 lignes', diff: '…' }
+    ];
+    var backups = sep(B.map(function (b) {
+      var open = !!st.open[b.id];
+      var q = st.queue[b.id];
+      return { date: b.date, effect: b.effect, diff: b.diff, open: open, aria: open ? 'true' : 'false', chev: open ? 'transform: rotate(180deg)' : '',
+        toggle: function () { var o = Object.assign({}, self.state.open); o[b.id] = !o[b.id]; self.setState({ open: o }); },
+        restoreLabel: q ? 'Restauration en attente · retirer' : 'Ajouter la restauration à la file',
+        restore: function () { setQ(b.id, q ? null : { label: 'Restaurer ' + b.date, diff: '# restauration de la sauvegarde du ' + b.date + '\n' + b.diff }); } };
+    }));
+    var items = Object.keys(st.queue).map(function (k) { return st.queue[k]; });
+    var n = items.length;
+    return {
+      rules: rules, backups: backups,
+      hasQueue: n > 0, review: st.review && n > 0, notReview: !st.review,
+      queueLabel: n + (n > 1 ? ' modifications en attente' : ' modification en attente'),
+      diffText: items.map(function (i) { return i.diff; }).join('\n'),
+      openReview: function () { self.setState({ review: true }); },
+      apply: function () { self.setState({ last: self.state.queue, queue: {}, review: false, toast: true }); },
+      clear: function () { self.setState({ queue: {}, review: false }); },
+      toast: st.toast,
+      undoApply: function () { self.setState({ queue: self.state.last || {}, toast: false }); }
+    };
+  }
+}
+</script>
+</body>
+</html>

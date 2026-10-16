@@ -1,0 +1,16 @@
+{
+  "site": "site-a",
+  "endpoint": "https://<sous-domaine-du-veilleur>/r/v1/report",
+  "root": "/home/<compte-site-a>/www",
+  "kind": "wordpress",
+  "critical": [
+    "wp-config.php",
+    ".htaccess",
+    ".user.ini",
+    "wordfence-waf.php",
+    "index.php"
+  ],
+  "must_contain": [
+    { "file": ".htaccess", "text": "# BEGIN site-a installer lock" }
+  ]
+}

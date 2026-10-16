@@ -1,0 +1,8 @@
+# Modèle de /etc/caddy/Caddyfile, sur le VPS seulement : le dépôt est public et
+# le sous-domaine du veilleur n'y figure pas. Caddy obtient et renouvelle seul
+# le certificat Let's Encrypt (ports 80 et 443 ouverts, enregistrements A et
+# AAAA du sous-domaine pointant vers le VPS).
+
+<sous-domaine> {
+	reverse_proxy 127.0.0.1:8080
+}
