@@ -173,6 +173,20 @@ describe('Paramètres et Réglages', () => {
     expect(wrapper.get('[data-recipient]').text()).toBe('a…@example.org')
     expect(wrapper.get('[data-device]').text()).toMatch(/poste de test.*cet appareil.*Actif/s)
     expect(wrapper.get('[data-version]').text()).toBe('Console Vigie 0.1.0')
+    const storage = wrapper.get('[data-token-storage]')
+    expect(storage.text()).toContain('Trousseau du système')
+    expect(storage.get('[data-tone]').attributes('data-tone')).toBe('ok')
+  })
+
+  it('Réglages : un jeton resté dans l’ancien fichier est signalé', async () => {
+    const veilleur = mockVeilleur()
+    veilleur.status.token_storage = 'file_legacy'
+    const { wrapper } = await open('/reglages')
+    const storage = wrapper.get('[data-token-storage]')
+    expect(storage.text()).toContain('Ancien fichier')
+    expect(storage.text()).toContain('Nouvel essai au prochain lancement')
+    expect(storage.get('[data-tone]').attributes('data-tone')).toBe('warn')
+    expect(wrapper.html()).not.toContain(TOKEN)
   })
 })
 
