@@ -11,7 +11,7 @@
 //! de l'API n'utilisent pas ce module : ils gardent leur 404 sans corps.
 
 use axum::Json;
-use axum::http::header::CACHE_CONTROL;
+use axum::http::header::{CACHE_CONTROL, RETRY_AFTER};
 use axum::http::{HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use serde::Serialize;
@@ -24,6 +24,7 @@ pub enum ErrorCode {
     NotFound,
     Conflict,
     TooManyRequests,
+    UnsupportedMediaType,
     Internal,
 }
 
@@ -34,6 +35,7 @@ impl ErrorCode {
             Self::NotFound => StatusCode::NOT_FOUND,
             Self::Conflict => StatusCode::CONFLICT,
             Self::TooManyRequests => StatusCode::TOO_MANY_REQUESTS,
+            Self::UnsupportedMediaType => StatusCode::UNSUPPORTED_MEDIA_TYPE,
             Self::Internal => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
@@ -46,6 +48,7 @@ impl ErrorCode {
             Self::NotFound => "introuvable",
             Self::Conflict => "conflit avec l'état actuel",
             Self::TooManyRequests => "trop de requêtes",
+            Self::UnsupportedMediaType => "type de contenu non pris en charge",
             Self::Internal => "erreur interne",
         }
     }
@@ -61,6 +64,7 @@ impl ApiError {
     pub const NOT_FOUND: Self = Self(ErrorCode::NotFound);
     pub const CONFLICT: Self = Self(ErrorCode::Conflict);
     pub const TOO_MANY_REQUESTS: Self = Self(ErrorCode::TooManyRequests);
+    pub const UNSUPPORTED_MEDIA_TYPE: Self = Self(ErrorCode::UnsupportedMediaType);
     pub const INTERNAL: Self = Self(ErrorCode::Internal);
 
     /// Réponse complète, corps compris : appelé par la couche de
@@ -104,6 +108,16 @@ impl IntoResponse for ApiError {
     }
 }
 
+/// 429 avec `Retry-After` en secondes ; la couche de `request_id` garde
+/// l'en-tête en écrivant le corps.
+pub fn too_many_requests(retry_after: u64) -> Response {
+    let mut response = ApiError::TOO_MANY_REQUESTS.into_response();
+    response
+        .headers_mut()
+        .insert(RETRY_AFTER, HeaderValue::from(retry_after.max(1)));
+    response
+}
+
 /// Fallback des routes de `/api/v1` : méthode refusée sur une route connue.
 pub async fn not_found() -> ApiError {
     ApiError::NOT_FOUND
@@ -126,6 +140,17 @@ mod tests {
             serde_json::json!({"error": {
                 "code": "internal", "message": "erreur interne", "request_id": "abc"
             }})
+        );
+    }
+
+    #[test]
+    fn a_429_says_when_to_retry() {
+        let response = too_many_requests(6);
+        assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(response.headers()[RETRY_AFTER], "6");
+        assert_eq!(
+            response.extensions().get::<ApiError>(),
+            Some(&ApiError::TOO_MANY_REQUESTS)
         );
     }
 

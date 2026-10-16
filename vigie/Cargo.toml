@@ -10,7 +10,8 @@ publish = false
 
 [dependencies]
 anyhow = "1"
-axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio"] }
+# matched-path : gabarit de route cité par le journal des appels de /api/v1.
+axum = { version = "0.8", default-features = false, features = ["http1", "json", "matched-path", "tokio"] }
 base64 = "0.22"
 clap = { version = "4", features = ["derive", "env"] }
 dirs = "6"

@@ -189,6 +189,18 @@ $ ssh vigie@<vps> ~/vigie/bin/vigie device list
 $ ssh vigie@<vps> ~/vigie/bin/vigie device revoke <id>
 ```
 
+Journal des appels : `serve` écrit une ligne par appel de `/api/v1` dans
+journald ; les lignes des 429 citent l'IP cliente (`decisions.md`, section
+#5). Elles suivent la rétention de journald du VPS, bornée par défaut en
+taille seulement : à fixer à 30 jours en root
+(`/etc/systemd/journald.conf.d/retention.conf`, `[Journal]`
+`MaxRetentionSec=30day`, puis `systemctl restart systemd-journald`). **À
+faire** et à constater par
+`systemd-analyze cat-config systemd/journald.conf`. La limite de débit lit
+l'IP cliente dans `X-Forwarded-For`, que Caddy écrit lui-même
+(`reverse_proxy` sans `trusted_proxies`) : ne pas lui ajouter de
+`trusted_proxies`.
+
 Contrat de l'API et correspondance avec les écrans :
 [`api-console.md`](./api-console.md).
 

@@ -11,6 +11,7 @@
 
 use axum::extract::Request;
 use axum::http::HeaderValue;
+use axum::http::header::CONTENT_LENGTH;
 use axum::middleware::Next;
 use axum::response::Response;
 
@@ -43,7 +44,16 @@ pub async fn layer(request: Request, next: Next) -> Response {
     let id = generate();
     let mut response = CURRENT.scope(id.clone(), next.run(request)).await;
     if let Some(error) = response.extensions_mut().remove::<ApiError>() {
-        response = error.render(&id);
+        // Le corps rendu remplace le vide ; les en-têtes posés avant lui
+        // (`Retry-After` d'un 429) et les extensions restent.
+        let (mut parts, _) = response.into_parts();
+        let (rendered, body) = error.render(&id).into_parts();
+        parts.status = rendered.status;
+        parts.headers.remove(CONTENT_LENGTH);
+        for (name, value) in &rendered.headers {
+            parts.headers.insert(name, value.clone());
+        }
+        response = Response::from_parts(parts, body);
     }
     if let Ok(value) = HeaderValue::from_str(&id) {
         response.headers_mut().insert(HEADER, value);
