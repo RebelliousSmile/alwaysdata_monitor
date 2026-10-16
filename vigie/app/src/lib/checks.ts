@@ -13,6 +13,11 @@ const LABELS: Record<string, string> = {
   tls: 'Certificat TLS',
   headers: 'En-têtes de sécurité',
   heartbeat: 'Silence de l’agent',
+  'agent:integrity': 'Intégrité des fichiers critiques',
+  'agent:critical-file': 'Fichiers critiques',
+  'agent:must-contain': 'Texte attendu dans les fichiers',
+  'agent:root': 'Racine du site',
+  'agent:uploads-php': 'PHP dans les uploads',
 }
 
 export function checkLabel(name: string): string {
