@@ -21,6 +21,9 @@ form_urlencoded = "1"
 getrandom = "0.4"
 # Déjà tiré par axum : distingue un corps trop gros d'un corps interrompu.
 http-body-util = "0.1"
+# Fuseaux IANA des sources de logs sans décalage écrit ; base tz embarquée,
+# indépendante de /usr/share/zoneinfo du VPS.
+jiff = { version = "0.2", default-features = false, features = ["std", "tzdb-bundle-always"] }
 log = "0.4"
 # Rendu Unicode seulement, pour le terminal de `vigie device pair`.
 qrcode = { version = "0.14", default-features = false }
@@ -43,6 +46,8 @@ url = "2"
 libc = "0.2"
 
 [dev-dependencies]
+# Décompresse la fixture de logs rotationnés (.gz).
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
 rcgen = { version = "0.14", default-features = false, features = ["ring", "pem", "crypto"] }
 # Relit le QR code de `vigie device pair` sans dépendre d'une image.
 rqrr = { version = "0.10", default-features = false }
