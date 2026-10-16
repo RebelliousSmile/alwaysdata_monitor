@@ -1,0 +1,15 @@
+{
+  "veilleur": {
+    "host": "<vps>",
+    "user": "vigie",
+    "sshKey": "~/.ssh/vigie_ci",
+    "remoteDir": "vigie",
+    "healthUrl": "https://<sous-domaine>/health"
+  },
+  "site-a-agent": {
+    "host": "<hote-ssh-alwaysdata>",
+    "user": "<compte-site-a>",
+    "sshKey": "~/.ssh/vigie_agent",
+    "remoteDir": "vigie-agent"
+  }
+}

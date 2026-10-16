@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Vigie — détail d'alerte</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0F1214}
+a{color:#7FC4F5}a:hover{color:#B5DDFA}
+:focus-visible{outline:2px solid #5FD3BE;outline-offset:2px}
+</style>
+</helmet>
+<div style="position: relative; width: 390px; min-height: 844px; box-sizing: border-box; background: #0F1214; color: #E6E8EA; font-family: 'IBM Plex Sans', system-ui, sans-serif; font-size: 15px; line-height: 1.45">
+
+  <header style="position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 4px; padding: 8px; background: #13171A; border-bottom: 1px solid #262C32">
+    <a href="ATraiter.dc.html" aria-label="Retour à À traiter" style="width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; color: #B8C0C7"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"></path></svg></a>
+    <div style="flex: 1; min-width: 0">
+      <div style="font-family: 'IBM Plex Mono', monospace; font-size: 15px">[client-1].fr</div>
+      <div style="font-size: 12px; color: #9AA3AB">PrestaShop 8 · lu il y a 2 min</div>
+    </div>
+    <button type="button" aria-label="Relire maintenant" style="width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; background: transparent; border: 0; color: #5FD3BE; cursor: pointer"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.6-6.4"></path><path d="M21 3v6h-6"></path></svg></button>
+    <a href="Parametres.dc.html" aria-label="Paramètres du site" style="width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; color: #B8C0C7"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12"></path><circle cx="16" cy="6" r="2"></circle><circle cx="10" cy="12" r="2"></circle><circle cx="18" cy="18" r="2"></circle></svg></a>
+  </header>
+
+  <main style="padding: 16px 16px 24px; display: flex; flex-direction: column; gap: 18px">
+    <div style="display: flex; flex-direction: column; gap: 6px">
+      <span style="{{statusChip}}">{{statusLabel}}</span>
+      <h1 style="margin: 0; font-size: 22px; font-weight: 600; line-height: 1.25">Erreurs PHP fatales sur /commande</h1>
+      <div style="font-size: 13px; color: #9AA3AB">alerte envoyée à 21:12 · règle « Erreurs PHP fatales : plus de 5 en 1 h »</div>
+    </div>
+
+    <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px">
+      <div style="background: #171B1F; border: 1px solid #262C32; border-radius: 12px; padding: 10px"><div style="font-family: 'IBM Plex Mono', monospace; font-size: 22px">12</div><div style="font-size: 12px; color: #9AA3AB">erreurs fatales</div></div>
+      <div style="background: #171B1F; border: 1px solid #262C32; border-radius: 12px; padding: 10px"><div style="font-family: 'IBM Plex Mono', monospace; font-size: 22px">14</div><div style="font-size: 12px; color: #9AA3AB">commandes en échec</div></div>
+      <div style="background: #171B1F; border: 1px solid #262C32; border-radius: 12px; padding: 10px"><div style="font-family: 'IBM Plex Mono', monospace; font-size: 22px">9</div><div style="font-size: 12px; color: #9AA3AB">clients touchés</div></div>
+    </div>
+
+    <section aria-labelledby="h-when" style="display: flex; flex-direction: column; gap: 6px">
+      <h2 id="h-when" style="margin: 0; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: #9AA3AB">Quand</h2>
+      <ol style="margin: 0; padding: 0; list-style: none; background: #171B1F; border: 1px solid #262C32; border-radius: 12px">
+        <sc-for list="{{timeline}}" as="t" hint-placeholder-count="5">
+          <li style="display: flex; gap: 12px; padding: 10px 14px; border-top: {{t.sep}}">
+            <span style="flex: none; width: 44px; font-family: 'IBM Plex Mono', monospace; font-size: 13px; color: #9AA3AB">{{t.t}}</span>
+            <span style="font-size: 13px">{{t.what}}</span>
+          </li>
+        </sc-for>
+      </ol>
+    </section>
+
+    <section aria-labelledby="h-what" style="display: flex; flex-direction: column; gap: 6px">
+      <h2 id="h-what" style="margin: 0; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: #9AA3AB">Quoi</h2>
+      <div style="background: #171B1F; border: 1px solid #262C32; border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 6px">
+        <div style="font-weight: 500">Call to a member function getId() on null</div>
+        <div style="font-family: 'IBM Plex Mono', monospace; font-size: 13px; color: #B8C0C7; word-break: break-all">controllers/front/OrderController.php:412</div>
+        <div style="font-size: 13px; color: #B8C0C7">Toujours sur <span style="font-family: 'IBM Plex Mono', monospace">POST /commande?step=3</span> (choix du transporteur).</div>
+      </div>
+    </section>
+
+    <section aria-labelledby="h-clue" style="display: flex; flex-direction: column; gap: 6px">
+      <h2 id="h-clue" style="margin: 0; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: #9AA3AB">Faits liés</h2>
+      <div style="background: #171B1F; border: 1px solid #262C32; border-radius: 12px">
+        <sc-for list="{{clues}}" as="c" hint-placeholder-count="3">
+          <a href="{{c.href}}" style="display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-top: {{c.sep}}; text-decoration: none; color: #E6E8EA">
+            <span style="flex: 1; font-size: 13px">{{c.text}}</span>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#9AA3AB" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"></path></svg>
+          </a>
+        </sc-for>
+      </div>
+    </section>
+
+    <section aria-label="Actions" style="display: flex; flex-direction: column; gap: 8px">
+      <a href="Journal.dc.html" style="height: 48px; display: flex; align-items: center; justify-content: center; border-radius: 10px; background: #3FB8A4; color: #0B1F1B; text-decoration: none; font-weight: 600">Voir les lignes de 21:00 à 21:45</a>
+      <sc-if value="{{showMute}}" hint-placeholder-val="{{false}}">
+        <div role="group" aria-label="Durée de la sourdine" style="background: #171B1F; border: 1px solid #626C76; border-radius: 12px; padding: 12px; display: flex; flex-direction: column; gap: 8px">
+          <div style="font-size: 13px; color: #B8C0C7">Plus d'alerte pour cette erreur pendant :</div>
+          <sc-for list="{{muteOptions}}" as="o" hint-placeholder-count="3">
+            <button type="button" onClick="{{o.pick}}" style="height: 44px; border: 1px solid #626C76; border-radius: 10px; background: transparent; color: #E6E8EA; font: inherit; cursor: pointer">{{o.label}}</button>
+          </sc-for>
+          <div style="font-size: 12px; color: #9AA3AB">L'alerte revient d'elle-même si le nombre d'erreurs double.</div>
+        </div>
+      </sc-if>
+      <div style="display: flex; gap: 8px">
+        <button type="button" onClick="{{toggleMute}}" aria-expanded="{{muteAria}}" style="flex: 1; height: 48px; border: 1px solid #626C76; border-radius: 10px; background: transparent; color: #E6E8EA; font: inherit; cursor: pointer">{{muteLabel}}</button>
+        <button type="button" onClick="{{resolve}}" style="flex: 1; height: 48px; border: 1px solid #626C76; border-radius: 10px; background: transparent; color: #E6E8EA; font: inherit; cursor: pointer">{{resolveLabel}}</button>
+      </div>
+    </section>
+  </main>
+
+  <nav aria-label="Navigation du site" style="position: sticky; bottom: 0; z-index: 2; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); background: #13171A; border-top: 1px solid #2F363D; padding: 4px 4px 16px">
+    <a href="ATraiter.dc.html" aria-current="page" style="position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-height: 56px; color: #5FD3BE; text-decoration: none; font-size: 12px; font-weight: 600"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 11l3 3 8-8"></path><path d="M20 12v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h9"></path></svg>À traiter<span style="position: absolute; top: 2px; left: 52%; min-width: 20px; height: 20px; padding: 0 6px; box-sizing: border-box; border-radius: 10px; background: #FF8B7D; color: #2A0E0A; font-size: 12px; font-weight: 600; line-height: 20px; text-align: center">5</span></a>
+    <a href="Site.dc.html" style="position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-height: 56px; color: #B8C0C7; text-decoration: none; font-size: 12px"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h4l3-8 4 16 3-8h4"></path></svg>Trafic<span style="position: absolute; top: 2px; left: 52%; min-width: 20px; height: 20px; padding: 0 6px; box-sizing: border-box; border-radius: 10px; background: #F5BC62; color: #2A1E05; font-size: 12px; font-weight: 600; line-height: 20px; text-align: center">3</span></a>
+    <a href="Erreurs.dc.html" style="position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-height: 56px; color: #B8C0C7; text-decoration: none; font-size: 12px"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l9.5 17h-19z"></path><path d="M12 10v4M12 17v.5"></path></svg>Erreurs<span style="position: absolute; top: 2px; left: 52%; min-width: 20px; height: 20px; padding: 0 6px; box-sizing: border-box; border-radius: 10px; background: #FF8B7D; color: #2A0E0A; font-size: 12px; font-weight: 600; line-height: 20px; text-align: center">2</span></a>
+    <a href="Dispo.dc.html" style="position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-height: 56px; color: #B8C0C7; text-decoration: none; font-size: 12px"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.8 5.6a5.5 5.5 0 0 0-7.8 0L12 6.6l-1-1a5.5 5.5 0 0 0-7.8 7.8L12 22l8.8-8.6a5.5 5.5 0 0 0 0-7.8z"></path></svg>Santé<span style="position: absolute; top: 2px; left: 52%; min-width: 20px; height: 20px; padding: 0 6px; box-sizing: border-box; border-radius: 10px; background: #FF8B7D; color: #2A0E0A; font-size: 12px; font-weight: 600; line-height: 20px; text-align: center">3</span></a>
+  </nav>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":1900}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { mute: false, muted: '', resolved: false };
+  }
+  renderVals() {
+    var self = this;
+    var st = this.state;
+    var sep = function (l) { return l.map(function (x, i) { x.sep = i === 0 ? '0' : '1px solid #22282D'; return x; }); };
+    var chip = function (bg, fg) { return 'align-self: flex-start; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; background: ' + bg + '; color: ' + fg; };
+    var statusLabel = st.resolved ? 'Résolue à 21:52' : st.muted ? 'En sourdine ' + st.muted : 'En cours · aucune erreur depuis 10 min';
+    var statusChip = st.resolved ? chip('#12302B', '#5FD3BE') : st.muted ? chip('#22282D', '#C9D1D8') : chip('#3A1A16', '#FF8B7D');
+    return {
+      statusLabel: statusLabel, statusChip: statusChip,
+      timeline: sep([
+        { t: '21:02', what: 'Première erreur fatale' },
+        { t: '21:12', what: 'Alerte envoyée (9 erreurs en 10 min)' },
+        { t: '21:40', what: 'Dernière erreur · 3 de plus, pas de nouvel email' },
+        { t: '21:50', what: 'Aucune erreur depuis 10 min' }
+      ]),
+      clues: sep([
+        { text: '45 warnings « id_carrier » dans [module-livraison] depuis 08:14, sur la même étape', href: 'Erreurs.dc.html' },
+        { text: '[module-livraison] mis à jour hier à 18:40 (vu au contrôle de 03:00)', href: 'Controles.dc.html' },
+        { text: 'Aucune modification de .htaccess ni robots.txt aujourd’hui', href: 'Blocages.dc.html' }
+      ]),
+      showMute: st.mute,
+      muteAria: st.mute ? 'true' : 'false',
+      muteLabel: st.mute ? 'Fermer' : 'Mettre en sourdine',
+      toggleMute: function () { self.setState({ mute: !self.state.mute }); },
+      muteOptions: [
+        { label: '24 heures', pick: function () { self.setState({ mute: false, muted: 'pour 24 h' }); } },
+        { label: '7 jours', pick: function () { self.setState({ mute: false, muted: 'pour 7 jours' }); } },
+        { label: 'Jusqu’à la prochaine mise à jour du module', pick: function () { self.setState({ mute: false, muted: 'jusqu’à la mise à jour' }); } }
+      ],
+      resolveLabel: st.resolved ? 'Rouvrir' : 'Marquer résolue',
+      resolve: function () { self.setState({ resolved: !self.state.resolved }); }
+    };
+  }
+}
+</script>
+</body>
+</html>

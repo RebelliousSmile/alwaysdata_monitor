@@ -1,0 +1,41 @@
+# Passage du veilleur, lancé chaque minute par vigie-tick.timer. Tant qu'un
+# passage tourne, le timer n'en démarre pas d'autre.
+[Unit]
+Description=vigie tick (veilleur multi-sites)
+After=network-online.target
+Wants=network-online.target
+# Avant le premier déploiement, le passage est ignoré au lieu d'échouer.
+ConditionFileIsExecutable=/home/vigie/vigie/bin/vigie
+ConditionPathExists=/home/vigie/vigie/config.toml
+
+[Service]
+Type=oneshot
+User=vigie
+Group=vigie
+ExecStart=/home/vigie/vigie/bin/vigie tick
+TimeoutStartSec=120
+# Comme serve : en manque de mémoire, le noyau tue d'abord un autre processus du VPS.
+OOMScoreAdjust=-500
+
+# Durcissement : seule la base est accessible en écriture, pas le binaire.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/vigie/vigie/data
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+UMask=0077

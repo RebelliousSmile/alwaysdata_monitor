@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Vigie — emails</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#E9ECEE}
+a{color:#0B6E99}a:hover{color:#084F6E}
+:focus-visible{outline:2px solid #0B6E99;outline-offset:2px}
+</style>
+</helmet>
+<div style="width: 390px; min-height: 844px; box-sizing: border-box; background: #E9ECEE; color: #1B1F23; font-family: 'IBM Plex Sans', system-ui, sans-serif; font-size: 15px; line-height: 1.5; padding: 16px; display: flex; flex-direction: column; gap: 20px">
+
+  <div style="font-size: 13px; color: #4A535B">Ce que FX reçoit dans sa boîte mail. Chaque bouton ouvre Vigie au bon endroit, avec le contexte.</div>
+
+  <article aria-label="Email immédiat" style="background: #FFFFFF; border-radius: 12px; overflow: hidden; border: 1px solid #D5DADF">
+    <div style="padding: 14px 16px; border-bottom: 1px solid #E3E7EA">
+      <div style="font-size: 12px; color: #4A535B">Vigie &lt;vigie@[domaine]&gt; · 21:12</div>
+      <div style="font-weight: 600; margin-top: 2px">[client-1].fr · 9 erreurs PHP fatales en 10 min sur /commande</div>
+    </div>
+    <div style="padding: 16px; display: flex; flex-direction: column; gap: 12px">
+      <div style="display: grid; grid-template-columns: 80px minmax(0, 1fr); gap: 6px 10px; font-size: 13px">
+        <span style="color: #4A535B">Depuis</span><span>21:02</span>
+        <span style="color: #4A535B">Erreur</span><span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; word-break: break-word">Call to a member function getId() on null · OrderController.php:412</span>
+        <span style="color: #4A535B">Où</span><span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px">POST /commande?step=3</span>
+        <span style="color: #4A535B">Effet</span><span>11 commandes en échec (500), 7 clients</span>
+      </div>
+      <a href="Alerte.dc.html" style="height: 48px; display: flex; align-items: center; justify-content: center; border-radius: 10px; background: #0B6E99; color: #FFFFFF; text-decoration: none; font-weight: 600">Ouvrir dans Vigie</a>
+      <div style="font-size: 12px; color: #4A535B">Pas d'autre email pour cette règle avant 21:42, sauf si le site devient injoignable. Tu seras prévenu quand ce sera rétabli.</div>
+    </div>
+  </article>
+
+  <article aria-label="Email du matin" style="background: #FFFFFF; border-radius: 12px; overflow: hidden; border: 1px solid #D5DADF">
+    <div style="padding: 14px 16px; border-bottom: 1px solid #E3E7EA">
+      <div style="font-size: 12px; color: #4A535B">Vigie &lt;vigie@[domaine]&gt; · 08:00</div>
+      <div style="font-weight: 600; margin-top: 2px">Mardi 13/10 · 2 points sur 6 sites</div>
+    </div>
+    <div style="padding: 16px; display: flex; flex-direction: column; gap: 14px">
+      <div style="display: flex; flex-direction: column; gap: 4px">
+        <div style="font-family: 'IBM Plex Mono', monospace; font-size: 13px; font-weight: 500">[client-1].fr</div>
+        <div style="font-size: 13px">RAM du compte à 2 015 Mo sur 2 048 (98 %) au relevé de 14:15</div>
+        <a href="Ressources.dc.html" style="font-size: 13px; min-height: 32px; display: inline-flex; align-items: center">Voir ce qui se passait à 14:15</a>
+      </div>
+      <div style="height: 1px; background: #E3E7EA"></div>
+      <div style="display: flex; flex-direction: column; gap: 4px">
+        <div style="font-family: 'IBM Plex Mono', monospace; font-size: 13px; font-weight: 500">[site-perso].fr</div>
+        <div style="font-size: 13px">2 visiteurs à trier, dont un scan de /wp-login.php (212 requêtes)</div>
+        <a href="Site.dc.html" style="font-size: 13px; min-height: 32px; display: inline-flex; align-items: center">Trier les visiteurs</a>
+      </div>
+      <div style="height: 1px; background: #E3E7EA"></div>
+      <div style="font-size: 13px; color: #4A535B">Rien à signaler sur [client-5].com, [client-6].fr, [client-2].com, [client-3].fr.</div>
+      <div style="font-size: 12px; color: #4A535B">Toutes les lectures ont réussi. Dernière lecture : 07:58.</div>
+    </div>
+  </article>
+
+  <article aria-label="Email de lecture impossible" style="background: #FFFFFF; border-radius: 12px; overflow: hidden; border: 1px solid #D5DADF">
+    <div style="padding: 14px 16px; border-bottom: 1px solid #E3E7EA">
+      <div style="font-size: 12px; color: #4A535B">Vigie &lt;vigie@[domaine]&gt; · 20:10</div>
+      <div style="font-weight: 600; margin-top: 2px">[client-3].fr · Vigie ne voit plus le site depuis 30 min</div>
+    </div>
+    <div style="padding: 16px; display: flex; flex-direction: column; gap: 12px">
+      <div style="font-size: 13px">Connexion SSH refusée (clé non acceptée) depuis 19:40. Les sondes HTTP continuent : le site répond normalement. Logs, ressources et contrôles ne sont plus lus.</div>
+      <a href="Etats.dc.html" style="height: 48px; display: flex; align-items: center; justify-content: center; border-radius: 10px; background: #0B6E99; color: #FFFFFF; text-decoration: none; font-weight: 600">Ouvrir dans Vigie</a>
+    </div>
+  </article>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":1700}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

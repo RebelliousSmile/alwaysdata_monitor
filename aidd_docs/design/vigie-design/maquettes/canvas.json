@@ -1,0 +1,32 @@
+{"v":3,"createdOnFiles":{"v":1,"at":"2026-10-15T16:30:00Z"},"title":"Vigie — console de sécurité","launch":{"view":"canvas"},"pages":[],
+"boards":{
+"Main.dc.html":{"x":0,"y":300,"w":390,"h":844,"title":"Mes sites","is_interactive":true,"radius":24},
+"ATraiter.dc.html":{"x":470,"y":300,"w":390,"h":1500,"title":"Site — À traiter","is_interactive":true,"radius":24},
+"Alerte.dc.html":{"x":940,"y":300,"w":390,"h":1900,"title":"Détail d'alerte","is_interactive":true,"radius":24},
+"Emails.dc.html":{"x":1410,"y":300,"w":390,"h":1700,"title":"Emails envoyés","radius":24},
+"Site.dc.html":{"x":0,"y":2600,"w":390,"h":2300,"title":"Trafic — visiteurs","is_interactive":true,"radius":24},
+"Journal.dc.html":{"x":470,"y":2600,"w":390,"h":1900,"title":"Trafic — journal","is_interactive":true,"radius":24},
+"Blocages.dc.html":{"x":940,"y":2600,"w":390,"h":2100,"title":"Trafic — blocages","is_interactive":true,"radius":24},
+"Erreurs.dc.html":{"x":0,"y":5300,"w":390,"h":1900,"title":"Erreurs","is_interactive":true,"radius":24},
+"Dispo.dc.html":{"x":470,"y":5300,"w":390,"h":1400,"title":"Santé — disponibilité","is_interactive":true,"radius":24},
+"Ressources.dc.html":{"x":940,"y":5300,"w":390,"h":1700,"title":"Santé — ressources","is_interactive":true,"radius":24},
+"Controles.dc.html":{"x":1410,"y":5300,"w":390,"h":2300,"title":"Santé — contrôles","is_interactive":true,"radius":24},
+"Parametres.dc.html":{"x":0,"y":8100,"w":390,"h":2000,"title":"Paramètres du site","is_interactive":true,"radius":24},
+"Reglages.dc.html":{"x":470,"y":8100,"w":390,"h":2300,"title":"Réglages globaux","is_interactive":true,"radius":24},
+"AjoutSite.dc.html":{"x":940,"y":8100,"w":390,"h":1500,"title":"Ajouter un site","is_interactive":true,"radius":24},
+"Etats.dc.html":{"x":0,"y":10900,"w":390,"h":2200,"title":"États","radius":24},
+"Systeme.dc.html":{"x":470,"y":10900,"w":960,"h":1400,"title":"Système visuel"}
+},
+"order":["Main.dc.html","ATraiter.dc.html","Alerte.dc.html","Emails.dc.html","Site.dc.html","Journal.dc.html","Blocages.dc.html","Erreurs.dc.html","Dispo.dc.html","Ressources.dc.html","Controles.dc.html","Parametres.dc.html","Reglages.dc.html","AjoutSite.dc.html","Etats.dc.html","Systeme.dc.html"],
+"notes":{
+"t1":{"x":0,"y":40,"text":"Arrivée et parcours d'alerte","kind":"title1","maxW":1800},
+"t2":{"x":0,"y":2340,"text":"Trafic","kind":"title1","maxW":1330},
+"t3":{"x":0,"y":5040,"text":"Erreurs et Santé","kind":"title1","maxW":1800},
+"t4":{"x":0,"y":7840,"text":"Réglages","kind":"title1","maxW":1330},
+"t5":{"x":0,"y":10640,"text":"États et système visuel","kind":"title1","maxW":1430},
+"n1":{"x":1900,"y":300,"w":420,"maxH":900,"fill":"blue","text":"NAVIGATION ET LIENS PROFONDS\n\nAccueil = Mes sites, trié par gravité : rouge, aveugle, orange, vert.\nDans un site : barre du bas À traiter / Trafic / Erreurs / Santé, badges = nombre de points ouverts.\nTrafic = Visiteurs | Journal | Blocages. Santé = Dispo | Ressources | Contrôles.\n\nSchéma d'URL : /s/{site}/{vue}?date=AAAA-MM-JJ&de=HH:MM&a=HH:MM&src=http,php&q=...\nTout lien (email, alerte, erreur, pic de ressources, carte visiteur) transmet date, fenêtre, sources et filtre.\nL'email immédiat ouvre /s/{site}/alerte/{id}.\nLa file d'écriture survit au changement d'onglet (état du site, pas de l'écran).\nRetour depuis Paramètres = écran d'origine."},
+"n2":{"x":1450,"y":2600,"w":420,"maxH":1000,"fill":"orange","text":"RÈGLES MÉTIER\n\nÀ trier = visiteur automatisé jamais décidé (ni bloqué, ni interdit, ni autorisé) et au-delà de 50 req/jour.\nTrès actif = au-delà du seuil « IP très active » (250 req/jour par défaut, réglable globalement, surchargeable par site). C'est un badge, pas une catégorie.\nAutoriser = liste blanche : n'apparaît plus dans À trier, ne déclenche plus d'alerte, ne peut pas être bloqué par une règle automatique. Révocable dans Blocages.\nSourdine d'une erreur : 24 h, 7 jours ou jusqu'à la prochaine mise à jour du module. Se lève seule si le volume double.\nRessources = compte Alwaysdata (partagé entre les sites du compte), pas le site seul.\nFuseau : Europe/Paris partout. Détail conservé 30 jours = profondeur de la navigation par jour."},
+"n3":{"x":1900,"y":5300,"w":420,"maxH":800,"fill":"green","text":"FILE D'ÉCRITURE UNIQUE\n\nToute modification de .htaccess ou robots.txt, d'où qu'elle parte (Visiteurs, Journal, Blocages, Contrôles, restauration), entre dans la même file.\n1. Vérifier : le diff s'ouvre, Appliquer n'existe que là.\n2. Appliquer : sauvegarde datée, écriture, test HTTP de l'accueil et de /commande.\n3. Échec du test : retour arrière automatique + écran d'échec (voir États).\n4. Succès : bandeau « Annuler (restaurer) » pendant 30 s.\nVigie ne touche jamais aux règles qu'il n'a pas écrites (règles combinées [OR])."},
+"n4":{"x":1450,"y":8100,"w":420,"maxH":800,"fill":"purple","text":"GRANDS ÉCRANS ET CIBLE TECHNIQUE\n\nCible : Tauri 2, une seule interface pour téléphone (Android, iOS) et ordinateur.\nUn service Rust tourne en continu sur un serveur (lecture SSH, sondes, emails, file d'écriture). L'app Tauri n'est qu'un client de ce service : un téléphone en veille ne peut pas surveiller.\nNotifications : email d'abord, notification de l'app en option.\n\nAu-delà de 900 px : barre du bas remplacée par une colonne de navigation à gauche, listes et détail côte à côte (alertes | détail, visiteurs | panneau de décision).\nThème clair à dessiner (réglage Apparence prévu)."}
+},
+"designSystems":[]}

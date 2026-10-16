@@ -1,0 +1,10 @@
+{
+  "boutique": {
+    "host": "ssh-<compte>.alwaysdata.net",
+    "user": "<compte>",
+    "sshKey": "~/.ssh/<compte>_ci",
+    "shopRoot": "www/prestashop",
+    "siteUrl": "https://www.<domaine>/",
+    "lifecycleRevision": 1
+  }
+}

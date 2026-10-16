@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Vigie — états</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0F1214}
+a{color:#7FC4F5}a:hover{color:#B5DDFA}
+:focus-visible{outline:2px solid #5FD3BE;outline-offset:2px}
+</style>
+</helmet>
+<div style="width: 390px; min-height: 844px; box-sizing: border-box; background: #0F1214; color: #E6E8EA; font-family: 'IBM Plex Sans', system-ui, sans-serif; font-size: 15px; line-height: 1.45; padding: 16px; display: flex; flex-direction: column; gap: 28px">
+
+  <section aria-labelledby="e1" style="display: flex; flex-direction: column; gap: 10px">
+    <h2 id="e1" style="margin: 0; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: #9AA3AB">Aveugle · [client-3].fr</h2>
+    <div style="background: #2A3138; border: 1px solid #626C76; border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 10px">
+      <div style="display: flex; gap: 10px; align-items: flex-start">
+        <span style="flex: none; width: 28px; height: 28px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-weight: 700; background: #0F1214; color: #E6E8EA" aria-hidden="true">?</span>
+        <div><div style="font-weight: 600">Vigie ne voit plus ce site depuis 19:40</div><div style="font-size: 13px; color: #C9D1D8">Connexion SSH refusée : clé vigie_2026 non acceptée.</div></div>
+      </div>
+      <div style="display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: 4px 8px; font-size: 13px">
+        <span style="color: #5FD3BE">✓</span><span>Sondes HTTP : le site répond (21:49)</span>
+        <span style="color: #FF8B7D">×</span><span>Logs, ressources et contrôles : arrêtés à 19:38</span>
+        <span style="color: #FF8B7D">×</span><span>Écriture des blocages : impossible</span>
+      </div>
+      <div style="display: flex; gap: 8px">
+        <a href="Parametres.dc.html" style="flex: 1; height: 44px; display: flex; align-items: center; justify-content: center; border: 1px solid #626C76; border-radius: 10px; color: #E6E8EA; text-decoration: none; font-size: 13px">Changer de clé</a>
+        <button type="button" style="flex: 1; height: 44px; border: 0; border-radius: 10px; background: #3FB8A4; color: #0B1F1B; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer">Réessayer</button>
+      </div>
+    </div>
+    <div style="font-size: 12px; color: #9AA3AB">Sur chaque écran du site, les données gardent leur heure (« données de 19:38 ») et ne se présentent jamais comme actuelles.</div>
+  </section>
+
+  <section aria-labelledby="e2" style="display: flex; flex-direction: column; gap: 10px">
+    <h2 id="e2" style="margin: 0; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: #9AA3AB">Écriture échouée, retour arrière fait</h2>
+    <div role="alert" style="background: #3A1A16; border: 1px solid #FF8B7D; border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 10px">
+      <div style="font-weight: 600; color: #FFB3A9">Modification annulée automatiquement</div>
+      <div style="font-size: 13px; color: #FFD9D3">Après écriture, /commande a répondu 500. Le .htaccess précédent a été remis à 21:51:08 : le site est revenu à l'état d'avant. Les 3 modifications sont encore dans la file.</div>
+      <div style="display: flex; gap: 8px">
+        <button type="button" style="flex: 1; height: 44px; background: transparent; border: 1px solid #FF8B7D; border-radius: 10px; color: #FFB3A9; font: inherit; font-size: 13px; cursor: pointer">Voir ce qui a été tenté</button>
+        <a href="Journal.dc.html" style="flex: 1; height: 44px; display: flex; align-items: center; justify-content: center; border: 1px solid #FF8B7D; border-radius: 10px; color: #FFB3A9; text-decoration: none; font-size: 13px">Voir la réponse 500</a>
+      </div>
+    </div>
+  </section>
+
+  <section aria-labelledby="e3" style="display: flex; flex-direction: column; gap: 10px">
+    <h2 id="e3" style="margin: 0; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: #9AA3AB">Première lecture en cours</h2>
+    <div style="background: #171B1F; border: 1px solid #262C32; border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 10px">
+      <div style="font-weight: 600">Lecture des logs de [client-4].fr</div>
+      <div role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="52" aria-label="Lecture des logs" style="height: 6px; background: #2F363D; border-radius: 3px; overflow: hidden"><div style="width: 52%; height: 6px; background: #3FB8A4"></div></div>
+      <div style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #9AA3AB">http 48 213 / 92 140 lignes · php fait · apache en attente</div>
+      <div style="display: flex; flex-direction: column; gap: 8px" aria-hidden="true">
+        <div style="height: 64px; border-radius: 10px; background: #1C2227"></div>
+        <div style="height: 64px; border-radius: 10px; background: #1C2227"></div>
+      </div>
+      <div style="font-size: 13px; color: #B8C0C7">Les écrans se remplissent au fur et à mesure. Rien n'est écrit sur le serveur pendant ce temps.</div>
+    </div>
+  </section>
+
+  <section aria-labelledby="e4" style="display: flex; flex-direction: column; gap: 10px">
+    <h2 id="e4" style="margin: 0; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: #9AA3AB">Rien à traiter</h2>
+    <div style="background: #171B1F; border: 1px solid #262C32; border-radius: 12px; padding: 24px 14px; display: flex; flex-direction: column; align-items: center; gap: 8px; text-align: center">
+      <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#5FD3BE" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M8 12l3 3 5-6"></path></svg>
+      <div style="font-weight: 600">Aucun visiteur à trier</div>
+      <div style="font-size: 13px; color: #9AA3AB">92 140 requêtes lues aujourd'hui, dernière lecture 21:48. Les robots déjà décidés sont dans Tous.</div>
+    </div>
+  </section>
+
+  <section aria-labelledby="e5" style="display: flex; flex-direction: column; gap: 10px">
+    <h2 id="e5" style="margin: 0; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: #9AA3AB">Téléphone hors ligne</h2>
+    <div role="status" style="display: flex; align-items: center; gap: 10px; padding: 10px 14px; background: #33280F; border-radius: 10px; color: #F5BC62; font-size: 13px">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 8.8a15 15 0 0 1 20 0M5 12.5a10 10 0 0 1 14 0M8.5 16a5 5 0 0 1 7 0M12 19.5h.01M3 3l18 18"></path></svg>
+      <span style="flex: 1">Pas de réseau · tu vois les données de 21:48. Les actions sont mises en attente.</span>
+    </div>
+  </section>
+
+  <section aria-labelledby="e6" style="display: flex; flex-direction: column; gap: 10px">
+    <h2 id="e6" style="margin: 0; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: #9AA3AB">Confirmation d'une action à risque</h2>
+    <div role="alertdialog" aria-labelledby="cf" style="background: #1C2227; border: 1px solid #FF8B7D; border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 10px">
+      <div id="cf" style="font-weight: 600">Débloquer GPTBot ?</div>
+      <div style="font-size: 13px; color: #B8C0C7">42 refus aujourd'hui. Il pourra de nouveau collecter les pages pour entraîner un modèle. Passe par la file : rien n'est écrit avant « Appliquer ».</div>
+      <div style="display: flex; gap: 8px">
+        <button type="button" style="flex: 1; height: 48px; background: transparent; border: 1px solid #626C76; border-radius: 10px; color: #E6E8EA; font: inherit; cursor: pointer">Annuler</button>
+        <button type="button" style="flex: 1; height: 48px; border: 1px solid #FF8B7D; border-radius: 10px; background: #7A3329; color: #FFFFFF; font: inherit; font-weight: 600; cursor: pointer">Ajouter à la file</button>
+      </div>
+    </div>
+    <div style="font-size: 12px; color: #9AA3AB">Retirer un site ou tous les blocs demande en plus de taper le nom du site (voir Paramètres).</div>
+  </section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":2200}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

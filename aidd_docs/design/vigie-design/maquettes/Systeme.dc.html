@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Vigie — système visuel</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0F1214}
+:focus-visible{outline:2px solid #5FD3BE;outline-offset:2px}
+</style>
+</helmet>
+<div style="width: 960px; height: 1400px; box-sizing: border-box; background: #0F1214; color: #E6E8EA; font-family: 'IBM Plex Sans', system-ui, sans-serif; font-size: 15px; line-height: 1.45; padding: 48px; display: flex; flex-direction: column; gap: 36px">
+  <div>
+    <h1 style="margin: 0; font-size: 22px; font-weight: 600">Système visuel de Vigie</h1>
+    <div style="font-size: 13px; color: #9AA3AB">Jetons et composants. Thème sombre ; le thème clair reprend les mêmes noms.</div>
+  </div>
+
+  <section aria-labelledby="s-col" style="display: flex; flex-direction: column; gap: 12px">
+    <h2 id="s-col" style="margin: 0; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: #9AA3AB">Couleurs</h2>
+    <div style="display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px">
+      <sc-for list="{{colors}}" as="c" hint-placeholder-count="12">
+        <div style="background: #171B1F; border: 1px solid #262C32; border-radius: 10px; overflow: hidden">
+          <div style="height: 44px; {{c.swatch}}"></div>
+          <div style="padding: 8px"><div style="font-family: 'IBM Plex Mono', monospace; font-size: 12px">{{c.name}}</div><div style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #9AA3AB">{{c.hex}}</div><div style="font-size: 12px; color: #B8C0C7">{{c.use}}</div></div>
+        </div>
+      </sc-for>
+    </div>
+    <div style="font-size: 13px; color: #B8C0C7">Rouge = gravité ou danger, rien d'autre. Ambre = à vérifier. Bleu = information ou choix assumé. Vert-bleu = OK et action principale. Les catégories (IA, SEO, moteur…) sont neutres, l'IA en violet.</div>
+  </section>
+
+  <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 36px">
+    <section aria-labelledby="s-type" style="display: flex; flex-direction: column; gap: 10px">
+      <h2 id="s-type" style="margin: 0; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: #9AA3AB">Typographie · 5 tailles</h2>
+      <div style="display: flex; align-items: baseline; gap: 16px"><span style="width: 60px; font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #9AA3AB">22 / 600</span><span style="font-size: 22px; font-weight: 600">Titre d'écran</span></div>
+      <div style="display: flex; align-items: baseline; gap: 16px"><span style="width: 60px; font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #9AA3AB">18 mono</span><span style="font-family: 'IBM Plex Mono', monospace; font-size: 18px">1 274 Mo</span></div>
+      <div style="display: flex; align-items: baseline; gap: 16px"><span style="width: 60px; font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #9AA3AB">15</span><span style="font-size: 15px">Texte courant, boutons</span></div>
+      <div style="display: flex; align-items: baseline; gap: 16px"><span style="width: 60px; font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #9AA3AB">13</span><span style="font-size: 13px; color: #B8C0C7">Faits secondaires, aides</span></div>
+      <div style="display: flex; align-items: baseline; gap: 16px"><span style="width: 60px; font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #9AA3AB">12</span><span style="font-size: 12px; color: #9AA3AB">Étiquettes, intertitres en capitales</span></div>
+      <div style="font-size: 13px; color: #B8C0C7">IBM Plex Sans pour le texte, IBM Plex Mono pour tout ce qui vient du serveur : IP, chemins, heures, volumes.</div>
+    </section>
+
+    <section aria-labelledby="s-rules" style="display: flex; flex-direction: column; gap: 10px">
+      <h2 id="s-rules" style="margin: 0; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: #9AA3AB">Règles</h2>
+      <ul style="margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: #B8C0C7">
+        <li>Toute cible tactile fait au moins 44 px de haut.</li>
+        <li>Contours de contrôle en #626C76 (3,2:1 sur la carte, 3,5:1 sur le fond) ; interrupteur éteint en #646D75.</li>
+        <li>Focus clavier : anneau vert-bleu de 2 px, décalé de 2 px.</li>
+        <li>Une seule action « Relire » dans l'en-tête, à la même place sur tous les écrans d'un site.</li>
+        <li>Une donnée ancienne porte toujours son heure.</li>
+        <li>Un état ne repose jamais sur la couleur seule : symbole (× ! i ✓), libellé ou contour en plus.</li>
+        <li>Le bouton rouge plein n'existe qu'au moment de confirmer un blocage ou un retrait.</li>
+      </ul>
+    </section>
+  </div>
+
+  <section aria-labelledby="s-comp" style="display: flex; flex-direction: column; gap: 14px">
+    <h2 id="s-comp" style="margin: 0; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: #9AA3AB">Composants</h2>
+    <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px">
+      <div style="display: flex; flex-direction: column; gap: 10px">
+        <div style="font-size: 12px; color: #9AA3AB">Boutons</div>
+        <button type="button" style="height: 48px; border: 0; border-radius: 10px; background: #3FB8A4; color: #0B1F1B; font: inherit; font-weight: 600">Principal</button>
+        <button type="button" style="height: 44px; border: 1px solid #626C76; border-radius: 10px; background: transparent; color: #E6E8EA; font: inherit">Secondaire</button>
+        <button type="button" style="height: 48px; border: 1px solid #FF8B7D; border-radius: 10px; background: #7A3329; color: #FFFFFF; font: inherit; font-weight: 600">Confirmer un blocage</button>
+        <button type="button" style="height: 44px; border: 1px solid #262C32; border-radius: 10px; background: #22282D; color: #9AA3AB; font: inherit" aria-disabled="true">Indisponible</button>
+        <button type="button" style="height: 44px; border: 1px solid #626C76; border-radius: 10px; background: transparent; color: #E6E8EA; font: inherit; outline: 2px solid #5FD3BE; outline-offset: 2px">Avec le focus</button>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 10px">
+        <div style="font-size: 12px; color: #9AA3AB">États</div>
+        <div style="display: flex; gap: 8px; flex-wrap: wrap">
+          <span style="width: 28px; height: 28px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-weight: 700; background: #3A1A16; color: #FF8B7D">×</span>
+          <span style="width: 28px; height: 28px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-weight: 700; background: #33280F; color: #F5BC62">!</span>
+          <span style="width: 28px; height: 28px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-weight: 700; background: #14263A; color: #8CC8F5">i</span>
+          <span style="width: 28px; height: 28px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-weight: 700; background: #12302B; color: #5FD3BE">✓</span>
+          <span style="width: 28px; height: 28px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-weight: 700; background: #2A3138; color: #E6E8EA">?</span>
+        </div>
+        <div style="font-size: 12px; color: #9AA3AB">non conforme · à vérifier · choix · OK · aveugle</div>
+        <div style="font-size: 12px; color: #9AA3AB; margin-top: 6px">Étiquettes</div>
+        <div style="display: flex; gap: 6px; flex-wrap: wrap">
+          <span style="padding: 2px 9px; border-radius: 999px; font-size: 12px; font-weight: 500; background: #22282D; color: #C9D1D8">Robot SEO</span>
+          <span style="padding: 2px 9px; border-radius: 999px; font-size: 12px; font-weight: 500; background: #2A1F3A; color: #C9A8F5">Robot IA</span>
+          <span style="padding: 1px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; background: #E6E8EA; color: #0F1214">nouveau</span>
+          <span style="padding: 2px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; background: #3A1A16; color: #FF8B7D">Fatal</span>
+        </div>
+        <div style="font-size: 12px; color: #9AA3AB; margin-top: 6px">Interrupteurs</div>
+        <div style="display: flex; gap: 12px">
+          <span style="width: 52px; height: 32px; padding: 3px; box-sizing: border-box; border-radius: 999px; display: flex; justify-content: flex-end; background: #3FB8A4"><span style="width: 26px; height: 26px; border-radius: 50%; background: #F4F6F7"></span></span>
+          <span style="width: 52px; height: 32px; padding: 3px; box-sizing: border-box; border-radius: 999px; display: flex; justify-content: flex-start; background: #646D75"><span style="width: 26px; height: 26px; border-radius: 50%; background: #F4F6F7"></span></span>
+        </div>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 10px">
+        <div style="font-size: 12px; color: #9AA3AB">File d'écriture</div>
+        <div style="background: #1C2227; border: 1px solid #626C76; border-radius: 12px; padding: 12px; display: flex; gap: 8px; align-items: center">
+          <span style="flex: 1; font-size: 13px">2 modifications en attente</span>
+          <span style="height: 44px; padding: 0 16px; display: flex; align-items: center; border-radius: 10px; background: #3FB8A4; color: #0B1F1B; font-weight: 600">Vérifier</span>
+        </div>
+        <div style="background: #12302B; border: 1px solid #3FB8A4; border-radius: 12px; padding: 10px 12px; display: flex; gap: 8px; align-items: center">
+          <span style="flex: 1; font-size: 13px; color: #5FD3BE">Appliqué · sauvegarde créée</span>
+          <span style="height: 44px; padding: 0 10px; display: flex; align-items: center; border: 1px solid #3FB8A4; border-radius: 10px; color: #5FD3BE; font-size: 13px">Annuler · 30 s</span>
+        </div>
+        <div style="font-size: 12px; color: #9AA3AB; margin-top: 6px">Navigation</div>
+        <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); background: #171B1F; border: 1px solid #262C32; border-radius: 10px; padding: 3px">
+          <span style="height: 44px; display: flex; align-items: center; justify-content: center; border-radius: 8px; background: #2A3138; font-weight: 600">Actif</span>
+          <span style="height: 44px; display: flex; align-items: center; justify-content: center; color: #B8C0C7">Autre</span>
+          <span style="height: 44px; display: flex; align-items: center; justify-content: center; color: #B8C0C7">Autre</span>
+        </div>
+      </div>
+    </div>
+  </section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":960,"height":1400}}'>
+class Component extends DCLogic {
+  renderVals() {
+    var C = [
+      ['fond', '#0F1214', 'fond des écrans'], ['carte', '#171B1F', 'cartes, listes'], ['carte-2', '#1C2227', 'file, sélection'], ['bordure', '#262C32', 'séparation douce'],
+      ['contrôle', '#626C76', 'contour des boutons'], ['texte', '#E6E8EA', '15,3:1'], ['texte-2', '#B8C0C7', '9,4:1'], ['texte-3', '#9AA3AB', '6,8:1 · minimum'],
+      ['principal', '#3FB8A4', 'action, OK'], ['danger', '#FF8B7D', 'gravité, blocage'], ['attention', '#F5BC62', 'à vérifier'], ['info', '#8CC8F5', 'choix, information']
+    ];
+    return { colors: C.map(function (c) { return { name: c[0], hex: c[1], use: c[2], swatch: 'background: ' + c[1] + (c[1] === '#0F1214' ? '; box-shadow: inset 0 0 0 1px #262C32' : '') }; }) };
+  }
+}
+</script>
+</body>
+</html>

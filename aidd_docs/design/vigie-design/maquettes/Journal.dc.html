@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Vigie — trafic, journal</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0F1214}
+a{color:#7FC4F5}a:hover{color:#B5DDFA}
+:focus-visible{outline:2px solid #5FD3BE;outline-offset:2px}
+</style>
+</helmet>
+<div style="position: relative; width: 390px; min-height: 844px; box-sizing: border-box; background: #0F1214; color: #E6E8EA; font-family: 'IBM Plex Sans', system-ui, sans-serif; font-size: 15px; line-height: 1.45">
+
+  <header style="position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 4px; padding: 8px; background: #13171A; border-bottom: 1px solid #262C32">
+    <a href="Main.dc.html" aria-label="Retour à mes sites" style="width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; color: #B8C0C7"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"></path></svg></a>
+    <div style="flex: 1; min-width: 0">
+      <div style="font-family: 'IBM Plex Mono', monospace; font-size: 15px">[client-1].fr</div>
+      <div style="font-size: 12px; color: #9AA3AB">PrestaShop 8 · lu il y a 2 min</div>
+    </div>
+    <button type="button" aria-label="Relire maintenant" style="width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; background: transparent; border: 0; color: #5FD3BE; cursor: pointer"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.6-6.4"></path><path d="M21 3v6h-6"></path></svg></button>
+    <a href="Parametres.dc.html" aria-label="Paramètres du site" style="width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; color: #B8C0C7"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12"></path><circle cx="16" cy="6" r="2"></circle><circle cx="10" cy="12" r="2"></circle><circle cx="18" cy="18" r="2"></circle></svg></a>
+  </header>
+
+  <main style="padding: 16px 16px 24px; display: flex; flex-direction: column; gap: 14px">
+    <h1 style="margin: 0; font-size: 22px; font-weight: 600">Trafic</h1>
+    <nav aria-label="Trafic" style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); background: #171B1F; border: 1px solid #262C32; border-radius: 10px; padding: 3px">
+      <a href="Site.dc.html" style="height: 44px; display: flex; align-items: center; justify-content: center; border-radius: 8px; color: #B8C0C7; text-decoration: none">Visiteurs</a>
+      <a href="Journal.dc.html" aria-current="page" style="height: 44px; display: flex; align-items: center; justify-content: center; border-radius: 8px; background: #2A3138; color: #E6E8EA; font-weight: 600; text-decoration: none">Journal</a>
+      <a href="Blocages.dc.html" style="height: 44px; display: flex; align-items: center; justify-content: center; border-radius: 8px; color: #B8C0C7; text-decoration: none">Blocages</a>
+    </nav>
+
+    <section aria-label="Filtres" style="background: #171B1F; border: 1px solid #262C32; border-radius: 12px; padding: 12px; display: flex; flex-direction: column; gap: 10px">
+      <div style="font-size: 12px; color: #9AA3AB">Arrivé depuis l'alerte « Erreurs PHP fatales sur /commande »</div>
+      <div style="display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 1fr); gap: 6px">
+        <div style="display: flex; flex-direction: column; gap: 4px"><label for="d" style="font-size: 12px; color: #9AA3AB">Jour</label><input id="d" type="date" value="2026-10-14" style="height: 44px; padding: 0 6px; background: #0F1214; border: 1px solid #626C76; border-radius: 10px; color: #E6E8EA; font: inherit; font-size: 13px; color-scheme: dark; min-width: 0"></div>
+        <div style="display: flex; flex-direction: column; gap: 4px"><label for="from" style="font-size: 12px; color: #9AA3AB">De</label><input id="from" type="time" value="21:00" style="height: 44px; padding: 0 6px; background: #0F1214; border: 1px solid #626C76; border-radius: 10px; color: #E6E8EA; font: inherit; font-size: 13px; color-scheme: dark; min-width: 0"></div>
+        <div style="display: flex; flex-direction: column; gap: 4px"><label for="to" style="font-size: 12px; color: #9AA3AB">À</label><input id="to" type="time" value="21:45" style="height: 44px; padding: 0 6px; background: #0F1214; border: 1px solid #626C76; border-radius: 10px; color: #E6E8EA; font: inherit; font-size: 13px; color-scheme: dark; min-width: 0"></div>
+      </div>
+      <div role="group" aria-label="Sources" style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px">
+        <sc-for list="{{sources}}" as="s" hint-placeholder-count="4">
+          <button type="button" aria-pressed="{{s.pressed}}" onClick="{{s.toggle}}" style="height: 44px; border-radius: 10px; font-family: 'IBM Plex Mono', monospace; font-size: 13px; cursor: pointer; {{s.style}}">{{s.name}}</button>
+        </sc-for>
+      </div>
+      <div style="display: flex; flex-wrap: wrap; gap: 6px">
+        <sc-for list="{{chips}}" as="c" hint-placeholder-count="2">
+          <button type="button" onClick="{{c.remove}}" aria-label="Retirer le filtre {{c.label}}" style="display: inline-flex; align-items: center; gap: 6px; height: 36px; padding: 0 10px; border-radius: 999px; background: #2A3138; border: 1px solid #626C76; color: #E6E8EA; font-family: 'IBM Plex Mono', monospace; font-size: 13px; cursor: pointer">{{c.label}}<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"></path></svg></button>
+        </sc-for>
+        <label for="q" style="position: absolute; left: -9999px">Ajouter un filtre</label>
+        <input id="q" type="search" placeholder="IP, URL, code…" style="flex: 1; min-width: 120px; height: 36px; padding: 0 10px; background: #0F1214; border: 1px solid #626C76; border-radius: 999px; color: #E6E8EA; font: inherit; font-size: 13px">
+      </div>
+    </section>
+
+    <div style="font-size: 13px; color: #9AA3AB">{{summary}}</div>
+
+    <sc-for list="{{groups}}" as="g" hint-placeholder-count="3">
+      <article style="background: #171B1F; border: 1px solid #262C32; border-radius: 12px; overflow: hidden">
+        <button type="button" onClick="{{g.toggle}}" aria-expanded="{{g.aria}}" style="width: 100%; display: flex; flex-direction: column; gap: 4px; text-align: left; padding: 12px 14px; background: transparent; border: 0; color: #E6E8EA; font: inherit; cursor: pointer">
+          <span style="display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%">
+            <span style="font-family: 'IBM Plex Mono', monospace; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">{{g.who}}</span>
+            <span style="{{g.chip}}">{{g.tag}}</span>
+          </span>
+          <span style="font-size: 13px; color: #B8C0C7">{{g.ua}}</span>
+          <span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #9AA3AB">{{g.span}} · {{g.count}}</span>
+        </button>
+        <sc-if value="{{g.open}}" hint-placeholder-val="{{false}}">
+          <div style="border-top: 1px solid #22282D">
+            <sc-for list="{{g.rows}}" as="r" hint-placeholder-count="4">
+              <div style="border-top: {{r.sep}}">
+                <button type="button" onClick="{{r.toggle}}" aria-expanded="{{r.aria}}" style="width: 100%; display: grid; grid-template-columns: 62px 44px minmax(0, 1fr); align-items: center; gap: 6px; min-height: 44px; padding: 6px 14px; text-align: left; background: transparent; border: 0; color: #E6E8EA; font: inherit; cursor: pointer">
+                  <span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #9AA3AB">{{r.t}}</span>
+                  <span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; font-weight: 500; {{r.codeStyle}}">{{r.code}}</span>
+                  <span style="font-family: 'IBM Plex Mono', monospace; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; {{r.pathStyle}}">{{r.path}}</span>
+                </button>
+                <sc-if value="{{r.open}}" hint-placeholder-val="{{false}}">
+                  <div style="padding: 0 14px 12px; display: flex; flex-direction: column; gap: 8px">
+                    <div style="display: grid; grid-template-columns: 84px minmax(0, 1fr); gap: 4px 8px; font-size: 13px">
+                      <sc-for list="{{r.fields}}" as="f" hint-placeholder-count="3">
+                        <span style="color: #9AA3AB">{{f.k}}</span><span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; word-break: break-all">{{f.v}}</span>
+                      </sc-for>
+                    </div>
+                    <button type="button" style="height: 44px; background: transparent; border: 1px solid #626C76; border-radius: 10px; color: #E6E8EA; font: inherit; font-size: 13px; cursor: pointer">Copier la ligne brute</button>
+                  </div>
+                </sc-if>
+              </div>
+            </sc-for>
+            <div style="padding: 10px 14px 14px; border-top: 1px solid #22282D">
+              <button type="button" onClick="{{g.focus}}" style="width: 100%; height: 44px; border: 1px solid #626C76; border-radius: 10px; background: transparent; color: #E6E8EA; font: inherit; font-size: 15px; cursor: pointer">{{g.focusLabel}}</button>
+            </div>
+          </div>
+        </sc-if>
+      </article>
+    </sc-for>
+
+    <button type="button" style="height: 48px; background: transparent; border: 1px dashed #626C76; border-radius: 12px; color: #E6E8EA; font: inherit; cursor: pointer">{{moreLabel}}</button>
+  </main>
+
+  <nav aria-label="Navigation du site" style="position: sticky; bottom: 0; z-index: 2; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); background: #13171A; border-top: 1px solid #2F363D; padding: 4px 4px 16px">
+    <a href="ATraiter.dc.html" style="position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-height: 56px; color: #B8C0C7; text-decoration: none; font-size: 12px"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 11l3 3 8-8"></path><path d="M20 12v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h9"></path></svg>À traiter<span style="position: absolute; top: 2px; left: 52%; min-width: 20px; height: 20px; padding: 0 6px; box-sizing: border-box; border-radius: 10px; background: #FF8B7D; color: #2A0E0A; font-size: 12px; font-weight: 600; line-height: 20px; text-align: center">5</span></a>
+    <a href="Site.dc.html" aria-current="page" style="position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-height: 56px; color: #5FD3BE; text-decoration: none; font-size: 12px; font-weight: 600"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h4l3-8 4 16 3-8h4"></path></svg>Trafic<span style="position: absolute; top: 2px; left: 52%; min-width: 20px; height: 20px; padding: 0 6px; box-sizing: border-box; border-radius: 10px; background: #F5BC62; color: #2A1E05; font-size: 12px; font-weight: 600; line-height: 20px; text-align: center">3</span></a>
+    <a href="Erreurs.dc.html" style="position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-height: 56px; color: #B8C0C7; text-decoration: none; font-size: 12px"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l9.5 17h-19z"></path><path d="M12 10v4M12 17v.5"></path></svg>Erreurs<span style="position: absolute; top: 2px; left: 52%; min-width: 20px; height: 20px; padding: 0 6px; box-sizing: border-box; border-radius: 10px; background: #FF8B7D; color: #2A0E0A; font-size: 12px; font-weight: 600; line-height: 20px; text-align: center">2</span></a>
+    <a href="Dispo.dc.html" style="position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-height: 56px; color: #B8C0C7; text-decoration: none; font-size: 12px"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.8 5.6a5.5 5.5 0 0 0-7.8 0L12 6.6l-1-1a5.5 5.5 0 0 0-7.8 7.8L12 22l8.8-8.6a5.5 5.5 0 0 0 0-7.8z"></path></svg>Santé<span style="position: absolute; top: 2px; left: 52%; min-width: 20px; height: 20px; padding: 0 6px; box-sizing: border-box; border-radius: 10px; background: #FF8B7D; color: #2A0E0A; font-size: 12px; font-weight: 600; line-height: 20px; text-align: center">3</span></a>
+  </nav>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":1900}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { src: { http: true, php: true, apache: false, sites: false }, chips: ['/commande'], open: { g1: true }, row: { 'g1-1': true } };
+  }
+  renderVals() {
+    var self = this;
+    var st = this.state;
+    var tags = { human: ['Client', '#22282D', '#E6E8EA'], me: ['Toi', '#12302B', '#5FD3BE'] };
+    var chip = function (k) { var c = tags[k]; return 'flex: none; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 500; background: ' + c[1] + '; color: ' + c[2]; };
+    var codeStyle = function (c) { return c === 'FATAL' ? 'color: #FF8B7D' : c >= 500 ? 'color: #FF8B7D' : c >= 400 ? 'color: #F5BC62' : c >= 300 ? 'color: #8CC8F5' : 'color: #5FD3BE'; };
+    var G = [
+      { id: 'g1', ip: '198.51.100.88', who: '198.51.100.88', tag: 'human', ua: 'Firefox · Android', span: '21:01 → 21:03', rows: [
+        { src: 'http', t: '21:01:40', code: 200, path: 'POST /commande?step=2', fields: [['Taille', '52 Ko'], ['Durée', '0,40 s'], ['Provenance', '/panier']] },
+        { src: 'php', t: '21:02:17', code: 'FATAL', path: 'getId() on null · OrderController.php:412', fields: [['Fichier', 'controllers/front/OrderController.php:412'], ['Message', 'Uncaught Error: Call to a member function getId() on null'], ['Pile', 'selectDelivery() ← initContent()']] },
+        { src: 'http', t: '21:02:17', code: 500, path: 'POST /commande?step=3', fields: [['Taille', '1,2 Ko'], ['Durée', '2,90 s'], ['Provenance', '/commande?step=2']] },
+        { src: 'http', t: '21:03:05', code: 500, path: 'POST /commande?step=3', fields: [['Taille', '1,2 Ko'], ['Durée', '2,71 s'], ['Provenance', '/commande?step=3']] }
+      ] },
+      { id: 'g2', ip: '198.51.100.7', who: '198.51.100.7', tag: 'human', ua: 'Safari · iPhone', span: '21:05 → 21:06', rows: [
+        { src: 'http', t: '21:05:31', code: 200, path: 'POST /commande?step=2', fields: [['Taille', '51 Ko'], ['Durée', '0,38 s'], ['Provenance', '/panier']] },
+        { src: 'php', t: '21:05:40', code: 'FATAL', path: 'getId() on null · OrderController.php:412', fields: [['Fichier', 'controllers/front/OrderController.php:412']] },
+        { src: 'http', t: '21:05:40', code: 500, path: 'POST /commande?step=3', fields: [['Taille', '1,2 Ko'], ['Durée', '2,88 s']] }
+      ] },
+      { id: 'g3', ip: '2001:db8:33d0::/64', who: '2001:db8:33d0::/64', tag: 'me', ua: 'Chrome 152 · Windows · back-office', span: '21:20', rows: [
+        { src: 'http', t: '21:20:02', code: 200, path: '/admin9615/index.php?controller=AdminOrders', fields: [['Taille', '61 Ko'], ['Durée', '0,62 s']] },
+        { src: 'http', t: '', code: '', path: '+ 14 fichiers js/css en 1 s · 280 Ko', fields: [] }
+      ] }
+    ];
+    var ipChip = st.chips.filter(function (c) { return c.indexOf('ip ') === 0; })[0];
+    var groups = G.filter(function (g) { return !ipChip || ipChip === 'ip ' + g.ip; }).map(function (g) {
+      var open = !!st.open[g.id];
+      var rows = g.rows.filter(function (r) { return st.src[r.src]; });
+      var nHttp = rows.filter(function (r) { return r.src === 'http' && r.code; }).length;
+      var nPhp = rows.filter(function (r) { return r.src === 'php'; }).length;
+      var focused = ipChip === 'ip ' + g.ip;
+      return {
+        who: g.who, tag: tags[g.tag][0], chip: chip(g.tag), ua: g.ua, span: g.span,
+        count: nHttp + ' requêtes' + (nPhp ? ' · ' + nPhp + ' erreur PHP' : ''),
+        open: open, aria: open ? 'true' : 'false',
+        toggle: function () { var o = Object.assign({}, self.state.open); o[g.id] = !o[g.id]; self.setState({ open: o }); },
+        focusLabel: focused ? 'Voir tous les visiteurs' : 'Ne voir que ce visiteur',
+        focus: function () {
+          var c = self.state.chips.filter(function (x) { return x.indexOf('ip ') !== 0; });
+          if (!focused) c.push('ip ' + g.ip);
+          self.setState({ chips: c });
+        },
+        rows: rows.map(function (r, i) {
+          var key = g.id + '-' + i;
+          var ropen = !!st.row[key] && !!r.code;
+          return {
+            t: r.t, code: r.code === 'FATAL' ? 'php' : r.code, path: r.path, fields: r.fields.map(function (f) { return { k: f[0], v: f[1] }; }),
+            codeStyle: codeStyle(r.code), pathStyle: !r.code ? 'color: #9AA3AB; font-style: italic' : r.code === 'FATAL' ? 'color: #FFB3A9' : 'color: #E6E8EA',
+            sep: i === 0 ? '0' : '1px solid #1E2328', open: ropen, aria: ropen ? 'true' : 'false',
+            toggle: function () { if (!r.code) return; var o = Object.assign({}, self.state.row); o[key] = !o[key]; self.setState({ row: o }); }
+          };
+        })
+      };
+    });
+    var sources = ['http', 'php', 'apache', 'sites'].map(function (s) {
+      var on = st.src[s];
+      return { name: s, pressed: on ? 'true' : 'false',
+        style: on ? 'background: #E6E8EA; color: #0F1214; border: 1px solid #E6E8EA; font-weight: 600' : 'background: transparent; color: #E6E8EA; border: 1px solid #626C76',
+        toggle: function () { var n = Object.assign({}, self.state.src); n[s] = !n[s]; self.setState({ src: n }); } };
+    });
+    var chips = st.chips.map(function (c) { return { label: c, remove: function () { self.setState({ chips: self.state.chips.filter(function (x) { return x !== c; }) }); } }; });
+    return {
+      sources: sources, chips: chips, groups: groups,
+      summary: ipChip ? '1 visiteur affiché' : '9 visiteurs · 41 requêtes · 12 erreurs PHP, dans l’ordre du temps',
+      moreLabel: ipChip ? 'Élargir à toute la journée' : 'Voir les 6 autres visiteurs'
+    };
+  }
+}
+</script>
+</body>
+</html>
