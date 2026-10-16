@@ -1,14 +1,22 @@
 name: console
 
-# Console seulement (vigie/app) : le veilleur a son propre workflow.
+# Console (vigie/app), et sources du veilleur : tests/contract.rs appelle le
+# client de la console contre le routeur du veilleur, un changement de l'API
+# doit le rejouer. Le reste du veilleur a son propre workflow.
 on:
   push:
     paths:
       - "vigie/app/**"
+      - "vigie/src/**"
+      - "vigie/Cargo.*"
+      - "vigie/tests/support/**"
       - ".github/workflows/console.yml"
   pull_request:
     paths:
       - "vigie/app/**"
+      - "vigie/src/**"
+      - "vigie/Cargo.*"
+      - "vigie/tests/support/**"
       - ".github/workflows/console.yml"
   workflow_dispatch:
 

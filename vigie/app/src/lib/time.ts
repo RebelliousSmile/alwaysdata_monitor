@@ -61,3 +61,17 @@ export function readAgo(read: number, now: number): string {
   }
   return `lu le ${shortDay.format(toDate(read))} à ${formatClock(read)}`
 }
+
+/** « à 21:50 » le jour même à Paris, sinon « le 14 oct. à 21:50 ». */
+export function formatWhen(seconds: number, now: number): string {
+  if (parisDate(seconds) === parisDate(now)) return `à ${formatClock(seconds)}`
+  return `le ${shortDay.format(toDate(seconds))} à ${formatClock(seconds)}`
+}
+
+/** Durée lisible : « 15 min », « 2 h », « 1 j ». */
+export function formatSpan(seconds: number): string {
+  if (seconds % 86400 === 0) return `${seconds / 86400} j`
+  if (seconds % 3600 === 0) return `${seconds / 3600} h`
+  if (seconds % 60 === 0) return `${seconds / 60} min`
+  return `${seconds} s`
+}
