@@ -110,3 +110,15 @@ quatre tours de sécurité ; contrat : [`protocole-commandes.md`](./protocole-co
 | Ancre externe de l'audit : la tête de chaque chaîne modifiée part par e-mail depuis `tick` | Une fin de chaîne coupée ne se voit que contre une tête connue d'ailleurs ; `serve` n'envoie jamais d'e-mail |
 | `rotate-key` n'est pas un remède à une compromission du site | Qui tient la clé de l'agent peut répondre avec sa propre clé ; le remède reste la réinstallation et `site rotate-key` hors canal |
 
+## Agent PHP et commandes (issue #6)
+
+Plan : `aidd_docs/tasks/2026_10/2026_10_16_agent-commandes/plan.md`.
+
+| Décision du 2026-10-16 | Raison |
+| --- | --- |
+| ext-sodium native et base64, pas `sodium_compat` | Décision transverse du 2026-10-16 |
+| Clé publique de commandes épinglée dans `config.json` en 0600 (dossier 0700), pas compilée dans le fichier PHP | Le fichier de l'agent est le même pour tous les sites ; qui peut écrire `config.json` sous ce compte peut aussi remplacer l'agent |
+| Le résultat d'une commande est persisté localement (`state.json`) jusqu'à l'accusé, contre « rien écrit en local » de l'issue | Contrat de #10 : un passage court perdrait sinon le résultat et bloquerait la file |
+| Le test de bout en bout parle en http à la boucle locale, pas en HTTPS ; il est hors de `cargo test` ordinaire et lancé en CI avec le PHP 8.1 épinglé | Le veilleur est en HTTP derrière Caddy ; pas de PHP dans le CI Rust ; la version visée est 8.1 |
+| La bascule de clé n'a lieu que sur une réponse signée, jamais sur un 204 | Un 204 forgé ou mal routé enfermerait l'agent dehors |
+

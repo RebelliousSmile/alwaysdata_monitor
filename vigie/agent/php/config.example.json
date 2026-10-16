@@ -12,5 +12,9 @@
   ],
   "must_contain": [
     { "file": ".htaccess", "text": "# BEGIN site-a installer lock" }
-  ]
+  ],
+  "commands": {
+    "endpoint": "https://<sous-domaine-du-veilleur>/r/v1/commands",
+    "pubkey": "<sortie de vigie commands pubkey>"
+  }
 }

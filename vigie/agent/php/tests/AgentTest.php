@@ -31,6 +31,18 @@ function findings_of(string $root, array $override = []): array
     return $byKey;
 }
 
+function refused_load(string $path, string $expected): void
+{
+    try {
+        load_config($path);
+    } catch (UsageError $e) {
+        check(str_contains($e->getMessage(), $expected), "message inattendu : {$e->getMessage()}");
+
+        return;
+    }
+    throw new Failure("configuration acceptée : {$path}");
+}
+
 function refused_config(array $override, string $expected): void
 {
     try {
@@ -89,6 +101,92 @@ function mtimes(string $dir): array
 }
 
 const CRITICAL = ['wp-config.php', '.htaccess', '.user.ini', 'wordfence-waf.php', 'index.php'];
+
+// --- Commandes -------------------------------------------------------------
+
+/** Vecteurs partagés avec les tests Rust (vigie/tests/commands_vectors.rs). */
+function vectors(): array
+{
+    return json_decode((string) file_get_contents(__DIR__ . '/../../../tests/fixtures/commands-vectors.json'), true, 32, \JSON_THROW_ON_ERROR);
+}
+
+/** Agent initialisé avec un canal de commandes vers ce port ; config en 0600. */
+function commands_agent(int $port, array $override = []): array
+{
+    $config = write_config(fixture(), array_replace([
+        'endpoint' => "http://127.0.0.1:{$port}/r/v1/report",
+        'commands' => ['endpoint' => "http://127.0.0.1:{$port}/r/v1/commands", 'pubkey' => vectors()['commands_pubkey']],
+    ], $override));
+    chmod($config, 0600);
+    $init = agent('--init', '--config', $config);
+    same(0, $init['code'], "--init : {$init['stderr']}");
+
+    return [$config, \dirname($config)];
+}
+
+/**
+ * Routeur `php -S` qui joue le veilleur : 204 aux rapports ; aux retraits,
+ * l'accusé du résultat reçu, puis la commande du scénario tant qu'aucun
+ * résultat n'est venu. Signé par la clé de commandes des vecteurs, ou par la
+ * clé du scénario (intrusion).
+ */
+function veilleur_router(string $dir, array $scenario): string
+{
+    file_put_contents("{$dir}/scenario.json", json_encode($scenario + [
+        'command' => null, 'accepted' => true, 'seed' => vectors()['commands_seed'], 'nonce' => null, 'prefix' => "vigie-commands-v1\n",
+    ]));
+    $router = $dir . '/router.php';
+    file_put_contents($router, <<<'PHP'
+        <?php
+        $scenario = json_decode(file_get_contents(__DIR__ . '/scenario.json'), true);
+        if ($_SERVER['REQUEST_URI'] === '/r/v1/report') {
+            http_response_code(204);
+            return true;
+        }
+        $body = file_get_contents('php://input');
+        file_put_contents(__DIR__ . '/pulls.jsonl', $body . "\n", FILE_APPEND);
+        $request = json_decode($body, true);
+        $result = $request['result'] ?? null;
+        $served = is_file(__DIR__ . '/served');
+        $command = null;
+        if ($result === null && $scenario['command'] !== null) {
+            $command = $scenario['command'] + ['site' => 'site-a', 'v' => 1, 'runtime' => 'php', 'params' => new stdClass(),
+                'issued_at' => time() - 10, 'expires_at' => time() + 3600];
+            touch(__DIR__ . '/served');
+        }
+        $now = time();
+        $response = json_encode([
+            'v' => 1, 'site' => 'site-a', 'nonce' => $scenario['nonce'] ?? $request['nonce'], 'server_time' => $now,
+            'acked' => $result['command_id'] ?? null, 'accepted' => $result === null ? null : $scenario['accepted'],
+            'command' => $command,
+        ]);
+        $pair = sodium_crypto_sign_seed_keypair(base64_decode($scenario['seed']));
+        $signature = sodium_crypto_sign_detached($scenario['prefix'] . $now . "\n" . $response, sodium_crypto_sign_secretkey($pair));
+        header('Content-Type: application/json');
+        header('X-Vigie-Timestamp: ' . $now);
+        header('X-Vigie-Signature: ' . base64_encode($signature));
+        echo $response;
+        PHP);
+
+    return $router;
+}
+
+function state_of(string $dir): array
+{
+    return json_decode((string) file_get_contents("{$dir}/state.json"), true);
+}
+
+/** Lignes des retraits reçus par le routeur. */
+function pulls_of(string $server): array
+{
+    $lines = is_file("{$server}/pulls.jsonl") ? file("{$server}/pulls.jsonl", \FILE_IGNORE_NEW_LINES) : [];
+
+    return array_map(static fn (string $l): array => json_decode($l, true), $lines);
+}
+
+const PING = ['id' => '01a1e2f3-0000-7000-8000-00000000000a', 'seq' => 1, 'name' => 'ping'];
+const ROTATE = ['id' => '01a1e2f3-0000-7000-8000-00000000000b', 'seq' => 2, 'name' => 'rotate-key'];
+
 
 return [
     'arborescence saine : aucun constat, faits complets' => function (): void {
@@ -312,5 +410,170 @@ return [
         same(interop_json(), $tracked, 'fixture périmée : relancer make-interop-fixture.php');
         $fixture = json_decode($tracked, true);
         check(sodium_crypto_sign_verify_detached(base64_decode($fixture['signature']), $fixture['body'], base64_decode($fixture['public_key'])), 'signature');
+    },
+
+    'commandes : chaque vecteur de réponse reçoit son verdict' => function (): void {
+        $v = vectors();
+        $key = base64_decode($v['commands_pubkey'], true);
+        foreach ($v['responses'] as $vector) {
+            [$verdict] = \Vigie\Agent\verify_response(200, [
+                'x-vigie-timestamp' => $vector['timestamp'], 'x-vigie-signature' => $vector['signature'],
+            ], $vector['body'], $key, $v['site'], $v['request_nonce'], $v['now']);
+            same($vector['verdict'], $verdict, $vector['name']);
+        }
+        $valid = $v['responses'][0];
+        $headers = ['x-vigie-timestamp' => $valid['timestamp'], 'x-vigie-signature' => $valid['signature']];
+        same('empty', \Vigie\Agent\verify_response(200, $headers, '', $key, 'site-a', $v['request_nonce'], $v['now'])[0], 'corps vide (php -S en erreur fatale)');
+        same('status', \Vigie\Agent\verify_response(500, $headers, $valid['body'], $key, 'site-a', $v['request_nonce'], $v['now'])[0], 'statut');
+        same('bad-signature', \Vigie\Agent\verify_response(200, $headers, $valid['body'] . ' ', $key, 'site-a', $v['request_nonce'], $v['now'])[0], 'corps altéré');
+    },
+
+    'commandes : retrait et preuve de rotation identiques aux vecteurs' => function (): void {
+        $v = vectors();
+        $agent = sodium_crypto_sign_secretkey(sodium_crypto_sign_seed_keypair(base64_decode($v['agent_seed'])));
+        foreach ($v['pulls'] as $pull) {
+            $prefixed = base64_encode(sodium_crypto_sign_detached(\Vigie\Agent\DOMAIN_PULL . $pull['body'], $agent));
+            same($pull['verdict'] === 'valid', $prefixed === $pull['signature'], $pull['name']);
+        }
+        $r = $v['rotation'];
+        $new = sodium_crypto_sign_secretkey(sodium_crypto_sign_seed_keypair(base64_decode($r['new_seed'])));
+        $proof = base64_encode(sodium_crypto_sign_detached(\Vigie\Agent\DOMAIN_ROTATE . $r['site'] . "\n" . $r['command_id'] . "\n" . $r['new_pubkey'], $new));
+        same($r['proof'], $proof, 'preuve de rotation');
+    },
+
+    'commandes : configuration ouverte, lien ou clé illisible refusés' => function (): void {
+        skip_unless(\DIRECTORY_SEPARATOR === '/', 'droits Unix');
+        $commands = ['endpoint' => 'https://vigie.invalid/r/v1/commands', 'pubkey' => vectors()['commands_pubkey']];
+        $open = write_config(fixture(), ['commands' => $commands]);
+        chmod($open, 0644);
+        try {
+            load_config($open);
+            throw new Failure('config.json en 0644 acceptée');
+        } catch (UsageError $e) {
+            check(str_contains($e->getMessage(), 'chmod 600'), $e->getMessage());
+        }
+        chmod($open, 0600);
+        load_config($open);
+        chmod(\dirname($open), 0755);
+        try {
+            load_config($open);
+            throw new Failure('dossier en 0755 accepté');
+        } catch (UsageError $e) {
+            check(str_contains($e->getMessage(), 'chmod 700'), $e->getMessage());
+        } finally {
+            chmod(\dirname($open), 0700);
+        }
+        $link = \dirname($open) . '/lien.json';
+        symlink($open, $link);
+        refused_load($link, 'jamais un lien');
+        $bad = write_config(fixture(), ['commands' => ['endpoint' => $commands['endpoint'], 'pubkey' => 'court']]);
+        chmod($bad, 0600);
+        refused_load($bad, 'commands.pubkey');
+        $extra = write_config(fixture(), ['commands' => $commands + ['shell' => 'id']]);
+        chmod($extra, 0600);
+        refused_load($extra, 'sans autre clé');
+    },
+
+    'commandes : ping exécuté une fois, résultat renvoyé jusqu\'à l\'accusé' => function (): void {
+        $server = tmp_dir();
+        [$port, $stop] = php_server(veilleur_router($server, ['command' => PING]), $server);
+        try {
+            [$config, $dir] = commands_agent($port);
+            $first = agent('--config', $config);
+            same(0, $first['code'], "premier passage : {$first['stderr']}");
+            $state = state_of($dir);
+            same(1, $state['last_command_seq'], 'commande exécutée');
+            same('ok', $state['result']['status'] ?? null, 'résultat en attente');
+            same('pong', $state['result']['detail'] ?? null, 'détail');
+            check((fileperms("{$dir}/state.json") & 0777) === 0600, 'état en 0600');
+            $second = agent('--config', $config);
+            same(0, $second['code'], "second passage : {$second['stderr']}");
+            same(null, state_of($dir)['result'], 'résultat accusé');
+            $pulls = pulls_of($server);
+            same(2, \count($pulls), 'deux retraits');
+            same(PING['id'], $pulls[1]['result']['command_id'] ?? null, 'résultat renvoyé');
+            check(!\array_key_exists('data', $pulls[1]['result']), 'pas de data vide (refusée par le veilleur)');
+            check($pulls[1]['seq'] > $pulls[0]['seq'], 'seq croissant');
+            check($pulls[0]['nonce'] !== $pulls[1]['nonce'], 'nonce neuf');
+            same([], glob("{$dir}/.state-*") ?: [], 'aucun fichier temporaire laissé');
+        } finally {
+            $stop();
+        }
+    },
+
+    'commandes : réponse non signée par la clé épinglée, préfixe faux ou nonce rejoué : rien ne s\'exécute' => function (): void {
+        $agentSeed = vectors()['agent_seed'];
+        foreach ([
+            'clé de l\'agent' => ['seed' => $agentSeed],
+            'préfixe de retrait' => ['prefix' => "vigie-pull-v1\n"],
+            'nonce rejoué' => ['nonce' => 'QXV0cmVOb25jZUF1dHJlTm9uY2U'],
+        ] as $case => $override) {
+            $server = tmp_dir();
+            [$port, $stop] = php_server(veilleur_router($server, ['command' => PING] + $override), $server);
+            try {
+                [$config, $dir] = commands_agent($port);
+                $run = agent('--config', $config);
+                same(1, $run['code'], "{$case} : code");
+                check(str_contains($run['stderr'], 'rien n\'est exécuté'), "{$case} : {$run['stderr']}");
+                same(0, state_of($dir)['last_command_seq'], "{$case} : rien exécuté");
+            } finally {
+                $stop();
+            }
+        }
+    },
+
+    'commandes : un état forgé n\'exécute rien, un état ouvert arrête le canal' => function (): void {
+        skip_unless(\DIRECTORY_SEPARATOR === '/', 'droits Unix');
+        $server = tmp_dir();
+        [$port, $stop] = php_server(veilleur_router($server, []), $server);
+        try {
+            [$config, $dir] = commands_agent($port);
+            // Un attaquant écrit une « commande » dans l'état : schéma strict, refus.
+            file_put_contents("{$dir}/state.json", json_encode(['pull_seq' => 0, 'last_command_seq' => 0, 'running' => null,
+                'result' => null, 'rotation' => null, 'command' => ['name' => 'ping']]));
+            chmod("{$dir}/state.json", 0600);
+            $run = agent('--config', $config);
+            same(2, $run['code'], 'état forgé : code');
+            check(str_contains($run['stderr'], 'État illisible'), $run['stderr']);
+            same([], pulls_of($server), 'aucun retrait avec un état forgé');
+            unlink("{$dir}/state.json");
+            agent('--config', $config);
+            chmod("{$dir}/state.json", 0644);
+            $run = agent('--config', $config);
+            check(str_contains($run['stderr'], 'chmod 600'), $run['stderr']);
+        } finally {
+            $stop();
+        }
+    },
+
+    'commandes : rotate-key bascule sur un accusé accepté, sinon la nouvelle paire disparaît' => function (): void {
+        foreach ([true, false] as $accepted) {
+            $server = tmp_dir();
+            [$port, $stop] = php_server(veilleur_router($server, ['command' => ROTATE, 'accepted' => $accepted]), $server);
+            try {
+                [$config, $dir] = commands_agent($port);
+                $old = file_get_contents("{$dir}/secret.key");
+                same(0, agent('--config', $config)['code'], 'rotation exécutée');
+                check(is_file("{$dir}/secret.key.new"), 'nouvelle paire créée');
+                same(0600, fileperms("{$dir}/secret.key.new") & 0777, 'nouvelle paire en 0600');
+                $result = state_of($dir)['result'];
+                $proof = base64_decode($result['data']['proof'], true);
+                $newPublic = base64_decode($result['data']['new_pubkey'], true);
+                check(sodium_crypto_sign_verify_detached($proof, \Vigie\Agent\DOMAIN_ROTATE . "site-a\n" . ROTATE['id'] . "\n" . $result['data']['new_pubkey'], $newPublic), 'preuve vérifiable');
+                $second = agent('--config', $config);
+                same(0, $second['code'], "accusé reçu : {$second['stderr']}");
+                clearstatcache();
+                check(!is_file("{$dir}/secret.key.new"), 'plus de nouvelle paire en attente');
+                if ($accepted) {
+                    check(file_get_contents("{$dir}/secret.key") !== $old, 'clé basculée');
+                    same($old, file_get_contents("{$dir}/secret.key.old"), 'ancienne clé gardée');
+                } else {
+                    same($old, file_get_contents("{$dir}/secret.key"), 'ancienne clé conservée');
+                }
+                same(null, state_of($dir)['rotation'], 'rotation close');
+            } finally {
+                $stop();
+            }
+        }
     },
 ];
