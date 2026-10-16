@@ -47,3 +47,8 @@ Planifier la plus petite version utile. Elle se limiterait au veilleur sur Alway
 ## Précision ajoutée au moment du plan (2026-10-15)
 
 Tout le nouveau développement vit dans un répertoire `monitor/` du dépôt, sans casser le module PrestaShop actuel.
+
+## Tranché le 2026-10-16
+
+Chaque point de « Encore ouvert » a reçu une décision datée, consignée dans
+[`vigie/docs/decisions.md`](../../../../vigie/docs/decisions.md) (issue #11).
