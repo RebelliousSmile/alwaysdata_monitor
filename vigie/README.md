@@ -4,6 +4,8 @@ Veilleur hébergé sur un VPS. Il surveille les sites de
 l'extérieur, reçoit les rapports signés d'un agent PHP posé sur chaque site
 (protocole : [`docs/protocole-agent.md`](./docs/protocole-agent.md), pose :
 [`docs/agent-php.md`](./docs/agent-php.md)) et alerte par e-mail.
+Les décisions de produit sont consignées dans
+[`docs/decisions.md`](./docs/decisions.md).
 
 Ce dossier est indépendant du module PrestaShop `sc_alwaysdata` à la racine du
 dépôt : il n'entre ni dans son déploiement (`scripts/deploy.mjs`), ni dans une

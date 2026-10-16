@@ -1,5 +1,5 @@
 [package]
-# Nom provisoire : l'outil n'a pas encore de nom.
+# Vigie : nom figé le 2026-10-16 (vigie/docs/decisions.md).
 name = "vigie"
 version = "0.3.0"
 edition = "2024"
