@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- Vigie console (Tauri 2, Windows and Android): device pairing, authenticated read API and incident acknowledgement (3a6922d)
+- Cross-cutting foundation: single SQLite writer, uniform API errors with `X-Request-Id`, injectable clock, gitleaks, static musl build and TLS dependency guard in CI (#9, 624569f)
+- `LogSource` contract: normalized `Entry`, combined log splitter, timezone handling and shared fixtures (#7, b45372c)
+- Two-axis site typology (CMS kind filters checks, runtime filters commands) and the closed command list (#2, 3477886)
+- Signed command channel `/r/v1/commands` with a hash-chained, signed audit log and its CLI (#10, 58bfa82)
+- PHP agent 0.2.0: signed pull, verified responses, `ping` and `rotate-key`, end-to-end test against the real watcher in CI (#6, 4fe9ba9)
+
 ## [v1.11.2] - 2026-10-16
 
 ### Added
