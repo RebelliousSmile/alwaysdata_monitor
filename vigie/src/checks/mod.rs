@@ -66,14 +66,48 @@ impl CheckKind {
     }
 
     pub fn run(self, site: &Site, ctx: &Ctx) -> Result<Vec<Finding>, CheckError> {
+        self.observe(site, ctx).map(|outcome| outcome.findings)
+    }
+
+    /// Comme `run`, avec les valeurs observées en chemin.
+    pub fn observe(self, site: &Site, ctx: &Ctx) -> Result<Outcome, CheckError> {
+        let plain = |findings| Outcome {
+            findings,
+            observed: Observed::default(),
+        };
         match self {
             Self::Content => content::run(site, ctx),
-            Self::Installer => installer::run(site, ctx),
-            Self::Exposed => exposed::run(site, ctx),
+            Self::Installer => installer::run(site, ctx).map(plain),
+            Self::Exposed => exposed::run(site, ctx).map(plain),
             Self::Tls => tls::run(site, ctx),
-            Self::Headers => headers::run(site, ctx),
+            Self::Headers => headers::run(site, ctx).map(plain),
         }
     }
+}
+
+/// Valeurs relevées par un passage concluant, montrées par la console.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
+pub struct Observed {
+    /// Statut HTTP de la page de `content`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub http_status: Option<u16>,
+    /// Expiration du certificat lu par `tls`, en secondes Unix.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tls_not_after: Option<i64>,
+}
+
+impl Observed {
+    /// JSON, ou `None` s'il n'y a rien à montrer.
+    pub fn to_json(&self) -> Option<String> {
+        (*self != Self::default()).then(|| serde_json::to_string(self).unwrap_or_default())
+    }
+}
+
+/// Constats d'un passage concluant, et ce qui a été observé en chemin.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Outcome {
+    pub findings: Vec<Finding>,
+    pub observed: Observed,
 }
 
 /// Ce dont un contrôle a besoin, partagé par tout le passage.
