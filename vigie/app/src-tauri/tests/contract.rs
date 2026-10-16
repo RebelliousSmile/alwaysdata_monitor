@@ -37,6 +37,7 @@ fn site_b() -> Site {
         keyword: None,
         interval: 600,
         agent_silence: 900,
+        logs: None,
     }
 }
 
