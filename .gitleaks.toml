@@ -1,0 +1,20 @@
+# gitleaks (CI : .github/workflows/vigie.yml, job secrets). Règles par défaut,
+# plus des exceptions étroites pour des faux positifs avérés. Un vrai secret
+# n'entre jamais ici : on le révoque et on le change.
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Vecteurs de test publics de la RFC 8032 (section 7.1)"
+paths = ['''^(vigie|monitor)/tests/fixtures/rfc8032\.json$''']
+
+[[allowlists]]
+description = "Jeton fictif des tests de la console, jamais émis par un veilleur"
+condition = "AND"
+regexTarget = "line"
+paths = [
+  '''^vigie/app/src/test/veilleur\.ts$''',
+  '''^vigie/app/src-tauri/src/lib\.rs$''',
+]
+regexes = ['''jeton-fictif-0123456789abcdef''']

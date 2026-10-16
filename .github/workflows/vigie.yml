@@ -58,3 +58,34 @@ jobs:
           docker run --rm --user "$(id -u):$(id -g)" -v "$GITHUB_WORKSPACE":/w -w /w
           php:8.1-cli@sha256:12154452109ad780fedbcf68b820a2b7dc5880d66ee38b7d87129c2de225f836
           sh -c 'php -m | grep -qx sodium || { echo "sodium absent de php:8.1-cli"; exit 1; }; php vigie/agent/php/tests/run.php'
+
+  # Cible de déploiement du VPS : binaire statique musl, croisé par zigbuild.
+  # Le valider ici évite de découvrir au déploiement une dépendance qui casse
+  # sous musl (aws-lc, openssl).
+  musl:
+    name: musl (zigbuild)
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: vigie
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master
+        with:
+          toolchain: "1.93.0" # même version que vigie/rust-toolchain.toml
+          targets: x86_64-unknown-linux-musl
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: 0.14.1
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cargo/bin/cargo-zigbuild
+            vigie/target
+          key: vigie-musl-${{ hashFiles('vigie/Cargo.lock') }}
+      - run: cargo install cargo-zigbuild --version 0.23.4 --locked
+      - run: cargo zigbuild --release --locked --target x86_64-unknown-linux-musl
+      - name: binaire statique
+        run: file target/x86_64-unknown-linux-musl/release/vigie | grep -q "statically linked"
