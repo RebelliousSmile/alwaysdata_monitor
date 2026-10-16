@@ -49,6 +49,7 @@ mod tests {
             keyword: None,
             interval: 300,
             agent_silence: 900,
+            logs: None,
         }
     }
 

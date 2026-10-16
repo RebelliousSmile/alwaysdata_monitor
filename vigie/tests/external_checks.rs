@@ -227,6 +227,7 @@ fn site(base: &str) -> Site {
         keyword: Some("/problemes/".into()),
         interval: 300,
         agent_silence: 900,
+        logs: None,
     }
 }
 
@@ -235,6 +236,7 @@ fn config(dir: &Path, base: &str) -> Config {
         database: dir.join("data").join("vigie.db"),
         api: None,
         commands: None,
+        logs: Default::default(),
         alerts: Alerts {
             to: "alertes@example.org".into(),
             from: "vigie@example.org".into(),
