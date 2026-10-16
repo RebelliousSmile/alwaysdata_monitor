@@ -600,6 +600,7 @@ mod tests {
             "/health/x",
             "/.env",
             "/r/v1/report",
+            "/r/v1/commands",
             "/r/v1",
             "/api/v1",
             "/api/v1/inconnu",

@@ -18,12 +18,13 @@ use ed25519_dalek::VerifyingKey;
 use vigie::alert::{self, Notifier, SmtpNotifier};
 use vigie::capability;
 use vigie::clock::{Clock, SystemClock};
+use vigie::command;
 use vigie::config::{self, ConfigError, Runtime};
 use vigie::device::{self, PAIRING_TTL};
 use vigie::finding::Severity;
 use vigie::store::{
     AckOutcome, Agent, KeyOutcome, META_TYPOLOGY_SERVE, META_TYPOLOGY_TICK, RevokeOutcome,
-    SCHEMA_AGENTS, SCHEMA_DEVICES, SCHEMA_INCIDENTS, SCHEMA_META, Store,
+    SCHEMA_AGENTS, SCHEMA_COMMANDS, SCHEMA_DEVICES, SCHEMA_INCIDENTS, SCHEMA_META, Store,
 };
 use vigie::{human_age, iso_utc, serve, tick};
 
@@ -82,6 +83,26 @@ enum Command {
         #[command(subcommand)]
         action: DeviceAction,
     },
+    /// Clés du canal de commandes (docs/protocole-commandes.md)
+    Commands {
+        #[command(subcommand)]
+        action: CommandsAction,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum CommandsAction {
+    /// Crée la clé de commandes et la clé d'audit de [commands] (jamais
+    /// écrasées) et affiche la clé publique à épingler par les agents
+    InitKeys,
+    /// Affiche la clé publique de commandes, à épingler par les agents
+    Pubkey,
+}
+
+#[derive(Debug, Clone, Copy, clap::ValueEnum)]
+enum Switch {
+    Enable,
+    Disable,
 }
 
 #[derive(Debug, Subcommand)]
@@ -127,6 +148,44 @@ enum SiteAction {
         /// Identifiant du site
         id: String,
     },
+    /// Active ou coupe le canal de commandes d'un site (coupé par défaut ;
+    /// couper annule la commande en vol)
+    Commands {
+        /// Identifiant du site
+        id: String,
+        switch: Switch,
+    },
+    /// Prépare une commande : aperçu sans rien écrire, puis --apply pour la
+    /// mettre en file
+    Command {
+        /// Identifiant du site
+        id: String,
+        /// ping ou rotate-key (htaccess-* attendent #13)
+        name: String,
+        /// Met la commande en file
+        #[arg(long)]
+        apply: bool,
+        /// Rejoue une commande non idempotente dont la précédente a une issue
+        /// inconnue
+        #[arg(long)]
+        force: bool,
+    },
+    /// Annule la commande en vol d'un site
+    CommandCancel {
+        /// Identifiant du site
+        id: String,
+    },
+    /// Journal d'audit des commandes d'un site, en JSONL
+    Audit {
+        /// Identifiant du site
+        id: String,
+        /// Vérifie la chaîne et les signatures (code 1 sinon) au lieu d'exporter
+        #[arg(long)]
+        verify: bool,
+        /// Tête attendue (reçue par e-mail) : détecte une chaîne tronquée
+        #[arg(long, requires = "verify")]
+        head: Option<String>,
+    },
     /// Retire la clé de l'agent et l'état de ses rapports
     Remove {
         /// Identifiant du site
@@ -166,6 +225,7 @@ fn run(cli: Cli) -> anyhow::Result<()> {
         Command::Site { action } => site(&config, action, now),
         Command::Ack { id } => ack(&config, id, now),
         Command::Device { action } => device(&config, action, now),
+        Command::Commands { action } => commands_keys(&config, action),
         Command::TestAlert => {
             let notifier = SmtpNotifier::new(config.alerts.clone());
             notifier
@@ -295,6 +355,7 @@ fn site(config: &config::Config, action: SiteAction, now: i64) -> anyhow::Result
             require_site(config, &id)?;
             let key = parse_pubkey(&pubkey)?;
             let mut store = Store::open(&config.database)?;
+            store.reset_commands(&id, now, audit_key(config)?.as_ref(), "site rotate-key")?;
             match store.rotate_key(&id, &key, now)? {
                 KeyOutcome::Done => {
                     println!("clé de l'agent de {id} remplacée : l'ancienne est refusée")
@@ -316,6 +377,38 @@ fn site(config: &config::Config, action: SiteAction, now: i64) -> anyhow::Result
                 "empreintes actuelles de {id} prises comme référence : incidents d'intégrité clos"
             );
         }
+        SiteAction::Commands { id, switch } => {
+            require_site(config, &id)?;
+            let key = audit_key(config)?.context("[commands] absent de la configuration")?;
+            let mut store = Store::open(&config.database)?;
+            let enable = matches!(switch, Switch::Enable);
+            let cancelled = store.set_commands_enabled(&id, enable, now, &key)?;
+            println!(
+                "canal de commandes de {id} {}",
+                if enable { "activé" } else { "coupé" }
+            );
+            for c in cancelled {
+                println!("commande {c} annulée");
+            }
+        }
+        SiteAction::Command {
+            id,
+            name,
+            apply,
+            force,
+        } => command(config, &id, &name, apply, force, now)?,
+        SiteAction::CommandCancel { id } => {
+            require_site(config, &id)?;
+            let key = audit_key(config)?.context("[commands] absent de la configuration")?;
+            let cancelled = Store::open(&config.database)?.cancel_command(&id, now, &key)?;
+            if cancelled.is_empty() {
+                bail!("{id} n'a aucune commande en vol");
+            }
+            for c in cancelled {
+                println!("commande {c} annulée");
+            }
+        }
+        SiteAction::Audit { id, verify, head } => audit(config, &id, verify, head.as_deref())?,
         SiteAction::Remove { id, yes } => {
             if !config.database.is_file() {
                 bail!("{id} n'a pas de clé (base absente)");
@@ -332,6 +425,7 @@ fn site(config: &config::Config, action: SiteAction, now: i64) -> anyhow::Result
                 }
             }
             let mut store = Store::open(&config.database)?;
+            store.reset_commands(&id, now, audit_key(config)?.as_ref(), "site remove")?;
             if !store.remove_key(&id)? {
                 bail!("{id} n'a pas de clé");
             }
@@ -572,5 +666,145 @@ fn status(config: &config::Config, now: i64) -> anyhow::Result<()> {
         Ok(())
     } else {
         bail!("tick en retard ou absent")
+    }
+}
+
+/// Clé d'audit de `[commands]`, si le canal est configuré.
+fn audit_key(config: &config::Config) -> anyhow::Result<Option<ed25519_dalek::SigningKey>> {
+    match &config.commands {
+        Some(commands) => Ok(Some(
+            command::key::load(&commands.audit_key_file).context("clé d'audit")?,
+        )),
+        None => Ok(None),
+    }
+}
+
+fn commands_keys(config: &config::Config, action: CommandsAction) -> anyhow::Result<()> {
+    let commands = config
+        .commands
+        .as_ref()
+        .context("[commands] absent de la configuration : key_file et audit_key_file")?;
+    let public = match action {
+        CommandsAction::InitKeys => {
+            let public = command::key::create(&commands.key_file).context("clé de commandes")?;
+            command::key::create(&commands.audit_key_file).context("clé d'audit")?;
+            println!(
+                "clés créées : {} et {}",
+                commands.key_file.display(),
+                commands.audit_key_file.display()
+            );
+            public
+        }
+        CommandsAction::Pubkey => command::key::load(&commands.key_file)
+            .context("clé de commandes")?
+            .verifying_key(),
+    };
+    println!(
+        "clé publique de commandes (à épingler par chaque agent) :\n{}",
+        STANDARD.encode(public.to_bytes())
+    );
+    Ok(())
+}
+
+/// Aperçu d'une commande, puis mise en file avec --apply.
+fn command(
+    config: &config::Config,
+    id: &str,
+    name: &str,
+    apply: bool,
+    force: bool,
+    now: i64,
+) -> anyhow::Result<()> {
+    let site = config
+        .sites
+        .iter()
+        .find(|s| s.id == id)
+        .with_context(|| format!("aucun site « {id} » dans la configuration"))?;
+    let kind = capability::CommandKind::from_name(name).with_context(|| {
+        format!(
+            "commande inconnue « {} » : {}",
+            command::neutralize(name),
+            capability::CommandKind::ALL.map(|k| k.name()).join(", ")
+        )
+    })?;
+    if let Err(refusal) = capability::permit(kind, site) {
+        bail!("{id} : {kind} refusée : {refusal}");
+    }
+    let runtime = site.effective_runtime().context("runtime absent")?;
+    let params = command::params_json(kind).context("paramètres indisponibles")?;
+    let typology = config::typology_fingerprint(config);
+    println!("site : {id} ({})", site.url);
+    println!("runtime : {}", runtime.as_str());
+    println!("commande : {kind}");
+    println!("paramètres : {params}");
+    println!(
+        "effet : {}",
+        match kind {
+            capability::CommandKind::Ping => "aucun ; prouve que le canal fonctionne",
+            capability::CommandKind::RotateKey =>
+                "l'agent crée une nouvelle paire de clés de rapport et la prouve ; ce n'est pas un remède à une compromission",
+            _ => "indisponible",
+        }
+    );
+    println!("typologie : {}", &typology[..12]);
+    if !apply {
+        println!("aperçu seulement : rien n'est écrit ; relancer avec --apply");
+        return Ok(());
+    }
+    let key = audit_key(config)?.context("[commands] absent de la configuration")?;
+    let command_id = command::uuid_v7(SystemClock.unix_ms())?;
+    let mut store = Store::open(&config.database)?;
+    match store.enqueue_command(
+        id,
+        kind,
+        runtime,
+        &params,
+        &typology,
+        &command_id,
+        now,
+        force,
+        &key,
+    )? {
+        Ok(queued) => println!(
+            "commande {} en file (seq {}), servie au prochain retrait de l'agent, expire le {}",
+            queued.id,
+            queued.seq,
+            iso_utc(queued.expires_at)
+        ),
+        Err(refusal) => bail!("{id} : {refusal}"),
+    }
+    Ok(())
+}
+
+fn audit(
+    config: &config::Config,
+    id: &str,
+    verify: bool,
+    head: Option<&str>,
+) -> anyhow::Result<()> {
+    require_site(config, id)?;
+    let Some(store) = Store::open_read(&config.database)?
+        .filter(|s| s.schema_version().is_ok_and(|v| v >= SCHEMA_COMMANDS))
+    else {
+        bail!("aucun journal d'audit (base absente ou antérieure au schéma {SCHEMA_COMMANDS})");
+    };
+    let records = store.audit_records(id)?;
+    if !verify {
+        for record in &records {
+            println!("{}", serde_json::to_string(record)?);
+        }
+        return Ok(());
+    }
+    let key = audit_key(config)?.context("[commands] absent de la configuration")?;
+    match command::audit::verify(id, &records, &key.verifying_key(), head) {
+        Ok(()) => {
+            println!(
+                "journal de {id} intact : {} entrée(s), tête {}",
+                records.len(),
+                store.audit_head(id)?
+            );
+            Ok(())
+        }
+        Err(broken) => bail!("journal de {id} altéré : {broken}"),
     }
 }

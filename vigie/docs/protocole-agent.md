@@ -93,8 +93,9 @@ Réponses :
   le journal du veilleur, avec le site et le `seq` quand ils sont lisibles,
   jamais avec le corps reçu.
 
-Seules `GET /health` et `POST /r/v1/report` existent ; toute autre route ou
-méthode reçoit le même 404.
+Pour un agent, seules `POST /r/v1/report` et `POST /r/v1/commands`
+(`protocole-commandes.md`) existent, avec `GET /health` ; toute autre route
+ou méthode hors de `/api/v1` reçoit le même 404.
 
 Un agent qui reçoit un 404 ne réessaie pas le même rapport : il enverra le
 suivant, avec un `seq` plus grand et un `sent_at` frais, à son prochain envoi.
@@ -177,7 +178,9 @@ ne vérifie jamais ce qu'une autre a signé.
 | Usage | Signe | Vérifie | Clé privée |
 | --- | --- | --- | --- |
 | Rapports | l'agent | le veilleur, avec la clé publique de `site add` | sur le site, hors webroot, 0600 vérifié par l'agent |
-| Commandes | le veilleur | l'agent, avec la clé publique épinglée | sur le VPS, distincte de toute clé d'agent ; livrée avec les commandes (#10, #6) |
+| Retraits de commandes | l'agent, préfixe `vigie-pull-v1\n` | le veilleur, même clé que les rapports | idem rapports ; le préfixe sépare les deux usages |
+| Commandes | le veilleur (`[commands] key_file`) | l'agent, avec la clé publique épinglée | sur le VPS, lue par `serve` seul (`protocole-commandes.md`) |
+| Audit des commandes | le veilleur (`[commands] audit_key_file`) | `vigie site audit --verify` | sur le VPS, lue par `serve`, `tick` et la CLI |
 
 - L'agent **épingle** la clé publique des commandes : il la reçoit une fois,
   à `--init`, et refuse ensuite toute commande signée par une autre. Elle ne
@@ -185,7 +188,8 @@ ne vérifie jamais ce qu'une autre a signé.
   commande.
 - La rotation d'une clé de rapport reste celle de `agent-php.md` et de
   `site rotate-key` ci-dessus. Changer la clé des commandes demande de
-  réinstaller chaque agent : la procédure sera écrite avec #10.
+  réinstaller chaque agent : `protocole-commandes.md`, « Changer la clé de
+  commandes ».
 - Un webhook entrant éventuel aurait son propre secret, distinct de toutes les
   clés Ed25519 (`decisions.md`, sonde UptimeRobot).
 - Les signatures restent en base64 standard avec remplissage (`decisions.md`).

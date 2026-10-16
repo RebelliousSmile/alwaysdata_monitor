@@ -583,3 +583,47 @@ async fn a_late_rotation_on_an_unknown_command_is_refused() {
         agent().verifying_key().to_bytes()
     );
 }
+
+#[test]
+fn tick_expires_commands_and_sends_each_audit_head_once() {
+    use std::time::Duration;
+    use vigie::alert::MemoryNotifier;
+    use vigie::tick::{self, Options};
+
+    let v = Veilleur::new();
+    let id = v.enqueue(CommandKind::Ping);
+    let options = Options {
+        check_budget: Duration::ZERO,
+        ..Options::default()
+    };
+    let mail = MemoryNotifier::new();
+    tick::run_with(&v.config(), T0, &options, &mail).expect("tick");
+    let sent = mail.take();
+    let head = v.store().audit_head("site-a").unwrap();
+    let anchor: Vec<_> = sent
+        .iter()
+        .filter(|e| e.subject.contains("journal des commandes"))
+        .collect();
+    assert_eq!(anchor.len(), 1, "{sent:?}");
+    assert!(anchor[0].body.contains(&head));
+    // Rien de neuf : rien d'envoyé.
+    tick::run_with(&v.config(), T0 + 60, &options, &mail).expect("tick");
+    assert!(
+        mail.take()
+            .iter()
+            .all(|e| !e.subject.contains("journal des commandes"))
+    );
+    // 24 h plus tard, la commande jamais retirée expire et la nouvelle tête part.
+    tick::run_with(&v.config(), T0 + COMMAND_TTL, &options, &mail).expect("tick");
+    assert_eq!(v.state(&id), State::Expired);
+    let sent = mail.take();
+    let new_head = v.store().audit_head("site-a").unwrap();
+    assert_ne!(new_head, head);
+    assert!(sent.iter().any(|e| e.body.contains(&new_head)));
+
+    // Clé d'audit illisible : tick passe quand même, rien n'expire.
+    let id = v.enqueue(CommandKind::Ping);
+    std::fs::remove_file(v.dir.path().join("audit.key")).unwrap();
+    tick::run_with(&v.config(), T0 + 3 * COMMAND_TTL, &options, &mail).expect("tick sans clé");
+    assert_eq!(v.state(&id), State::Pending);
+}

@@ -1,6 +1,6 @@
 ---
 objective: "Le veilleur sert à l'agent d'un site, à sa demande, une commande signée par une clé dédiée, prise dans une liste fermée filtrée par runtime contre la configuration du moment, préparée par `vigie site command` en aperçu puis appliquée par --apply, rejouable nulle part, dont le résultat revient jusqu'à accusé, et tracée dans un journal d'audit chaîné, signé par une clé d'audit distincte et ancré hors de la base."
-status: in-progress
+status: done
 issue_number: 10
 ---
 
