@@ -15,10 +15,10 @@ use anyhow::{Result, bail};
 
 use crate::alert::{self, Email, Notifier, SmtpNotifier};
 use crate::checks::{self, CheckError, CheckKind, Ctx, heartbeat};
-use crate::config::{Config, Site};
+use crate::config::{Config, Site, TypologyRecord};
 use crate::finding::Finding;
 use crate::http::{Http, REQUEST_TIMEOUT, Trust};
-use crate::store::{AGENT_PREFIX, RunRecord, Store};
+use crate::store::{AGENT_PREFIX, META_TYPOLOGY_TICK, RunRecord, Store};
 
 #[derive(Debug, Clone)]
 pub struct Options {
@@ -63,6 +63,27 @@ pub fn run(config: &Config, now: i64) -> Result<()> {
     Ok(())
 }
 
+/// Écrit la typologie vue par ce passage quand elle a changé, et journalise
+/// les sites concernés : le journal garde quelle typologie valait quand.
+fn record_typology(store: &mut Store, config: &Config, now: i64) -> Result<()> {
+    let current = TypologyRecord::of(config);
+    let previous = store
+        .meta(META_TYPOLOGY_TICK)?
+        .and_then(|(value, _)| serde_json::from_str::<TypologyRecord>(&value).ok());
+    if previous.as_ref() == Some(&current) {
+        return Ok(());
+    }
+    match &previous {
+        Some(previous) => log::info!(
+            "typologie changée, empreinte {} : {}",
+            current.fingerprint,
+            previous.changes(&current).join(" ; ")
+        ),
+        None => log::info!("typologie relevée, empreinte {}", current.fingerprint),
+    }
+    store.set_meta(META_TYPOLOGY_TICK, &serde_json::to_string(&current)?, now)
+}
+
 pub fn run_with(
     config: &Config,
     now: i64,
@@ -72,6 +93,7 @@ pub fn run_with(
     let start = Instant::now();
     let mut store = Store::open(&config.database)?;
     store.record_tick(now)?;
+    record_typology(&mut store, config, now)?;
     let http = Http::new(&options.trust, options.request_timeout);
     let ctx = Ctx {
         http: &http,
@@ -277,4 +299,39 @@ pub fn check_once(config: &Config, site_id: &str, options: &Options, now: i64) -
         }
     }
     Ok(report)
+}
+
+#[cfg(test)]
+mod typology_tests {
+    use super::*;
+
+    fn config(database: std::path::PathBuf, runtime: &str) -> Config {
+        crate::config::parse(
+            std::path::Path::new("config.toml"),
+            &format!(
+                "database = '{}'\n[alerts]\nto = \"a@example.org\"\nfrom = \"v@example.org\"\nsmtp_host = \"smtp.example.org\"\npassword_file = \"/x\"\n[[sites]]\nid = \"site-a\"\nurl = \"https://site-a.example.org/\"\n{runtime}",
+                database.display()
+            ),
+        )
+        .expect("configuration")
+    }
+
+    #[test]
+    fn the_typology_is_written_once_per_change() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db = dir.path().join("vigie.db");
+        let mut store = Store::open(&db).expect("base");
+        let php = config(db.clone(), "runtime = \"php\"\n");
+        record_typology(&mut store, &php, 100).expect("relevé");
+        record_typology(&mut store, &php, 200).expect("inchangé");
+        let (_, at) = store.meta(META_TYPOLOGY_TICK).unwrap().expect("écrite");
+        assert_eq!(at, 100, "une seule écriture pour une typologie inchangée");
+
+        let generic = config(db, "");
+        record_typology(&mut store, &generic, 300).expect("changée");
+        let (value, at) = store.meta(META_TYPOLOGY_TICK).unwrap().expect("écrite");
+        assert_eq!(at, 300);
+        let record: TypologyRecord = serde_json::from_str(&value).unwrap();
+        assert_eq!(record.sites, ["site-a generic -"]);
+    }
 }

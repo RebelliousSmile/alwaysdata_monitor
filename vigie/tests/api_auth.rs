@@ -337,7 +337,7 @@ async fn a_newer_schema_still_pairs_and_authenticates() {
     let v = Veilleur::new();
     let code = v.pairing("téléphone");
     let conn = rusqlite::Connection::open(&v.db).expect("raw");
-    conn.pragma_update(None, "user_version", 7).expect("bump");
+    conn.pragma_update(None, "user_version", 99).expect("bump");
     drop(conn);
 
     let reply = v.pair_code(&code).await;
@@ -347,7 +347,7 @@ async fn a_newer_schema_still_pairs_and_authenticates() {
     assert_eq!(reply.status, StatusCode::OK);
 
     let store = Store::open_read(&v.db).expect("open_read").expect("base");
-    assert_eq!(store.schema_version().expect("version"), 7);
+    assert_eq!(store.schema_version().expect("version"), 99);
     let devices = store.devices().expect("devices");
     assert_eq!(devices.len(), 1);
     assert_eq!(devices[0].seen_at, Some(T0));

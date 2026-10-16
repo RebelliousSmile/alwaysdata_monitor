@@ -32,6 +32,7 @@ fn site_b() -> Site {
         id: "site-b".into(),
         url: "https://site-b.example.org/".into(),
         kind: SiteKind::Wordpress,
+        runtime: None,
         keyword_url: None,
         keyword: None,
         interval: 600,

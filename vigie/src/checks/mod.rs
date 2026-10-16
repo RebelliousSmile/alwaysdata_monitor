@@ -50,11 +50,19 @@ impl CheckKind {
         }
     }
 
-    pub fn applies(self, site: &Site) -> bool {
+    /// CMS auxquels le contrôle s'applique (registre des capacités, issue
+    /// #2). `match` sans joker : un contrôle nouveau oblige à décider.
+    pub fn cms(self) -> &'static [SiteKind] {
+        const ALL_CMS: &[SiteKind] =
+            &[SiteKind::Generic, SiteKind::Wordpress, SiteKind::Prestashop];
         match self {
-            Self::Installer => site.kind != SiteKind::Generic,
-            _ => true,
+            Self::Installer => &[SiteKind::Wordpress, SiteKind::Prestashop],
+            Self::Content | Self::Exposed | Self::Tls | Self::Headers => ALL_CMS,
         }
+    }
+
+    pub fn applies(self, site: &Site) -> bool {
+        self.cms().contains(&site.kind)
     }
 
     /// Secondes entre deux passages de ce contrôle sur ce site.
@@ -173,4 +181,22 @@ fn witness_path(prefix: &str) -> String {
 /// blancs près), c'est la page générique du site, pas le fichier demandé.
 fn same_as_witness(page: &Page, witness: &Page) -> bool {
     witness.status == page.status && witness.body.trim() == page.body.trim()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_installer_check_applies_to_a_cms_only() {
+        assert_eq!(
+            CheckKind::Installer.cms(),
+            [SiteKind::Wordpress, SiteKind::Prestashop]
+        );
+        for kind in CheckKind::ALL {
+            if kind != CheckKind::Installer {
+                assert_eq!(kind.cms().len(), 3, "{}", kind.name());
+            }
+        }
+    }
 }

@@ -29,9 +29,9 @@ use axum::routing::{get, post};
 use serde::Serialize;
 
 use crate::clock::{Clock, SystemClock};
-use crate::config::Config;
+use crate::config::{Config, TypologyRecord};
 use crate::ingest::{self, HEADER_SIGNATURE, HEADER_SITE, Reason, Refusal};
-use crate::store::Store;
+use crate::store::{META_TYPOLOGY_SERVE, Store};
 use crate::writer::Writer;
 
 /// Au-delà, `tick` est considéré comme arrêté (timer chaque minute).
@@ -259,10 +259,22 @@ pub fn run(config: Config, ip: IpAddr, port: u16) -> Result<()> {
         .context("démarrage du runtime tokio")?;
     // Une base existante est migrée dès le démarrage, sans attendre le
     // prochain `tick` : `/api/v1` en a besoin. `serve` ne crée pas la base.
-    if config.database.is_file()
-        && let Err(err) = Store::open(&config.database)
-    {
-        log::error!("migration de la base au démarrage impossible : {err:#}");
+    // La typologie chargée y est notée : `vigie status` dit si `serve` doit
+    // être relancé pour voir une configuration modifiée. Aucun échec ici
+    // n'arrête `serve`.
+    let typology = TypologyRecord::of(&config);
+    log::info!("typologie chargée, empreinte {}", typology.fingerprint);
+    if config.database.is_file() {
+        let written = Store::open(&config.database).and_then(|mut store| {
+            store.set_meta(
+                META_TYPOLOGY_SERVE,
+                &serde_json::to_string(&typology)?,
+                crate::now(),
+            )
+        });
+        if let Err(err) = written {
+            log::error!("migration ou écriture de la typologie au démarrage impossible : {err:#}");
+        }
     }
     runtime.block_on(async move {
         let addr = SocketAddr::new(ip, port);
@@ -328,6 +340,7 @@ mod tests {
                 id: "site-a".into(),
                 url: "https://site-a.example.org/".into(),
                 kind: SiteKind::Generic,
+                runtime: None,
                 keyword_url: None,
                 keyword: None,
                 interval: 300,

@@ -83,3 +83,15 @@ Plan : `aidd_docs/tasks/2026_10/2026_10_16_logsource/plan.md` ; contrat :
 | Une ligne n'est jamais rejetée pour sa longueur sous 4 Mio : chaque champ est tronqué ; l'agent coupe chaque ligne à 16 Kio | Un robot ne doit pas se cacher en gonflant sa ligne |
 | `fetch(from, max_entries)` et `Fetched.more` figés dès maintenant | Une borne ajoutée plus tard casserait chaque adaptateur |
 
+## Typologie des sites (issue #2)
+
+Plan : `aidd_docs/tasks/2026_10/2026_10_16_typologie-kind/plan.md` ; contrat :
+[`protocole-commandes.md`](./protocole-commandes.md).
+
+| Décision du 2026-10-16 | Raison |
+| --- | --- |
+| Le champ des commandes s'appelle `runtime`, et non `kind` comme dans l'issue | `kind` désigne déjà le CMS ; deux axes, comme la décision transverse ci-dessus |
+| Le registre des capacités est `config.toml` sur le VPS, non signé. Sa version est l'empreinte SHA-256 de la projection `id kind runtime` de chaque site, notée par `serve` et par `tick` et comparée par `vigie status` | Une signature ne protégerait que contre qui tient déjà le compte `vigie`. `serve` lit la configuration une fois : son empreinte dit ce qu'il applique |
+| Toutes les commandes n'admettent que `php` tant qu'aucun agent Node n'existe | Fail-closed |
+| L'enveloppe d'une commande porte `v` et `site`, et son schéma refuse tout champ inconnu | La clé de commandes est commune à tous les sites ; une version permet d'évoluer sans casser les agents |
+
