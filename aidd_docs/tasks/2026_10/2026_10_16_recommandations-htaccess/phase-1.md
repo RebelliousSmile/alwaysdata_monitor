@@ -19,15 +19,15 @@ status: pending
     │   └── main.rs           ✏️ `site recommend <site>` : propositions ; `--apply` met htaccess-apply en file
     └── tests/
         ├── recommend.rs      ✅ cas de gradation et de protection
-        └── fixtures/htaccess/ ✅ golden files (blocs attendus) et vecteurs de validation (acceptés, refusés) pour Rust et PHP
+        └── fixtures/htaccess/ ✅ golden files (blocs attendus), protected-uas.txt, vectors.json (vecteurs et fuzz différentiel, verdicts attendus) pour Rust et PHP
 ```
 
 ## Tasks to do
 
-1. `recommend` : robots qui respectent robots.txt → ligne `User-agent: X` / `Disallow: /` ; robots non protégés qui ne le respectent pas → règle d'UA ; IP élevées, hébergeur vérifié, hors protégées et hors `behind_proxy` → règle d'IP avec `%{TIME}` d'expiration ; rien d'autre.
-2. Génération déterministe (ordre stable) ; golden files comparés à l'octet.
-3. Validation : formes de ligne fermées ; refus de toute directive dangereuse ; vecteurs `accept/*.txt` et `refuse/*.txt` lus par Rust et par le test PHP.
-4. `site recommend` : affiche robots.txt à poser à la main, le bloc, l'empreinte du `.htaccess` de référence ; `--apply` met en file `htaccess-apply` (aperçu d'abord, comme `site command`).
+1. `recommend` : robots qui respectent robots.txt → ligne `User-agent: X` / `Disallow: /` ; robots non protégés qui ne le respectent pas → règle d'UA (30 j) ; IP élevées, hébergeur vérifié, hors protégées et hors `behind_proxy` → règle d'IP (24 h) ; sans fuseau du site, ni UA ni IP ; rien d'autre.
+2. Génération déterministe (ordre stable, IP canoniques, littéraux échappés) ; golden files comparés à l'octet ; `%{TIME}` dans le fuseau du site.
+3. Validation par groupes (plan, « Decisions ») avec `now` injecté : bornes de `%{TIME}` selon la sorte du groupe, corpus d'UA protégés, CR/tabulation/NUL/continuation refusés ; `vectors.json` généré par un test Rust (`VIGIE_WRITE_VECTORS=1`, comme `commands-vectors.json`), dont un fuzz différentiel à graine fixe (lignes mutées : un octet changé, inséré, supprimé).
+4. `site recommend` : affiche robots.txt à poser à la main, le bloc, `previous_sha256` (dernier rapport) et `new_sha256` ; `--apply` met en file `htaccess-apply` (aperçu d'abord, comme `site command`) ; à la réussite, la référence d'intégrité de `.htaccess` passe à `new_sha256`.
 
 ## Test acceptance criteria
 
@@ -35,4 +35,5 @@ status: pending
 | ---- | ------------------- |
 | 1 | Googlebot, YandexBot, facebookexternalhit, un navigateur, ChatGPT-User : aucune proposition d'UA ni d'IP ; GPTBot → robots.txt ; Bytespider → UA ; IP élevée sans reverse DNS hébergeur → rien |
 | 2 | Golden files identiques |
-| 3 | Chaque vecteur `refuse/` (php_value, AddHandler, SetHandler, Include, auto_prepend_file, ligne vide d'espaces bizarres, guillemet non fermé, littéral trop long, `# END vigie` imbriqué) est refusé ; chaque `accept/` passe |
+| 3 | Refusés : php_value, AddHandler, SetHandler, Include, auto_prepend_file, ligne d'espaces bizarres, guillemet non fermé, littéral trop long, `# END vigie` imbriqué, ligne finissant par `\\`, CR, tabulation, `.` non échappé, groupe sans `%{TIME}`, `[OR]` sur la dernière condition, `%{TIME}` passé ou au-delà de la borne, littéral touchant « Googlebot » ou un navigateur du corpus ; acceptés : chaque bloc golden |
+| 4 | Après un `htaccess-apply` réussi, le rapport suivant portant `new_sha256` n'ouvre pas `agent:integrity/modified:.htaccess` |
