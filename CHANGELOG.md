@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.11.0] - 2026-10-16
+
+Adds Vigie, a multi-site watcher living in `vigie/`, independent of the PrestaShop module, which is unchanged (`v1.10.0..cb90a9d`).
+
+### Added
+- Vigie watcher skeleton (Rust, axum, SQLite) and VPS provisioning (1e26a20)
+- External checks and e-mail alerts (2b55edd)
+- Signed agent reports (ed25519) and agent silence detection (4932d34)
+- PHP agent and critical file integrity checks (208a73d)
+- Local replay of the 2026-09-07 incident as an acceptance test (b1e1161)
+- Module deployment script with lock and SSH validations (aaff9db)
+- Vigie console mockups and design handoff (c17e4ce)
+- Repository rule: no real production data in this public repository (46b2ad9)
+
+### Changed
+- Project renamed Vigie: `monitor/` becomes `vigie/` (1a9de67)
+
+### Fixed
+- VPS installation through `git archive`, LF line endings under `autocrlf` (f9b9604)
+- `/health` proof taken outside the deployment lock (8b6a642)
+- OOM priority of `tick` aligned with `serve` (c874f74)
+
 ## [v1.10.0] - 2026-09-26
 
 First tagged release; covers the full history since the initial scaffold (`5ecd249..1f171d0`).
