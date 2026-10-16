@@ -46,6 +46,12 @@ const MIGRATIONS: &[&str] = &[
     // journal d'audit en ajout seul (déclencheurs) chaîné par site, et dernier
     // hash envoyé par e-mail comme ancre externe.
     include_str!("../migrations/0008.sql"),
+    // 9 : réservée aux logs reçus (#1) ; provisoire, sans objet.
+    include_str!("../migrations/0009.sql"),
+    // 10 : agrégats de l'analyse de logs (`analysis/store.rs`) : seaux par
+    // minute des règles, profils d'IP par heure (index couvrant du compte de
+    // classement), robots et charge par heure, curseur et heure de référence.
+    include_str!("../migrations/0010.sql"),
 ];
 
 /// Version de schéma à partir de laquelle les incidents existent.
@@ -62,6 +68,9 @@ pub const SCHEMA_CHECK_RESULTS: usize = 6;
 pub const SCHEMA_META: usize = 7;
 /// Version de schéma à partir de laquelle le canal de commandes existe.
 pub const SCHEMA_COMMANDS: usize = 8;
+/// Version de schéma à partir de laquelle les agrégats de l'analyse de logs
+/// existent.
+pub const SCHEMA_ANALYSIS: usize = 10;
 
 /// Empreinte de la typologie chargée par `serve` à son démarrage.
 pub const META_TYPOLOGY_SERVE: &str = "typology.serve";
@@ -1975,7 +1984,7 @@ mod tests {
             assert!(!migration.contains('\r'), "migration {} en CRLF", i + 1);
         }
         let (_dir, store) = temp_store();
-        assert_eq!(store.schema_version().expect("version"), 8);
+        assert_eq!(store.schema_version().expect("version"), SCHEMA_ANALYSIS);
         let mut stmt = store
             .conn
             .prepare("SELECT type, name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name")
@@ -1990,6 +1999,9 @@ mod tests {
             ("index", "commands_one_open"),
             ("index", "incidents_open_key"),
             ("index", "incidents_site_check"),
+            ("index", "log_buckets_key"),
+            ("index", "log_buckets_minute"),
+            ("index", "log_profiles_rank"),
             ("index", "ticks_at"),
             ("table", "audit_notified"),
             ("table", "baselines"),
@@ -1999,6 +2011,11 @@ mod tests {
             ("table", "commands"),
             ("table", "devices"),
             ("table", "incidents"),
+            ("table", "log_bots"),
+            ("table", "log_buckets"),
+            ("table", "log_cursors"),
+            ("table", "log_load"),
+            ("table", "log_profiles"),
             ("table", "meta"),
             ("table", "pairings"),
             ("table", "reports"),

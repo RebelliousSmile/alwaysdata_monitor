@@ -11,8 +11,9 @@
 //! fait octet par octet. Un glouton à deux pointeurs est faux avec deux
 //! sortes d'étoiles ; la correspondance est donc une programmation dynamique
 //! sur deux lignes, O(motif × chemin) bornée par 256 × 2048, précédée d'un
-//! préfiltre sur les littéraux fixes de tête et de queue qui écarte presque
-//! tous les chemins sans calcul.
+//! préfiltre sur les littéraux fixes de tête et de queue, puis sur les
+//! littéraux du milieu, cherchés dans l'ordre : il écarte presque tous les
+//! chemins sans calcul, y compris ceux taillés pour frôler le motif.
 
 use std::fmt;
 
@@ -56,6 +57,10 @@ pub struct Glob {
     /// Littéraux fixes de tête et de queue (préfiltre).
     prefix: Vec<u8>,
     suffix: Vec<u8>,
+    /// Littéraux du milieu (entre deux jokers), dans l'ordre du motif :
+    /// tout chemin qui correspond les contient dans cet ordre, sans
+    /// chevauchement.
+    inner: Vec<Vec<u8>>,
     /// Le motif n'a aucun joker : égalité stricte.
     literal: bool,
 }
@@ -121,11 +126,27 @@ impl Glob {
             tokens.iter().rev().map_while(fixed).collect()
         };
         suffix.reverse();
+        let mut inner = Vec::new();
+        if !literal {
+            let middle = &tokens[prefix.len()..tokens.len() - suffix.len()];
+            let mut run = Vec::new();
+            for token in middle {
+                match token {
+                    Token::Byte(b) => run.push(*b),
+                    _ if !run.is_empty() => inner.push(std::mem::take(&mut run)),
+                    _ => {}
+                }
+            }
+            if !run.is_empty() {
+                inner.push(run);
+            }
+        }
         Ok(Self {
             source: pattern.to_string(),
             tokens,
             prefix,
             suffix,
+            inner,
             literal,
         })
     }
@@ -149,8 +170,25 @@ impl Glob {
         }
         let tokens = &self.tokens[self.prefix.len()..self.tokens.len() - self.suffix.len()];
         let text = &path[self.prefix.len()..path.len() - self.suffix.len()];
-        dp(tokens, text)
+        contains_in_order(text, &self.inner) && dp(tokens, text)
     }
+}
+
+/// `text` contient `needles` dans l'ordre, sans chevauchement. La première
+/// occurrence de chacune est la bonne : si un placement existe, celui qui
+/// prend chaque fois la plus à gauche en est un aussi.
+fn contains_in_order(text: &[u8], needles: &[Vec<u8>]) -> bool {
+    let mut rest = text;
+    for needle in needles {
+        match rest
+            .windows(needle.len())
+            .position(|w| w == needle.as_slice())
+        {
+            Some(at) => rest = &rest[at + needle.len()..],
+            None => return false,
+        }
+    }
+    true
 }
 
 /// `prev[j]` : les jetons déjà lus couvrent exactement `text[..j]`.
