@@ -53,7 +53,7 @@ fn tick_then_status_succeeds_and_migrations_rerun_cleanly() {
     let after = vigie(&config, &["status"]);
     assert!(after.status.success(), "{after:?}");
     let stdout = String::from_utf8_lossy(&after.stdout);
-    assert!(stdout.contains("schéma v4"), "{stdout}");
+    assert!(stdout.contains("schéma v5"), "{stdout}");
     assert!(stdout.contains("→ ok"), "{stdout}");
     assert!(stdout.contains("incidents ouverts : aucun"), "{stdout}");
     assert!(stdout.contains("notifications en attente : 0"), "{stdout}");
@@ -174,4 +174,147 @@ fn status_shows_the_agent_of_each_site() {
     let out = vigie(&config, &["status"]);
     let text = stdout(&out);
     assert!(text.contains("agent : clé enregistrée il y a"), "{text}");
+}
+
+const API: &str = "[api]\npublic_url = \"https://veilleur.example.org\"\n";
+
+fn api(public_url: &str) -> String {
+    format!("[api]\npublic_url = \"{public_url}\"\n")
+}
+
+/// Relit le QR code imprimé par `device pair` : deux modules par caractère,
+/// un demi-bloc plein est un module clair.
+fn decode_qr(lines: &[&str]) -> String {
+    let rows: Vec<Vec<char>> = lines.iter().map(|l| l.chars().collect()).collect();
+    let width = rows.iter().map(Vec::len).max().expect("QR vide");
+    let light = |x: usize, y: usize| -> bool {
+        let c = rows[y / 2].get(x).copied().unwrap_or(' ');
+        match (c, y % 2) {
+            ('█', _) | ('▀', 0) | ('▄', 1) => true,
+            (' ' | '▀' | '▄', _) => false,
+            _ => panic!("caractère inattendu dans le QR : {c:?}"),
+        }
+    };
+    const SCALE: usize = 4;
+    const MARGIN: usize = 8;
+    let (w, h) = (width, rows.len() * 2);
+    let mut image = rqrr::PreparedImage::prepare_from_greyscale(
+        w * SCALE + 2 * MARGIN,
+        h * SCALE + 2 * MARGIN,
+        |x, y| {
+            let inside = (MARGIN..MARGIN + w * SCALE).contains(&x)
+                && (MARGIN..MARGIN + h * SCALE).contains(&y);
+            if !inside || light((x - MARGIN) / SCALE, (y - MARGIN) / SCALE) {
+                255
+            } else {
+                0
+            }
+        },
+    );
+    let grids = image.detect_grids();
+    assert_eq!(grids.len(), 1, "un seul QR code attendu");
+    grids[0].decode().expect("QR illisible").1
+}
+
+/// Le QR code, puis le lien, dans la sortie de `device pair`.
+fn pair_output(out: &Output) -> (String, String) {
+    let text = stdout(out);
+    let lines: Vec<&str> = text.lines().collect();
+    let blank = lines.iter().position(|l| l.is_empty()).expect("ligne vide");
+    let link = lines[blank + 1].to_owned();
+    (decode_qr(&lines[..blank]), link)
+}
+
+#[test]
+fn device_pair_needs_an_api_section_and_a_safe_url() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db = dir.path().join("vigie.db");
+
+    let config = write_config(dir.path(), "");
+    let out = vigie(&config, &["device", "pair", "--name", "pc"]);
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    assert!(stderr(&out).contains("[api]"), "{out:?}");
+
+    let config = write_config(dir.path(), &api("http://site-a.example.org"));
+    let out = vigie(&config, &["device", "pair", "--name", "pc"]);
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    assert!(!db.exists(), "aucune base pour une adresse refusée");
+
+    let config = write_config(dir.path(), API);
+    let out = vigie(&config, &["device", "pair", "--name", "   "]);
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    assert!(stderr(&out).contains("nom d'appareil vide"), "{out:?}");
+    assert!(!db.exists());
+
+    let config = write_config(dir.path(), &api("http://127.0.0.1:8080"));
+    let out = vigie(&config, &["device", "pair", "--name", "pc"]);
+    assert!(out.status.success(), "boucle locale admise : {out:?}");
+}
+
+#[test]
+fn device_pair_prints_a_qr_code_of_the_link_and_list_shows_no_secret() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let config = write_config(dir.path(), API);
+
+    let out = vigie(&config, &["device", "pair", "--name", "téléphone"]);
+    assert!(out.status.success(), "{out:?}");
+    let (decoded, link) = pair_output(&out);
+    assert_eq!(decoded, link);
+    let code = link
+        .strip_prefix("vigie://pair?u=https%3A%2F%2Fveilleur.example.org&c=")
+        .unwrap_or_else(|| panic!("lien inattendu : {link}"));
+    assert_eq!(code.len(), 22);
+    assert!(stdout(&out).contains("(10 min), une seule fois"), "{out:?}");
+
+    let out = vigie(&config, &["device", "list"]);
+    assert!(out.status.success(), "{out:?}");
+    let text = stdout(&out);
+    assert!(text.contains("appareils : aucun"), "{text}");
+    assert!(text.contains("en attente d'appairage : 1"), "{text}");
+    assert!(text.contains("téléphone"), "{text}");
+    assert!(!text.contains(code), "code affiché par list : {text}");
+
+    let out = vigie(&config, &["device", "revoke", "99"]);
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    assert!(stderr(&out).contains("aucun appareil 99"), "{out:?}");
+}
+
+#[test]
+fn device_revoke_marks_a_paired_device_revoked() {
+    use vigie::device;
+    use vigie::store::Store;
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let config = write_config(dir.path(), API);
+    let out = vigie(&config, &["device", "pair", "--name", "pc"]);
+    assert!(out.status.success(), "{out:?}");
+    let (_, link) = pair_output(&out);
+    let code = link.rsplit("&c=").next().expect("code");
+
+    // Ce que fait `POST /api/v1/pair`, sans serveur.
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("horloge")
+        .as_secs() as i64;
+    let paired = Store::open(&dir.path().join("vigie.db"))
+        .expect("open")
+        .consume_pairing(&device::hash(code), &device::hash("jeton"), now)
+        .expect("consume")
+        .expect("appareil");
+
+    let text = stdout(&vigie(&config, &["device", "list"]));
+    assert!(text.contains("appareils : 1"), "{text}");
+    assert!(text.contains("actif, jamais vu"), "{text}");
+    assert!(!text.contains("en attente"), "{text}");
+
+    let id = paired.id.to_string();
+    let out = vigie(&config, &["device", "revoke", &id]);
+    assert!(out.status.success(), "{out:?}");
+    assert!(stdout(&out).contains("révoqué"), "{out:?}");
+    let out = vigie(&config, &["device", "revoke", &id]);
+    assert!(out.status.success(), "{out:?}");
+    assert!(stdout(&out).contains("déjà révoqué"), "{out:?}");
+
+    let text = stdout(&vigie(&config, &["device", "list"]));
+    assert!(text.contains(&format!("#{id}  pc  révoqué le")), "{text}");
 }
