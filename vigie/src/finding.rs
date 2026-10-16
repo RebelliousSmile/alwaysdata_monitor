@@ -5,7 +5,11 @@
 use std::fmt;
 
 /// Ordonnée : une gravité qui monte renvoie l'e-mail d'ouverture.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+/// Sérialisée comme [`Severity::as_str`].
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
+#[serde(rename_all = "lowercase")]
 pub enum Severity {
     /// Montré dans `status`, jamais envoyé par e-mail.
     Info,

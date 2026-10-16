@@ -26,6 +26,13 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "std"
 webpki-roots = "1"
 url = "2"
 
+# Jeton de l'appareil dans le Credential Manager (secret.rs). Jamais la
+# façade `keyring` : sans sa feature native, elle se rabat en silence sur un
+# stockage en mémoire. Android garde le jeton dans un fichier privé.
+[target.'cfg(windows)'.dependencies]
+keyring-core = "1"
+windows-native-keyring-store = { version = "1", default-features = false }
+
 # Scan du QR code d'appairage : Android seulement, Windows colle le lien.
 [target.'cfg(any(target_os = "android", target_os = "ios"))'.dependencies]
 tauri-plugin-barcode-scanner = "2"

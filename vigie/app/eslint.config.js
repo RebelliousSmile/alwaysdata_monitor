@@ -24,6 +24,8 @@ export default [
     rules: {
       ...typescript.rules,
       'vue/multi-word-component-names': 'off',
+      // Échappement : aucun HTML brut injecté dans le webview.
+      'vue/no-v-html': 'error',
     },
   },
   { ignores: ['dist/', 'node_modules/', 'src-tauri/'] },

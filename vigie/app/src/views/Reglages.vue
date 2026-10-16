@@ -5,7 +5,7 @@ import AppIcon from '@/components/AppIcon.vue'
 import DataGate from '@/components/DataGate.vue'
 import NotYet from '@/components/NotYet.vue'
 import StatusChip from '@/components/StatusChip.vue'
-import type { Device } from '@/lib/api'
+import type { Device, TokenStorage } from '@/lib/api'
 import { now } from '@/lib/clock'
 import { formatSpan, formatWhen } from '@/lib/time'
 import { asApiError, useConnection } from '@/stores/connection'
@@ -30,6 +30,30 @@ function deviceState(device: Device): { tone: 'ok' | 'neutral'; label: string } 
   if (device.revoked_at !== null) return { tone: 'neutral', label: `Révoqué ${formatWhen(device.revoked_at, now.value)}` }
   return { tone: 'ok', label: 'Actif' }
 }
+
+// Où vit le jeton de cet appareil. Seul l'ancien fichier est un état
+// dégradé : la migration est retentée à chaque lancement.
+const TOKEN_STORAGE: Record<TokenStorage, { tone: 'ok' | 'warn'; label: string; detail: string }> = {
+  keyring: {
+    tone: 'ok',
+    label: 'Trousseau du système',
+    detail: 'Jeton rangé dans le Credential Manager de Windows, pour ce poste seulement.',
+  },
+  private_file: {
+    tone: 'ok',
+    label: 'Stockage privé',
+    detail: 'Jeton dans le stockage privé de l’application, exclu de la sauvegarde et du transfert vers un autre téléphone.',
+  },
+  file_legacy: {
+    tone: 'warn',
+    label: 'Ancien fichier',
+    detail: 'Le jeton n’a pas pu être rangé dans le trousseau : il reste dans le fichier de l’appareil. Nouvel essai au prochain lancement.',
+  },
+}
+const tokenStorage = computed(() => {
+  const storage = connection.device?.token_storage
+  return storage ? TOKEN_STORAGE[storage] : null
+})
 
 const confirming = ref(false)
 const removing = ref(false)
@@ -137,6 +161,20 @@ async function remove(): Promise<void> {
     class="flex flex-col gap-2 rounded-card border border-line bg-surface p-3.5"
     data-unpair
   >
+    <div
+      v-if="tokenStorage"
+      class="flex flex-col gap-0.5"
+      data-token-storage
+    >
+      <div class="flex flex-wrap items-center gap-2">
+        <span class="flex-1 text-sm font-semibold">Jeton de cet appareil</span>
+        <StatusChip
+          :tone="tokenStorage.tone"
+          :label="tokenStorage.label"
+        />
+      </div>
+      <span class="text-xs text-text-3">{{ tokenStorage.detail }}</span>
+    </div>
     <p class="text-sm text-text-2">
       Retirer cet appareil révoque son jeton côté veilleur et l’efface de l’appareil.
     </p>
