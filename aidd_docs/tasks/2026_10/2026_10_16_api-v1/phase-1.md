@@ -10,11 +10,12 @@ status: pending
 .
 └── vigie/
     ├── src/
-    │   ├── api/limit.rs      ✅ deux tables de seaux (appareils, IP /64), IP cliente (boucle locale seulement)
-│   ├── api/log_text.rs   ✅ LogText : seul constructeur assainissant
-│   ├── serve.rs          ✏️ into_make_service_with_connect_info
+        │   ├── api/limit.rs      ✅ deux tables de seaux (appareils, IP /64), IP cliente (boucle locale seulement)
+    │   ├── api/log_text.rs   ✅ LogText : seul constructeur assainissant
+    │   ├── serve.rs          ✏️ into_make_service_with_connect_info
     │   ├── api.rs            ✏️ couche de journal et d'en-têtes, 415, OPTIONS, sanitize des champs de logs
-    │   ├── error.rs          ✏️ ErrorCode::UnsupportedMediaType, BadRequest ; Retry-After sur 429
+    │   ├── error.rs          ✏️ ErrorCode::UnsupportedMediaType, BadRequest, CursorExpired (409) ; Retry-After sur 429
+    ├── app/eslint.config.js  ✏️ vue/no-v-html en erreur
     │   └── config.rs         ✏️ 200 sites au plus
     └── tests/
         └── api_guards.rs     ✅ débit, journal, en-têtes, CORS, 415, liste blanche des DTO
@@ -43,7 +44,7 @@ journey
 
 ## Tasks to do
 
-1. `limit.rs` (règles du plan), `ConnectInfo` câblé dans `serve`, `FakeClock` dans les tests.
+1. `limit.rs` (règles du plan), `ConnectInfo` câblé dans `serve`, `FakeClock` dans les tests ; l'extracteur scinde recherche du jeton et `touch_seen` pour appliquer la limite entre les deux.
 2. Couche Tower sur `/api/v1`, extérieure à `request_id` : journal (gabarit via `MatchedPath`, regroupement des 429), en-têtes ; test `OPTIONS` → 404.
 3. 415 seulement pour un `POST` à corps mal typé.
 4. `LogText` utilisé par tout DTO d'origine log, `detail` des incidents `logs` compris.
