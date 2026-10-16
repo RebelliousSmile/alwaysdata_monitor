@@ -1,6 +1,6 @@
 ---
 objective: "Le socle de Vigie tient les exigences de l'issue #9 : écritures SQLite sans SQLITE_BUSY entre serve, tick et la CLI, erreurs d'API uniformes avec request_id, horloge injectable, build musl et détection de secrets en CI, règles de clés et de secrets écrites."
-status: in-progress
+status: done
 issue_number: 9
 ---
 
