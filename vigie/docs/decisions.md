@@ -32,3 +32,26 @@ Points déjà tranchés ailleurs :
 | Agir sur un site suit toujours trois temps : Vigie propose, l'exploitant valide, l'application se fait par une commande explicite (`--apply`). Aucune action n'est automatique. Cette décision revient sur « l'outil n'écrit jamais sur un site » du plan de la console | Les garde-fous des issues (signature, anti-rejeu, liste fermée d'actions, sauvegarde et retour arrière) rendent l'écriture acceptable si l'exploitant valide chaque action | #10, #6, #13, #4 |
 | La typologie d'un site a deux axes. Le type de CMS (`generic`, `wordpress`, `prestashop`) filtre les contrôles, comme aujourd'hui. Le runtime (`php`, `node`, `static`) filtre les commandes. `wordpress` et `prestashop` impliquent `php`, ce que la lecture de la configuration vérifie | Le CMS seul ne dit pas ce qu'un site peut exécuter, et le runtime seul ne dit pas quels contrôles lui appliquer | #2, #4 |
 | Les signatures restent encodées en base64 standard avec remplissage, et l'agent PHP utilise l'extension sodium native. #9 et #6 demandaient de l'hex minuscule et sodium_compat | L'agent signe ainsi en production ; changer d'encodage obligerait à redéployer chaque agent avec une période où le veilleur accepte les deux formats. L'extension sodium est présente chez Alwaysdata (`hebergement.md`). L'encodage est figé et documenté dans `protocole-agent.md`, ce qui était le vrai besoin | #9, #6 |
+
+## Sonde UptimeRobot (issue #3)
+
+Une sonde UptimeRobot HTTP(s) interroge `/health` du veilleur toutes les
+5 min. Elle couvre la panne du VPS ou du veilleur, que le veilleur ne peut pas
+signaler lui-même ; elle ne surveille pas les sites. `/health` répond 503
+quand le dernier `tick` a plus de 3 min (`src/serve.rs`, test
+`health_thresholds`). Les conditions de l'offre gratuite et l'essai du
+2026-10-16 (alerte environ 5 min après le 503, retour environ 3 min après la
+relance) sont dans [`reception.md`](./reception.md), section 4.
+
+| Décision du 2026-10-16 | Raison |
+| --- | --- |
+| Pas de webhook entrant en V1. Les alertes UptimeRobot arrivent par e-mail, n'entrent pas dans la base de Vigie et restent à usage interne | Un seul canal d'incidents suffit. Les conditions d'UptimeRobot interdisent de reconditionner ses alertes pour un tiers : ce que voit le client vient du veilleur |
+
+Si un webhook entrant devient utile, il respecte toutes ces exigences :
+
+- un secret partagé rotable, distinct des clés Ed25519 des agents ;
+- un HMAC-SHA256 du corps et de l'horodatage, comparé en temps constant ;
+- un anti-rejeu de ±300 s sur l'horodatage ;
+- une limite de débit par IP, 10 appels par minute ;
+- un schéma JSON strict qui refuse les champs inconnus ;
+- un traitement strictement en lecture seule : aucun appel ne déclenche d'action.
