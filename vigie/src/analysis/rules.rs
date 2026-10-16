@@ -378,13 +378,28 @@ impl CompiledRule {
     /// L'entrée compte pour la règle : méthode, statut et chemin, du moins
     /// coûteux au plus coûteux.
     pub fn matches(&self, entry: &Entry) -> bool {
+        self.matches_request(entry) && self.matches_path(&entry.path)
+    }
+
+    /// Méthode et statut seulement : le test peu coûteux, avant le chemin.
+    pub fn matches_request(&self, entry: &Entry) -> bool {
         (self.methods.is_empty()
             || entry
                 .method
                 .as_ref()
                 .is_some_and(|m| self.methods.contains(m)))
             && (self.statuses.is_empty() || self.statuses.iter().any(|r| r.contains(&entry.status)))
-            && (self.paths.is_empty() || self.paths.iter().any(|g| g.matches(&entry.path)))
+    }
+
+    /// Le chemin seul ; le repli (`fold.rs`) en garde le résultat par chemin
+    /// distinct d'un lot.
+    pub fn matches_path(&self, path: &str) -> bool {
+        self.paths.is_empty() || self.paths.iter().any(|g| g.matches(path))
+    }
+
+    /// La règle filtre sur le chemin.
+    pub fn has_paths(&self) -> bool {
+        !self.paths.is_empty()
     }
 }
 
