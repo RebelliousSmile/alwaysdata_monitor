@@ -22,7 +22,7 @@ Le rapport porte aussi des faits : version de WordPress (`wp-includes/version.ph
 version de PHP, version de l'agent. Les liens symboliques ne sont jamais suivis
 hors de `root`.
 
-L'agent ne garde aucun état : `seq` est l'heure en millisecondes. C'est le
+Le rapport ne dépend d'aucun état : son `seq` est l'heure en millisecondes (seul le canal de commandes, facultatif, garde un état, voir plus bas). C'est le
 veilleur qui compare les empreintes à la référence du site et ouvre un
 avertissement `agent:integrity` quand un fichier critique change (voir
 [Intégrité des fichiers critiques](./protocole-agent.md#intégrité-des-fichiers-critiques)).
@@ -185,6 +185,43 @@ la tâche planifiée échoue : enchaîner les deux sans attendre. Supprimer ensu
 `secret.key.old`. En cas de fuite de la clé, faire `rotate-key` (ou
 `site remove`) d'abord : les rapports signés par l'ancienne clé sont refusés
 dès maintenant.
+
+## Commandes du veilleur
+
+Facultatif, fermé par défaut. Avec une section `commands` dans `config.json`,
+l'agent retire après chaque rapport la commande de son site
+([`protocole-commandes.md`](./protocole-commandes.md)) :
+
+```json
+"commands": {
+  "endpoint": "https://<sous-domaine-du-veilleur>/r/v1/commands",
+  "pubkey": "<sortie de vigie commands pubkey>"
+}
+```
+
+- `pubkey` **épingle** la clé de commandes du veilleur : une réponse signée
+  par une autre clé n'exécute rien. Elle ne change que par une nouvelle pose.
+- Avec `commands`, l'agent exige `config.json` en 0600 et son dossier en 0700,
+  au propriétaire du processus, sans lien symbolique : sinon il refuse de
+  retirer. Sous Windows, `commands` est refusé (droits non vérifiables).
+- L'état du canal vit à côté de la clé, dans `state.json` (0600, écrit par
+  fichier temporaire puis `rename`, sous `flock` de `state.lock`) : séquences,
+  commande en cours, résultat en attente d'accusé. Un passage concurrent saute
+  les commandes. Un état illisible ou ouvert arrête le canal, pas le rapport.
+- Ce que l'agent exécute : `ping` (rien, répond `pong`) et `rotate-key` (voir
+  ci-dessous). `htaccess-apply` et `htaccess-rollback` répondent `refused` tant
+  que #13 n'est pas livré. Tout autre nom fait rejeter la réponse. Aucun
+  `eval`, aucun appel shell.
+- Une commande n'est exécutée qu'une fois ; son résultat est renvoyé à chaque
+  passage jusqu'à l'accusé du veilleur. Une exécution interrompue revient
+  `failed` (« exécution interrompue »).
+- `rotate-key` : nouvelle paire dans `secret.key.new`, preuve de possession
+  envoyée avec le résultat ; la bascule (`secret.key.new` devient
+  `secret.key`, l'ancienne est gardée en `secret.key.old`) n'a lieu que sur un
+  accusé accepté, ou sur une réponse **signée** à un retrait signé par la
+  nouvelle clé. Un 204 de rapport, non signé, ne fait jamais basculer.
+- Activer côté veilleur : `vigie site commands site-a enable`. Un site PHP
+  déclaré `generic` dans `config.toml` doit y porter `runtime = "php"`.
 
 ## Retrait
 
