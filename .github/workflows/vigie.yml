@@ -1,14 +1,16 @@
 name: vigie
 
-# Veilleur uniquement : le module PrestaShop n'est pas concerné.
+# Veilleur uniquement : ni le module PrestaShop ni la console (vigie/app).
 on:
   push:
     paths:
       - "vigie/**"
+      - "!vigie/app/**"
       - ".github/workflows/vigie.yml"
   pull_request:
     paths:
       - "vigie/**"
+      - "!vigie/app/**"
       - ".github/workflows/vigie.yml"
   workflow_dispatch:
 

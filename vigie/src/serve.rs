@@ -1,12 +1,14 @@
 //! `vigie serve` : service systemd `vigie-serve`, publié par Caddy.
 //!
-//! Deux routes seulement :
+//! Trois familles de routes :
 //!
 //! - `GET /health` publie l'heure du dernier `tick`, sans aucun nom de site :
 //!   `vigie/scripts/deploy.mjs` en a besoin pour prouver qu'un `tick` du
 //!   nouveau binaire est passé ;
 //! - `POST /r/v1/report` reçoit les rapports signés des agents
-//!   (`docs/protocole-agent.md`) et n'envoie jamais d'e-mail : `tick` notifie.
+//!   (`docs/protocole-agent.md`) et n'envoie jamais d'e-mail : `tick` notifie ;
+//! - `/api/v1` sert la console, authentifiée par appareil (`api.rs`,
+//!   `docs/api-console.md`).
 //!
 //! Tout le reste, autre route comme autre méthode, et tout rapport refusé
 //! reçoivent le même 404 sans corps, pour ne rien dire de l'outil à qui balaie
@@ -76,11 +78,11 @@ pub fn health(last_tick: Option<i64>, now: i64) -> (StatusCode, Health) {
 /// Heure courante en secondes Unix ; remplaçable dans les tests.
 pub type Clock = Arc<dyn Fn() -> i64 + Send + Sync>;
 
-struct AppState {
-    database: PathBuf,
+pub(crate) struct AppState {
+    pub(crate) database: PathBuf,
     /// Identifiants des sites de la configuration.
-    sites: Vec<String>,
-    clock: Clock,
+    pub(crate) sites: Vec<String>,
+    pub(crate) clock: Clock,
 }
 
 pub fn router(database: PathBuf, sites: Vec<String>) -> Router {
@@ -91,6 +93,7 @@ pub fn router_with_clock(database: PathBuf, sites: Vec<String>, clock: Clock) ->
     Router::new()
         .route("/health", get(health_handler).fallback(not_found))
         .route("/r/v1/report", post(report_handler).fallback(not_found))
+        .merge(crate::api::routes())
         .fallback(not_found)
         .with_state(Arc::new(AppState {
             database,
@@ -99,7 +102,7 @@ pub fn router_with_clock(database: PathBuf, sites: Vec<String>, clock: Clock) ->
         }))
 }
 
-async fn not_found() -> StatusCode {
+pub(crate) async fn not_found() -> StatusCode {
     StatusCode::NOT_FOUND
 }
 
@@ -223,6 +226,13 @@ pub fn run(database: PathBuf, sites: Vec<String>, ip: IpAddr, port: u16) -> Resu
         .enable_all()
         .build()
         .context("démarrage du runtime tokio")?;
+    // Une base existante est migrée dès le démarrage, sans attendre le
+    // prochain `tick` : `/api/v1` en a besoin. `serve` ne crée pas la base.
+    if database.is_file()
+        && let Err(err) = Store::open(&database)
+    {
+        log::error!("migration de la base au démarrage impossible : {err:#}");
+    }
     runtime.block_on(async move {
         let addr = SocketAddr::new(ip, port);
         let listener = tokio::net::TcpListener::bind(addr)
@@ -352,7 +362,17 @@ mod tests {
     async fn other_routes_and_methods_are_a_silent_404() {
         let dir = tempfile::tempdir().expect("tempdir");
         let db = dir.path().join("vigie.db");
-        for uri in ["/", "/admin", "/health/x", "/.env", "/r/v1/report", "/r/v1"] {
+        for uri in [
+            "/",
+            "/admin",
+            "/health/x",
+            "/.env",
+            "/r/v1/report",
+            "/r/v1",
+            "/api/v1",
+            "/api/v1/pair",
+            "/api/v1/inconnu",
+        ] {
             let (status, body) = get(db.clone(), uri).await;
             assert_eq!(status, StatusCode::NOT_FOUND, "{uri}");
             assert!(body.is_empty(), "{uri}");

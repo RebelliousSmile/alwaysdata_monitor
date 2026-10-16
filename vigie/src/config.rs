@@ -35,9 +35,21 @@ pub enum ConfigError {
 pub struct Config {
     /// Base SQLite partagée par `serve` et `tick`, chemin absolu.
     pub database: PathBuf,
+    /// API de la console ; sans elle, `device pair` est refusé.
+    pub api: Option<Api>,
     pub alerts: Alerts,
     #[serde(default)]
     pub sites: Vec<Site>,
+}
+
+/// API de la console (`docs/api-console.md`).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Api {
+    /// Adresse publique du veilleur, telle que la console l'appelle. La règle
+    /// « https hors boucle locale » est appliquée par `device pair`, pour
+    /// qu'une adresse mal saisie n'arrête ni `serve` ni `tick`.
+    pub public_url: String,
 }
 
 /// Envoi par un relais SMTP authentifié, en STARTTLS obligatoire.
@@ -195,6 +207,20 @@ fn is_plausible_https_url(value: &str) -> bool {
         && url::Url::parse(value).is_ok_and(|u| u.host_str().is_some())
 }
 
+/// `http://` ou `https://`, un hôte, ni identifiant, ni requête, ni fragment,
+/// aucun espace ni caractère de contrôle.
+fn is_plausible_base_url(value: &str) -> bool {
+    !value.chars().any(|c| c.is_whitespace() || c.is_control())
+        && url::Url::parse(value).is_ok_and(|u| {
+            matches!(u.scheme(), "http" | "https")
+                && u.host_str().is_some_and(|h| !h.is_empty())
+                && u.username().is_empty()
+                && u.password().is_none()
+                && u.query().is_none()
+                && u.fragment().is_none()
+        })
+}
+
 fn is_plausible_host(value: &str) -> bool {
     !value.is_empty()
         && value
@@ -238,6 +264,14 @@ impl Config {
         if !(self.alerts.password_file.is_absolute() || pw.starts_with('/')) {
             return Err(format!(
                 "alerts.password_file doit être un chemin absolu (reçu : {pw})"
+            ));
+        }
+        if let Some(api) = &self.api
+            && !is_plausible_base_url(&api.public_url)
+        {
+            return Err(format!(
+                "api.public_url doit être http(s)://hôte[:port][/chemin], sans requête (reçu : {})",
+                api.public_url
             ));
         }
         let mut seen = HashSet::new();
@@ -362,6 +396,34 @@ url = "https://www.example.org/"
             "smtp_host = \"smtp.example.org\"\nsmtp_port = 0",
         );
         assert!(parse_str(&port).is_err());
+    }
+
+    #[test]
+    fn reads_the_api_section() {
+        let raw = VALID.replace(
+            "[alerts]",
+            "[api]\npublic_url = \"https://veilleur.example.org\"\n\n[alerts]",
+        );
+        let config = parse_str(&raw).expect("valide");
+        assert_eq!(
+            config.api.expect("api").public_url,
+            "https://veilleur.example.org"
+        );
+        assert!(parse_str(VALID).expect("valide").api.is_none());
+        // Forme seulement : http est refusé plus tard, par `device pair`.
+        let http = raw.replace("https://veilleur", "http://veilleur");
+        assert!(parse_str(&http).is_ok());
+        for bad in [
+            "veilleur.example.org",
+            "https://veilleur.example.org/?x=1",
+            "https://moi@veilleur.example.org",
+            "ftp://veilleur.example.org",
+        ] {
+            let raw = raw.replace("https://veilleur.example.org", bad);
+            assert!(parse_str(&raw).is_err(), "{bad}");
+        }
+        let unknown = raw.replace("[api]", "[api]\nsecret = 1");
+        assert!(parse_str(&unknown).is_err());
     }
 
     #[test]

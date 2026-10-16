@@ -17,8 +17,12 @@ use ed25519_dalek::VerifyingKey;
 
 use vigie::alert::{self, Notifier, SmtpNotifier};
 use vigie::config::{self, ConfigError};
+use vigie::device::{self, PAIRING_TTL};
 use vigie::finding::Severity;
-use vigie::store::{AckOutcome, Agent, KeyOutcome, SCHEMA_AGENTS, SCHEMA_INCIDENTS, Store};
+use vigie::store::{
+    AckOutcome, Agent, KeyOutcome, RevokeOutcome, SCHEMA_AGENTS, SCHEMA_DEVICES, SCHEMA_INCIDENTS,
+    Store,
+};
 use vigie::{human_age, iso_utc, now, serve, tick};
 
 /// Code de retour d'une configuration invalide ou introuvable.
@@ -71,6 +75,28 @@ enum Command {
     },
     /// Envoie un e-mail de test par le relais SMTP configuré
     TestAlert,
+    /// Appareils de la console : appairage et révocation
+    Device {
+        #[command(subcommand)]
+        action: DeviceAction,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum DeviceAction {
+    /// Crée un code d'appairage valable 10 min, affiché en QR code et en lien
+    Pair {
+        /// Nom de l'appareil, repris par `device list`
+        #[arg(long)]
+        name: String,
+    },
+    /// Liste les appareils et les codes en attente, sans aucun secret
+    List,
+    /// Révoque un appareil : son jeton est refusé dès maintenant
+    Revoke {
+        /// Numéro de l'appareil (dans `device list`)
+        id: i64,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -138,6 +164,7 @@ fn run(cli: Cli) -> anyhow::Result<()> {
         Command::Status => status(&config),
         Command::Site { action } => site(&config, action),
         Command::Ack { id } => ack(&config, id),
+        Command::Device { action } => device(&config, action),
         Command::TestAlert => {
             let notifier = SmtpNotifier::new(config.alerts.clone());
             notifier
@@ -306,6 +333,92 @@ fn ack(config: &config::Config, id: i64) -> anyhow::Result<()> {
         AckOutcome::AlreadyAcked => println!("incident {id} déjà acquitté"),
         AckOutcome::AlreadyClosed => println!("incident {id} déjà clos"),
         AckOutcome::NotFound => bail!("aucun incident {id}"),
+    }
+    Ok(())
+}
+
+fn device(config: &config::Config, action: DeviceAction) -> anyhow::Result<()> {
+    let now = now();
+    match action {
+        DeviceAction::Pair { name } => {
+            let Some(api) = &config.api else {
+                bail!(
+                    "aucune section [api] dans la configuration : y ajouter public_url (voir config.example.toml)"
+                );
+            };
+            // Avant toute écriture : aucun code n'est créé pour une adresse refusée.
+            device::check_public_url(&api.public_url)?;
+            let name = device::check_name(&name)?;
+            let code = device::new_code()?;
+            let link = device::pair_link(&api.public_url, &code);
+            let qr = device::render_qr(&link)?;
+            let expires_at = now + PAIRING_TTL;
+            let mut store = Store::open(&config.database)?;
+            store.create_pairing(&device::hash(&code), name, now, expires_at)?;
+            println!("{qr}");
+            println!();
+            println!("{link}");
+            println!();
+            println!(
+                "appairage de « {name} » : à scanner ou à coller dans la console avant {} ({} min), une seule fois",
+                iso_utc(expires_at),
+                PAIRING_TTL / 60
+            );
+        }
+        DeviceAction::List => {
+            let store = match Store::open_read(&config.database)? {
+                Some(store) if store.schema_version()? >= SCHEMA_DEVICES => Some(store),
+                _ => None,
+            };
+            let (devices, pending) = match &store {
+                Some(store) => (store.devices()?, store.pending_pairings(now)?),
+                None => (Vec::new(), Vec::new()),
+            };
+            if devices.is_empty() {
+                println!("appareils : aucun");
+            } else {
+                println!("appareils : {}", devices.len());
+                for d in &devices {
+                    let seen = d.seen_at.map_or("jamais vu".into(), |at| {
+                        format!("vu il y a {}", human_age(now - at))
+                    });
+                    let state = match d.revoked_at {
+                        Some(at) => format!("révoqué le {}", iso_utc(at)),
+                        None => format!("actif, {seen}"),
+                    };
+                    println!(
+                        "  #{}  {}  {state}  (appairé le {})",
+                        d.id,
+                        d.name,
+                        iso_utc(d.created_at)
+                    );
+                }
+            }
+            if !pending.is_empty() {
+                println!("en attente d'appairage : {}", pending.len());
+                for p in &pending {
+                    println!(
+                        "  {}  code créé le {}, expire dans {}",
+                        p.name,
+                        iso_utc(p.created_at),
+                        human_age(p.expires_at - now)
+                    );
+                }
+            }
+        }
+        DeviceAction::Revoke { id } => {
+            if !config.database.is_file() {
+                bail!("aucun appareil {id} (base absente)");
+            }
+            let mut store = Store::open(&config.database)?;
+            match store.revoke_device(id, now)? {
+                RevokeOutcome::Revoked => {
+                    println!("appareil {id} révoqué : son jeton est refusé dès maintenant")
+                }
+                RevokeOutcome::AlreadyRevoked => println!("appareil {id} déjà révoqué"),
+                RevokeOutcome::NotFound => bail!("aucun appareil {id}"),
+            }
+        }
     }
     Ok(())
 }

@@ -15,7 +15,7 @@ Sur le veilleur, toujours appeler le binaire par son chemin complet.
 
 | Commande | Rôle |
 | -------- | ---- |
-| `~/vigie/bin/vigie serve` | Service `vigie-serve` derrière Caddy : écoute sur `$IP:$PORT` (ou `--ip`, `--port`), `127.0.0.1:8080` dans l'unité. Deux routes : `GET /health` et `POST /r/v1/report` ; tout le reste renvoie 404 sans corps |
+| `~/vigie/bin/vigie serve` | Service `vigie-serve` derrière Caddy : écoute sur `$IP:$PORT` (ou `--ip`, `--port`), `127.0.0.1:8080` dans l'unité. Routes : `GET /health`, `POST /r/v1/report` et l'API de la console `/api/v1` ; tout le reste renvoie 404 sans corps. Migre la base au démarrage |
 | `~/vigie/bin/vigie tick` | Lancé chaque minute par `vigie-tick.timer` : lance les contrôles dus, ouvre ou clôt les incidents, envoie les e-mails |
 | `~/vigie/bin/vigie check <site> --once` | Lance tous les contrôles d'un site et affiche les constats, sans écrire dans la base ni envoyer d'e-mail ; code 1 si un constat est à traiter |
 | `~/vigie/bin/vigie status` | Dernier passage, sites et dernier contrôle, incidents ouverts avec leur âge, état de l'agent de chaque site, informations (en-têtes manquants), notifications en attente ; code 1 si `tick` est en retard |
@@ -25,9 +25,13 @@ Sur le veilleur, toujours appeler le binaire par son chemin complet.
 | `~/vigie/bin/vigie site accept <site>` | Prend les empreintes du dernier rapport comme référence et clôt les incidents d'intégrité : à lancer après une modification voulue d'un fichier critique |
 | `~/vigie/bin/vigie site remove <site> [--yes]` | Retire la clé, l'état des rapports et la référence des empreintes ; sans `--yes`, demande de retaper l'identifiant |
 | `~/vigie/bin/vigie ack <id>` | Acquitte un incident : plus de rappel, la clôture automatique reste active |
+| `~/vigie/bin/vigie device pair --name <nom>` | Crée un code d'appairage de la console, valable 10 min et une seule fois : l'affiche en QR code (terminal à fond sombre) et en lien `vigie://pair` ; exige la section `[api]` |
+| `~/vigie/bin/vigie device list` | Appareils (actif, vu il y a…, révoqué) et codes en attente, sans aucun secret |
+| `~/vigie/bin/vigie device revoke <id>` | Révoque un appareil : son jeton est refusé dès la requête suivante |
 | `~/vigie/bin/vigie test-alert` | Envoie un e-mail de test par le relais SMTP configuré |
 
 `/health` répond 200 si le dernier `tick` date de moins de 3 minutes, sinon 503.
+Appairage, jetons et codes de réponse de `/api/v1` : [`docs/api-console.md`](./docs/api-console.md).
 
 ## Rapports des agents
 
@@ -89,6 +93,11 @@ l'envoi dans le fichier `password_file`. L'envoi est refusé, avant toute
 connexion, si ce fichier est lisible par le groupe ou par les autres, ou s'il
 appartient à un autre utilisateur. Le mot de passe n'apparaît dans aucun log ni
 dans aucune erreur.
+
+La section `[api]`, facultative, donne `public_url`, l'adresse publique du
+veilleur telle que la console l'appelle : en https, http n'étant admis que sur
+la boucle locale. Elle entre dans le lien d'appairage ; sans elle,
+`device pair` est refusé.
 
 ## Développement
 

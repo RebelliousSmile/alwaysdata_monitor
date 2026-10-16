@@ -69,6 +69,7 @@ fn options(site: &IncidentSite) -> Options {
 fn config(dir: &Path, base: &str) -> Config {
     Config {
         database: dir.join("vigie.db"),
+        api: None,
         alerts: Alerts {
             to: "alertes@example.org".into(),
             from: "vigie@example.org".into(),
