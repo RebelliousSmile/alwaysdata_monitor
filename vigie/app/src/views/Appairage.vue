@@ -2,7 +2,7 @@
 import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import ScreenTitle from '@/components/ScreenTitle.vue'
-import type { ErrorKind } from '@/lib/api'
+import { errorText, type ErrorKind } from '@/lib/api'
 import { parsePairLink } from '@/lib/pairing'
 import { isMobile } from '@/lib/platform'
 import { asApiError, useConnection } from '@/stores/connection'
@@ -56,12 +56,24 @@ async function scanCode(): Promise<void> {
   failure.value = null
   try {
     // Chargé à la demande : le plugin n'existe que dans les builds mobiles.
-    const { scan, Format } = await import('@tauri-apps/plugin-barcode-scanner')
-    const result = await scan({ formats: [Format.QRCode] })
+    const scanner = await import('@tauri-apps/plugin-barcode-scanner')
+    // `scan` échoue tant que la caméra n'a pas été autorisée : on la demande
+    // d'abord, Android n'affiche sa boîte de dialogue qu'à cette occasion.
+    let camera = await scanner.checkPermissions()
+    if (camera !== 'granted') camera = await scanner.requestPermissions()
+    if (camera !== 'granted') {
+      failure.value =
+        'Accès à la caméra refusé. Autorisez-le dans les réglages Android de Vigie, ou collez le lien.'
+      return
+    }
+    const result = await scanner.scan({ formats: [scanner.Format.QRCode] })
     link.value = result.content
     await submit(result.content)
   } catch (err) {
-    failure.value = `Scan impossible : ${String(err)}. Collez le lien à la place.`
+    const text = errorText(err)
+    // Retour arrière pendant le scan : rien d'anormal à signaler.
+    if (text === 'cancelled') return
+    failure.value = `Scan impossible : ${text}. Collez le lien à la place.`
   }
 }
 </script>
