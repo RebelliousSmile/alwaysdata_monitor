@@ -66,3 +66,68 @@ jobs:
         working-directory: vigie/app/src-tauri
       - run: cargo test --locked --all-targets
         working-directory: vigie/app/src-tauri
+
+  # APK de debug, comme lyremember : SDK, NDK et gen/android sont produits
+  # dans le job, rien n'est installé sur le poste. L'APK est un artefact du
+  # run, à télécharger sur le téléphone. La signature release viendra avec
+  # le workflow de release (phase 5).
+  android:
+    name: android
+    runs-on: ubuntu-24.04
+    env:
+      NDK_VERSION: 27.0.12077973
+    defaults:
+      run:
+        working-directory: vigie/app
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+        with:
+          package_json_file: vigie/app/package.json
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "20"
+          cache: pnpm
+          cache-dependency-path: vigie/app/pnpm-lock.yaml
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3.2.2
+      - run: sdkmanager "ndk;${{ env.NDK_VERSION }}"
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master
+        with:
+          toolchain: "1.93.0" # même version que vigie/app/src-tauri/rust-toolchain.toml
+          targets: aarch64-linux-android
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            vigie/app/src-tauri/target
+          key: console-android-${{ hashFiles('vigie/app/src-tauri/Cargo.lock') }}
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec tauri android init
+        env:
+          NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/${{ env.NDK_VERSION }}
+      # Une seule ABI (arm64) et un profil dev allégé : sans cela, l'APK de
+      # debug de lyremember pesait 746 Mo.
+      - run: pnpm exec tauri android build --apk --debug --target aarch64
+        env:
+          NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/${{ env.NDK_VERSION }}
+          CARGO_PROFILE_DEV_DEBUG: "false"
+          CARGO_PROFILE_DEV_STRIP: symbols
+          CARGO_PROFILE_DEV_OPT_LEVEL: "z"
+      - name: APK
+        id: apk
+        run: |
+          APK=$(find src-tauri/gen/android -path "*/debug/*.apk" -type f | head -1)
+          test -n "$APK" || { echo "aucun APK produit"; exit 1; }
+          ls -l "$APK"
+          echo "path=vigie/app/$APK" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: vigie-console-debug-apk
+          path: ${{ steps.apk.outputs.path }}
+          retention-days: 14
+          if-no-files-found: error
