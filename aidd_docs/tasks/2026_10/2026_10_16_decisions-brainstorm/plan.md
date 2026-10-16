@@ -1,6 +1,6 @@
 ---
 objective: "Chaque point resté ouvert dans le brainstorm du 2026-10-15 porte une décision datée, consignée dans le dépôt, et l'issue #11 peut être fermée."
-status: in-progress
+status: implemented
 issue_number: 11
 ---
 
