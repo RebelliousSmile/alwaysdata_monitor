@@ -1,0 +1,115 @@
+{
+  "agent_pubkey": "0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc=",
+  "agent_seed": "ERERERERERERERERERERERERERERERERERERERERERE=",
+  "commands_pubkey": "oJql9HpnWYAv+VX43C0qFKXJnSO+l/hkEn/5ODRVpPA=",
+  "commands_seed": "IiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiI=",
+  "comment": "Vecteurs du canal de commandes (docs/protocole-commandes.md). Graines de test seulement, jamais en service.",
+  "domains": {
+    "commands": "vigie-commands-v1\n",
+    "pull": "vigie-pull-v1\n",
+    "rotate": "vigie-rotate-v1\n"
+  },
+  "now": 1800000000,
+  "pulls": [
+    {
+      "body": "{\"agent\":\"agent-php/0.2.0\",\"nonce\":\"Tm9uY2VEZVRlc3RBMTIzNDU2\",\"result\":{\"command_id\":\"01a1e2f3-0000-7000-8000-000000000001\",\"detail\":\"pong\",\"status\":\"ok\"},\"sent_at\":1800000000,\"seq\":7,\"site\":\"site-a\",\"type\":\"pull\",\"v\":1}",
+      "name": "retrait signé avec le préfixe",
+      "signature": "nMfYKZFR9LY4YS1vr1puvS1stXz9fX1xYLMBBG23KC+w1TQrWga+0gkT0qY0RrnBscQEDB2iRyEPWNK+S4sZCQ==",
+      "verdict": "valid"
+    },
+    {
+      "body": "{\"agent\":\"agent-php/0.2.0\",\"nonce\":\"Tm9uY2VEZVRlc3RBMTIzNDU2\",\"result\":{\"command_id\":\"01a1e2f3-0000-7000-8000-000000000001\",\"detail\":\"pong\",\"status\":\"ok\"},\"sent_at\":1800000000,\"seq\":7,\"site\":\"site-a\",\"type\":\"pull\",\"v\":1}",
+      "name": "retrait signé sans préfixe (comme un rapport)",
+      "signature": "i0YIramcZ8K9D0Rt0vQwTqO0x7kZCpW3mwcOZzzSaWAseoR1LhhmSEWHEKpY5wmFFgHsX6Ye0T7VL6/xs6abBg==",
+      "verdict": "bad-signature"
+    }
+  ],
+  "request_nonce": "Tm9uY2VEZVRlc3RBMTIzNDU2",
+  "responses": [
+    {
+      "body": "{\"accepted\":null,\"acked\":null,\"command\":{\"expires_at\":1800086340,\"id\":\"01a1e2f3-0000-7000-8000-000000000001\",\"issued_at\":1799999940,\"name\":\"ping\",\"params\":{},\"runtime\":\"php\",\"seq\":3,\"site\":\"site-a\",\"v\":1},\"nonce\":\"Tm9uY2VEZVRlc3RBMTIzNDU2\",\"server_time\":1800000000,\"site\":\"site-a\",\"v\":1}",
+      "name": "réponse valide avec commande",
+      "signature": "9b7Qgz2cXQPSNHl95iTcOEG9MqL31GnUwumPVTGZPtT2WndbPCgCPCMGWlvLPgnFpCxgsxSUnxwJ/N+jHWFVAg==",
+      "timestamp": "1800000000",
+      "verdict": "valid"
+    },
+    {
+      "body": "{\"accepted\":null,\"acked\":null,\"command\":{\"expires_at\":1800086340,\"id\":\"01a1e2f3-0000-7000-8000-000000000001\",\"issued_at\":1799999940,\"name\":\"ping\",\"params\":{},\"runtime\":\"php\",\"seq\":3,\"site\":\"site-a\",\"v\":1},\"nonce\":\"Tm9uY2VEZVRlc3RBMTIzNDU2\",\"server_time\":1800000000,\"site\":\"site-a\",\"v\":1}",
+      "name": "préfixe de domaine faux",
+      "signature": "jZsOnDZRX4YdAX0zWk0vEAMxRgTiBFU2PzLJeK7pBknpjkjrqRN5leWb/RpSoDcpiOUB1AFRzmwNkpKxLBYtDg==",
+      "timestamp": "1800000000",
+      "verdict": "bad-signature"
+    },
+    {
+      "body": "{\"accepted\":null,\"acked\":null,\"command\":{\"expires_at\":1800086340,\"id\":\"01a1e2f3-0000-7000-8000-000000000001\",\"issued_at\":1799999940,\"name\":\"ping\",\"params\":{},\"runtime\":\"php\",\"seq\":3,\"site\":\"site-a\",\"v\":1},\"nonce\":\"Tm9uY2VEZVRlc3RBMTIzNDU2\",\"server_time\":1800000000,\"site\":\"site-a\",\"v\":1}",
+      "name": "horodatage d'en-tête altéré",
+      "signature": "9b7Qgz2cXQPSNHl95iTcOEG9MqL31GnUwumPVTGZPtT2WndbPCgCPCMGWlvLPgnFpCxgsxSUnxwJ/N+jHWFVAg==",
+      "timestamp": "1800000001",
+      "verdict": "bad-signature"
+    },
+    {
+      "body": "{\"accepted\":null,\"acked\":null,\"command\":{\"expires_at\":1800086340,\"id\":\"01a1e2f3-0000-7000-8000-000000000001\",\"issued_at\":1799999940,\"name\":\"ping\",\"params\":{},\"runtime\":\"php\",\"seq\":3,\"site\":\"site-a\",\"v\":1},\"nonce\":\"Tm9uY2VEZVRlc3RBMTIzNDU2\",\"server_time\":1800000000,\"site\":\"site-a\",\"v\":1}",
+      "name": "horodatage différent de server_time",
+      "signature": "a8G3S7vxC2rndneOSctEO3sK6vVuuEUOk1+zmLDpoLX3ncN6XMoRKB8E5sn6JHR9liDzBreB9trV3/aFXF+xCQ==",
+      "timestamp": "1800000005",
+      "verdict": "timestamp-mismatch"
+    },
+    {
+      "body": "{\"accepted\":null,\"acked\":null,\"command\":null,\"nonce\":\"Tm9uY2VEZVRlc3RBMTIzNDU2\",\"server_time\":1799999600,\"site\":\"site-a\",\"v\":1}",
+      "name": "horodatage hors de ±300 s",
+      "signature": "NKVoMtfKBDwFf/YduN+TF4iKs/4o1h/cXZT0VAj6uNJX+gzAXiw6H8MbDZGtgkuTeqkTcdO6hlIYB6Idcd9lBQ==",
+      "timestamp": "1799999600",
+      "verdict": "clock"
+    },
+    {
+      "body": "{\"accepted\":null,\"acked\":null,\"command\":{\"expires_at\":1800086340,\"id\":\"01a1e2f3-0000-7000-8000-000000000001\",\"issued_at\":1799999940,\"name\":\"ping\",\"params\":{},\"runtime\":\"php\",\"seq\":3,\"site\":\"site-b\",\"v\":1},\"nonce\":\"Tm9uY2VEZVRlc3RBMTIzNDU2\",\"server_time\":1800000000,\"site\":\"site-b\",\"v\":1}",
+      "name": "réponse pour un autre site",
+      "signature": "K8zDCAXfc+TQzl6BJ8DZ7ZVvKGMVM1eR6BpmfyjQApuoC68E69bXUrOENgdKHu9Ecjijk4Dqnacxzn1kElfoBw==",
+      "timestamp": "1800000000",
+      "verdict": "site"
+    },
+    {
+      "body": "{\"accepted\":null,\"acked\":null,\"command\":{\"expires_at\":1800086340,\"id\":\"01a1e2f3-0000-7000-8000-000000000001\",\"issued_at\":1799999940,\"name\":\"ping\",\"params\":{},\"runtime\":\"php\",\"seq\":3,\"site\":\"site-b\",\"v\":1},\"nonce\":\"Tm9uY2VEZVRlc3RBMTIzNDU2\",\"server_time\":1800000000,\"site\":\"site-a\",\"v\":1}",
+      "name": "commande pour un autre site",
+      "signature": "GsDIJwk/EyXCdO2KaDUkE7K9JjK3z31wFTfavmiYKSqWNqR6FeIi4fvWZ4At9zqRq9N9cPA5mpeEn8pzMS5dBw==",
+      "timestamp": "1800000000",
+      "verdict": "site"
+    },
+    {
+      "body": "{\"accepted\":null,\"acked\":null,\"command\":{\"expires_at\":1799999999,\"id\":\"01a1e2f3-0000-7000-8000-000000000001\",\"issued_at\":1799999940,\"name\":\"ping\",\"params\":{},\"runtime\":\"php\",\"seq\":3,\"site\":\"site-a\",\"v\":1},\"nonce\":\"Tm9uY2VEZVRlc3RBMTIzNDU2\",\"server_time\":1800000000,\"site\":\"site-a\",\"v\":1}",
+      "name": "commande expirée",
+      "signature": "Fre9t6boFFL9hFX7UAUp2r0Ws6QJ/0iHo/lkKcK78f51c08Y+B8b1UQ1MPoChuFYj7GLPZp/kD5plkS+e6R/Cg==",
+      "timestamp": "1800000000",
+      "verdict": "expired"
+    },
+    {
+      "body": "{\"accepted\":null,\"acked\":null,\"command\":null,\"nonce\":\"QXV0cmVOb25jZUF1dHJlTm9uY2U\",\"server_time\":1800000000,\"site\":\"site-a\",\"v\":1}",
+      "name": "nonce différent de celui du retrait",
+      "signature": "vpTLdLEnjzo85YJn8RPg3uSFZkvgNyFfKEX+BlZgdBmm+PCZFoXS7k/A2QQcr+rXt9KQHALSotcd5D6qVJOxDg==",
+      "timestamp": "1800000000",
+      "verdict": "nonce"
+    },
+    {
+      "body": "{\"accepted\":true,\"acked\":\"01a1e2f3-0000-7000-8000-000000000001\",\"command\":null,\"nonce\":\"Tm9uY2VEZVRlc3RBMTIzNDU2\",\"server_time\":1800000000,\"site\":\"site-a\",\"v\":1}",
+      "name": "accusé accepté",
+      "signature": "wOpaAD+xlQ33JYHW5kQ8D9ezmEzLUWTT/arO+KtFPSt3O5n1W5f6j+5mLGUlD+PZr4GhFNW7zE5FMq6W1q5gCA==",
+      "timestamp": "1800000000",
+      "verdict": "valid"
+    },
+    {
+      "body": "{\"accepted\":false,\"acked\":\"01a1e2f3-0000-7000-8000-000000000001\",\"command\":null,\"nonce\":\"Tm9uY2VEZVRlc3RBMTIzNDU2\",\"server_time\":1800000000,\"site\":\"site-a\",\"v\":1}",
+      "name": "accusé refusé",
+      "signature": "KYujbasAFOWuCRAlhV1AwnGpd+b+DZiydIqbe5+SeyMAyZ6v0OJIGDMvYatf2W2Fhp1oshhUsnJpRhWlXnuUBg==",
+      "timestamp": "1800000000",
+      "verdict": "valid"
+    }
+  ],
+  "rotation": {
+    "command_id": "01a1e2f3-0000-7000-8000-000000000001",
+    "new_pubkey": "F8t5+ytBIPKx7GXkGY1uCLKOgT/rAeSkAIObheGAgM4=",
+    "new_seed": "MzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzM=",
+    "proof": "dto64PgJzk0AX5Rf/ktwqvwCHPFD9O1gbNxEqX7RKsSbgAJbgYT6eq7TKJkWSBOuJmFjyX60FUHrjto2gHdxAQ==",
+    "site": "site-a"
+  },
+  "site": "site-a"
+}

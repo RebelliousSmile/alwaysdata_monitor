@@ -234,6 +234,7 @@ fn config(dir: &Path, base: &str) -> Config {
     Config {
         database: dir.join("data").join("vigie.db"),
         api: None,
+        commands: None,
         alerts: Alerts {
             to: "alertes@example.org".into(),
             from: "vigie@example.org".into(),

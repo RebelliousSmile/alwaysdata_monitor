@@ -7,6 +7,9 @@
 //!   nouveau binaire est passé ;
 //! - `POST /r/v1/report` reçoit les rapports signés des agents
 //!   (`docs/protocole-agent.md`) et n'envoie jamais d'e-mail : `tick` notifie ;
+//! - `POST /r/v1/commands` sert à l'agent sa commande signée et reçoit le
+//!   résultat de la précédente (`command/pull.rs`,
+//!   `docs/protocole-commandes.md`), fermé tant que `[commands]` manque ;
 //! - `/api/v1` sert la console, authentifiée par appareil (`api.rs`,
 //!   `docs/api-console.md`).
 //!
@@ -15,7 +18,7 @@
 //! les URL ou sonde le point d'entrée.
 
 use std::net::{IpAddr, SocketAddr};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -87,6 +90,10 @@ pub(crate) struct AppState {
     /// Seule connexion qui écrit dans `serve`. À n'appeler que depuis
     /// `spawn_blocking` : `serve` tourne sur un runtime à un seul thread.
     pub(crate) writer: Writer,
+    /// Fichier de configuration, relu à chaque retrait de commande : `serve`
+    /// ne lit sinon la configuration qu'à son démarrage. `None` dans les tests
+    /// qui n'en ont pas : la configuration chargée sert alors.
+    pub(crate) config_path: Option<PathBuf>,
 }
 
 impl AppState {
@@ -100,11 +107,20 @@ pub fn router(config: Config) -> Router {
 }
 
 pub fn router_with_clock(config: Config, clock: Arc<dyn Clock>) -> Router {
+    router_with(config, clock, None)
+}
+
+/// Routeur complet ; `config_path` est relu à chaque retrait de commande.
+pub fn router_with(config: Config, clock: Arc<dyn Clock>, config_path: Option<PathBuf>) -> Router {
     let site_ids = config.sites.iter().map(|s| s.id.clone()).collect();
     let writer = Writer::new(&config.database);
     Router::new()
         .route("/health", get(health_handler).fallback(not_found))
         .route("/r/v1/report", post(report_handler).fallback(not_found))
+        .route(
+            crate::command::pull::ROUTE,
+            post(commands_handler).fallback(not_found),
+        )
         .merge(crate::api::routes())
         .fallback(not_found)
         .with_state(Arc::new(AppState {
@@ -112,6 +128,7 @@ pub fn router_with_clock(config: Config, clock: Arc<dyn Clock>) -> Router {
             site_ids,
             clock,
             writer,
+            config_path,
         }))
         .layer(axum::middleware::from_fn(crate::request_id::layer))
 }
@@ -252,7 +269,146 @@ async fn report_handler(State(state): State<Arc<AppState>>, request: Request) ->
     }
 }
 
-pub fn run(config: Config, ip: IpAddr, port: u16) -> Result<()> {
+/// Lit le corps d'une requête d'agent avec les limites de `/r/v1/report` ;
+/// `Err` : la raison du refus.
+async fn read_agent_body(
+    body: axum::body::Body,
+    announced: Option<u64>,
+) -> Result<axum::body::Bytes, Reason> {
+    if announced.is_some_and(|len| len > MAX_REPORT_BYTES as u64) {
+        return Err(Reason::TooLarge);
+    }
+    let read = axum::body::to_bytes(body, MAX_REPORT_BYTES);
+    match tokio::time::timeout(REPORT_BODY_TIMEOUT, read).await {
+        Ok(Ok(bytes)) => Ok(bytes),
+        Ok(Err(err)) => {
+            let too_large = err
+                .into_inner()
+                .downcast_ref::<http_body_util::LengthLimitError>()
+                .is_some();
+            Err(if too_large {
+                Reason::TooLarge
+            } else {
+                Reason::Truncated
+            })
+        }
+        Err(_) => Err(Reason::TooSlow),
+    }
+}
+
+/// 200 et la réponse signée, ou le 404 commun. Configuration relue et clés
+/// lues à chaque retrait : sans `[commands]` ou sans clé lisible, rien n'est
+/// servi ni accusé.
+async fn commands_handler(
+    State(state): State<Arc<AppState>>,
+    request: Request,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    let (parts, body) = request.into_parts();
+    let header = |name: &str| {
+        parts
+            .headers
+            .get(name)
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_owned)
+    };
+    let site = header(HEADER_SITE);
+    let signature = header(HEADER_SIGNATURE);
+    let announced = header(CONTENT_LENGTH.as_str()).and_then(|v| v.parse::<u64>().ok());
+    let bytes = match read_agent_body(body, announced).await {
+        Ok(bytes) => bytes,
+        Err(reason) => return refuse_pull(Refusal::new(site.as_deref(), reason)),
+    };
+    let now = state.clock.unix();
+    let task_state = Arc::clone(&state);
+    let task_site = site.clone();
+    let outcome = tokio::task::spawn_blocking(move || {
+        let refusal = |reason| Refusal::new(task_site.as_deref(), reason);
+        let internal = |why: String| refusal(Reason::Internal(why));
+        let config = match &task_state.config_path {
+            Some(path) => {
+                crate::config::load(path).map_err(|e| internal(format!("configuration : {e}")))?
+            }
+            None => task_state.config.clone(),
+        };
+        let Some(commands) = &config.commands else {
+            return Err(refusal(Reason::UnknownSite));
+        };
+        let command_key = crate::command::key::load(&commands.key_file)
+            .map_err(|e| internal(format!("clé de commandes : {e}")))?;
+        let audit_key = crate::command::key::load(&commands.audit_key_file)
+            .map_err(|e| internal(format!("clé d'audit : {e}")))?;
+        let keys = crate::command::pull::Keys {
+            commands: &command_key,
+            audit: &audit_key,
+        };
+        let written = task_state.writer.write(|store| {
+            Ok(crate::command::pull::pull(
+                store,
+                &config,
+                &keys,
+                task_site.as_deref(),
+                signature.as_deref(),
+                &bytes,
+                now,
+            ))
+        });
+        match written {
+            Ok(Some(result)) => result,
+            Ok(None) => Err(refusal(Reason::UnknownSite)),
+            Err(err) => Err(internal(format!("{err:#}"))),
+        }
+    })
+    .await;
+    match outcome {
+        Ok(Ok((signed, served))) => {
+            log::info!(
+                "[{}] retrait accepté (site {}, seq {}, accusé {:?}, commande {:?})",
+                crate::request_id::current(),
+                served.site,
+                served.seq,
+                served.acked,
+                served.command
+            );
+            let mut response = (StatusCode::OK, signed.body).into_response();
+            let headers = response.headers_mut();
+            headers.insert(
+                axum::http::header::CONTENT_TYPE,
+                axum::http::HeaderValue::from_static("application/json"),
+            );
+            headers.insert(
+                axum::http::header::CACHE_CONTROL,
+                axum::http::HeaderValue::from_static("no-store"),
+            );
+            if let (Ok(ts), Ok(sig)) = (
+                axum::http::HeaderValue::from_str(&signed.timestamp.to_string()),
+                axum::http::HeaderValue::from_str(&signed.signature),
+            ) {
+                headers.insert(crate::command::pull::HEADER_TIMESTAMP, ts);
+                headers.insert(HEADER_SIGNATURE, sig);
+            }
+            response
+        }
+        Ok(Err(refusal)) => refuse_pull(refusal),
+        Err(err) => refuse_pull(Refusal::new(
+            site.as_deref(),
+            Reason::Internal(format!("tâche interrompue : {err}")),
+        )),
+    }
+}
+
+fn refuse_pull(refusal: Refusal) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    let rid = crate::request_id::current();
+    if matches!(refusal.reason, Reason::Internal(_)) {
+        log::error!("[{rid}] retrait de commande : {refusal}");
+    } else {
+        log::warn!("[{rid}] retrait de commande : {refusal}");
+    }
+    StatusCode::NOT_FOUND.into_response()
+}
+
+pub fn run(config: Config, config_path: PathBuf, ip: IpAddr, port: u16) -> Result<()> {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -282,10 +438,13 @@ pub fn run(config: Config, ip: IpAddr, port: u16) -> Result<()> {
             .await
             .with_context(|| format!("écoute sur {addr} impossible"))?;
         log::info!("serve à l'écoute sur {addr}");
-        axum::serve(listener, router(config))
-            .with_graceful_shutdown(shutdown_signal())
-            .await
-            .context("serveur HTTP")
+        axum::serve(
+            listener,
+            router_with(config, Arc::new(SystemClock), Some(config_path)),
+        )
+        .with_graceful_shutdown(shutdown_signal())
+        .await
+        .context("serveur HTTP")
     })
 }
 
@@ -336,6 +495,7 @@ mod tests {
             },
             database,
             api: None,
+            commands: None,
             sites: vec![Site {
                 id: "site-a".into(),
                 url: "https://site-a.example.org/".into(),
@@ -440,6 +600,7 @@ mod tests {
             "/health/x",
             "/.env",
             "/r/v1/report",
+            "/r/v1/commands",
             "/r/v1",
             "/api/v1",
             "/api/v1/inconnu",

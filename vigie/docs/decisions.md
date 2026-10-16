@@ -95,3 +95,18 @@ Plan : `aidd_docs/tasks/2026_10/2026_10_16_typologie-kind/plan.md` ; contrat :
 | Toutes les commandes n'admettent que `php` tant qu'aucun agent Node n'existe | Fail-closed |
 | L'enveloppe d'une commande porte `v` et `site`, et son schéma refuse tout champ inconnu | La clé de commandes est commune à tous les sites ; une version permet d'évoluer sans casser les agents |
 
+## Canal de commandes (issue #10)
+
+Plan : `aidd_docs/tasks/2026_10/2026_10_16_canal-commandes/plan.md`, relu en
+quatre tours de sécurité ; contrat : [`protocole-commandes.md`](./protocole-commandes.md).
+
+| Décision du 2026-10-16 | Raison |
+| --- | --- |
+| Trois clés : la clé de rapport de l'agent signe aussi ses retraits, avec le préfixe `vigie-pull-v1\n` (exception consignée à « une clé par usage ») ; une clé de commandes lue par `serve` seul ; une clé d'audit distincte | Pas de seconde clé à installer sur chaque site ; la séparation de domaine empêche qu'une signature de rapport vaille retrait ; la clé la plus dangereuse ne quitte pas `serve` |
+| `htaccess-apply` et `htaccess-rollback` restent indisponibles dans le code jusqu'à #13 | Un bloc `.htaccess` libre donne l'exécution de code : la liste fermée de directives doit être vérifiée côté agent |
+| La configuration est relue à chaque retrait : site connu et `permit` contre l'état du fichier | `serve` ne lit sinon la configuration qu'au démarrage |
+| Résultat toujours accusé (`acked`), avec `accepted` ; persisté par l'agent jusqu'à l'accusé | Le passage de l'agent est un processus court : un résultat perdu bloquerait la file, un résultat refusé sans accusé serait renvoyé pour toujours |
+| Pas d'exception « commandes concurrentes » : une seule commande non close par site | Pas de besoin exprimé ; plus simple à auditer |
+| Ancre externe de l'audit : la tête de chaque chaîne modifiée part par e-mail depuis `tick` | Une fin de chaîne coupée ne se voit que contre une tête connue d'ailleurs ; `serve` n'envoie jamais d'e-mail |
+| `rotate-key` n'est pas un remède à une compromission du site | Qui tient la clé de l'agent peut répondre avec sa propre clé ; le remède reste la réinstallation et `site rotate-key` hors canal |
+

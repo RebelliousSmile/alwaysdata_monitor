@@ -85,7 +85,13 @@ jobs:
             ~/.cargo/bin/cargo-zigbuild
             vigie/target
           key: vigie-musl-${{ hashFiles('vigie/Cargo.lock') }}
-      - run: cargo install cargo-zigbuild --version 0.23.4 --locked
+      # Le cache peut déjà rendre le binaire : l'installer seulement s'il manque
+      # ou n'est pas à la version épinglée.
+      - name: cargo-zigbuild 0.23.4
+        run: |
+          if ! cargo zigbuild --version 2>/dev/null | grep -qx 'cargo-zigbuild 0.23.4'; then
+            cargo install cargo-zigbuild --version 0.23.4 --locked --force
+          fi
       - run: cargo zigbuild --release --locked --target x86_64-unknown-linux-musl
       - name: binaire statique
         run: file target/x86_64-unknown-linux-musl/release/vigie | grep -q "statically linked"

@@ -45,6 +45,7 @@ fn config(dir: &Path) -> Config {
     Config {
         database: dir.join("vigie.db"),
         api: None,
+        commands: None,
         alerts: Alerts {
             to: "alertes@example.org".into(),
             from: "vigie@example.org".into(),

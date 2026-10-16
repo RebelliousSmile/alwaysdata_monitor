@@ -7,6 +7,7 @@ pub mod api;
 pub mod capability;
 pub mod checks;
 pub mod clock;
+pub mod command;
 pub mod config;
 pub mod device;
 pub mod error;
