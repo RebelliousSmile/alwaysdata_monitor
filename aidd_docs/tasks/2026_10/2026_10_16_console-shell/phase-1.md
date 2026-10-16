@@ -22,7 +22,7 @@ status: pending
 ## Tasks to do
 
 1. `SecretStore` et ses trois implémentations ; `pairing` l'utilise.
-2. Migration d'un `device.json` 0.1.1 (struct héritée, jeton du fichier qui fait foi, relecture, réécriture atomique) ; échec → jeton du fichier, `token_storage = "file_legacy"` ; révocation si l'écriture échoue à l'appairage ; suppression des deux côtés.
+2. Migration d'un `device.json` 0.1.1, sous Windows comme sous Android (même `SecretStore` : jeton déplacé vers le trousseau ou vers `no_backup`, puis fichier réécrit sans jeton ; une sauvegarde faite avant la mise à jour reste hors de portée, documenté) (struct héritée, jeton du fichier qui fait foi, relecture, réécriture atomique) ; échec → jeton du fichier, `token_storage = "file_legacy"` ; révocation si l'écriture échoue à l'appairage ; suppression des deux côtés.
 3. Tests de garde-fous (plan) ; patch `allowBackup` dans `console.yml` et `console-release.yml`, vérifié par `aapt2` ; `cargo tree` Android sans `keyring-core`.
 
 ## Test acceptance criteria
@@ -30,5 +30,6 @@ status: pending
 | Task | Acceptance criteria |
 | ---- | ------------------- |
 | 1-2 | Avec la mémoire : appairage, relecture, révocation ; migration d'un `device.json` 0.1.1 : jeton déplacé, fichier sans jeton ; sur le runner Windows : aller-retour réel dans le Credential Manager puis suppression |
+| 2ter | Migration Android d'un `device.json` 0.1.1 : jeton dans `no_backup`, fichier d'origine sans jeton |
 | 2bis | Store mémoire en échec d'écriture ou de relecture : appareil resté appairé, `token_storage = "file_legacy"` ; échec à l'appairage : jeton révoqué ; aucune erreur ne contient le jeton |
 | 3 | Une capacité ajoutée, un `v-html`, un plugin `fs` transitif ou une commande Tauri nouvelle font échouer la CI ; APK sans sauvegarde autorisée |
