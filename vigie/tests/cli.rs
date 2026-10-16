@@ -359,3 +359,105 @@ fn status_says_when_serve_has_not_seen_the_typology() {
     assert!(text.contains("serve : aucune"), "{text}");
     assert!(text.contains("serve à redémarrer"), "{text}");
 }
+
+#[test]
+fn site_command_previews_then_applies_with_every_guard() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+    }
+    let commands = format!(
+        "[commands]\nkey_file = '{}'\naudit_key_file = '{}'\n",
+        dir.path().join("commands.key").display(),
+        dir.path().join("audit.key").display()
+    );
+    let config = write_config(
+        dir.path(),
+        &format!("{commands}{SITE_A}kind = \"wordpress\"\n"),
+    );
+    let out = vigie(&config, &["commands", "init-keys"]);
+    assert!(out.status.success(), "{out:?}");
+    let public = stdout(&out).lines().last().unwrap().to_owned();
+    assert_eq!(public.len(), 44);
+    let out = vigie(&config, &["commands", "init-keys"]);
+    assert_eq!(out.status.code(), Some(1), "jamais écrasée : {out:?}");
+    assert_eq!(
+        stdout(&vigie(&config, &["commands", "pubkey"]))
+            .lines()
+            .last(),
+        Some(public.as_str())
+    );
+
+    assert!(
+        vigie(&config, &["site", "add", "site-a", "--pubkey", KEY_1])
+            .status
+            .success()
+    );
+    let db = dir.path().join("vigie.db");
+    let before = std::fs::read(&db).unwrap();
+    let out = vigie(&config, &["site", "command", "site-a", "ping"]);
+    assert!(out.status.success(), "{out:?}");
+    assert!(stdout(&out).contains("aperçu seulement"), "{out:?}");
+    assert_eq!(std::fs::read(&db).unwrap(), before, "l'aperçu n'écrit rien");
+
+    let out = vigie(&config, &["site", "command", "site-a", "ping", "--apply"]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(stderr(&out).contains("désactivé"), "{out:?}");
+    assert!(
+        vigie(&config, &["site", "commands", "site-a", "enable"])
+            .status
+            .success()
+    );
+    let out = vigie(&config, &["site", "command", "site-a", "ping", "--apply"]);
+    assert!(out.status.success(), "{out:?}");
+    let out = vigie(&config, &["site", "command", "site-a", "ping", "--apply"]);
+    assert!(stderr(&out).contains("déjà en vol"), "{out:?}");
+    let out = vigie(
+        &config,
+        &["site", "command", "site-a", "htaccess-apply", "--apply"],
+    );
+    assert!(stderr(&out).contains("pas encore disponible"), "{out:?}");
+    let out = vigie(&config, &["site", "command", "site-a", "shell"]);
+    assert!(stderr(&out).contains("commande inconnue"), "{out:?}");
+
+    let out = vigie(&config, &["site", "audit", "site-a", "--verify"]);
+    assert!(out.status.success(), "{out:?}");
+    let zeros = "0".repeat(64);
+    let out = vigie(
+        &config,
+        &["site", "audit", "site-a", "--verify", "--head", &zeros],
+    );
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    let out = vigie(&config, &["site", "audit", "site-a"]);
+    assert_eq!(
+        stdout(&out).lines().count(),
+        2,
+        "enabled, created : {out:?}"
+    );
+
+    assert!(
+        vigie(&config, &["site", "command-cancel", "site-a"])
+            .status
+            .success()
+    );
+    // remove remet le canal à zéro.
+    assert!(
+        vigie(&config, &["site", "commands", "site-a", "enable"])
+            .status
+            .success()
+    );
+    assert!(
+        vigie(&config, &["site", "remove", "site-a", "--yes"])
+            .status
+            .success()
+    );
+    assert!(
+        vigie(&config, &["site", "add", "site-a", "--pubkey", KEY_2])
+            .status
+            .success()
+    );
+    let out = vigie(&config, &["site", "command", "site-a", "ping", "--apply"]);
+    assert!(stderr(&out).contains("désactivé"), "{out:?}");
+}

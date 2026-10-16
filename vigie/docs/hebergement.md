@@ -254,6 +254,22 @@ schéma 7 de la base (table `meta`) : `tick` s'arrête sur « binaire trop
 ancien ». Le retour arrière demande donc aussi la base sauvegardée avant le
 déploiement.
 
+## Canal de commandes (issue #10)
+
+`[commands]` est une section nouvelle de `config.toml`, refusée par un ancien
+binaire (`deny_unknown_fields`) :
+
+1. **déployer d'abord** le binaire qui connaît `[commands]` (schéma 8) ;
+2. créer le dossier des clés en 0700 (`install -d -m 700 ~/vigie/keys`) ;
+3. **poser ensuite** `[commands]` (`key_file`, `audit_key_file`, chemins
+   absolus) et lancer `vigie commands init-keys` ;
+4. relancer `serve` ; le canal reste coupé pour chaque site tant que
+   `vigie site commands <site> enable` n'est pas lancé.
+
+Retour au binaire précédent : retirer d'abord `[commands]` de `config.toml`.
+L'ancien binaire refuse aussi une base au schéma 8 : le retour arrière demande
+la base sauvegardée avant le déploiement. Les clés restent sur le disque.
+
 ## Secrets
 
 Inventaire tenu par le socle (issue #9). Aucun secret ne passe par une variable
@@ -268,7 +284,8 @@ sont `VIGIE_CONFIG` (chemin de la configuration), `IP`, `PORT` et `RUST_LOG`.
 | Codes d'appairage | base `vigie.db` | empreinte seule, usage unique, 10 min |
 | Clé privée de l'agent (rapports) | sur chaque site, hors webroot | 0600 vérifié par l'agent à chaque passage, dossier 0700, jamais de lien symbolique suivi |
 | Clés publiques des agents | base `vigie.db` | publiques, pas secrètes ; changées par `site rotate-key` |
-| Clé privée des commandes du veilleur | sur le VPS, à venir avec #10 | distincte de toute autre clé (`protocole-agent.md`, « Une clé par usage ») |
+| Clé de commandes du veilleur | `[commands] key_file`, par exemple `~vigie/vigie/keys/commands.key` | 0600 dans un dossier 0700, au propriétaire de `vigie`, **vérifié par le code** à chaque lecture, sans suivre de lien ; lue par `serve` seul |
+| Clé d'audit du veilleur | `[commands] audit_key_file`, même dossier | mêmes règles ; lue par `serve`, `tick` et la CLI |
 | Accès FTP ou API d'un hébergeur | nulle part | demandé au moment d'agir, jamais stocké (`decisions.md`) |
 
 La CI lance gitleaks sur tout l'historique à chaque push

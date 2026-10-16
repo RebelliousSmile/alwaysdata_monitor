@@ -84,6 +84,69 @@ fn record_typology(store: &mut Store, config: &Config, now: i64) -> Result<()> {
     store.set_meta(META_TYPOLOGY_TICK, &serde_json::to_string(&current)?, now)
 }
 
+/// Canal de commandes : expiration des commandes (`expired`, `unknown`) et
+/// envoi de la tête de chaque journal d'audit modifié, ancre hors de la base
+/// (`command/audit.rs`). Sans `[commands]` ou sans clé d'audit lisible, rien
+/// n'expire (`serve` vérifie lui-même l'échéance) et le passage continue.
+/// Rend le nombre d'e-mails envoyés.
+fn commands_housekeeping(
+    store: &mut Store,
+    config: &Config,
+    now: i64,
+    notifier: &dyn Notifier,
+    deadline: Instant,
+) -> usize {
+    let Some(commands) = &config.commands else {
+        return 0;
+    };
+    if store.schema_version().unwrap_or(0) < crate::store::SCHEMA_COMMANDS {
+        return 0;
+    }
+    let audit_key = match crate::command::key::load(&commands.audit_key_file) {
+        Ok(key) => key,
+        Err(err) => {
+            log::error!("canal de commandes : clé d'audit illisible, aucune expiration : {err}");
+            return 0;
+        }
+    };
+    match store.expire_commands(now, &audit_key) {
+        Ok(0) => {}
+        Ok(n) => log::info!("{n} commande(s) expirée(s) ou d'issue inconnue"),
+        Err(err) => log::error!("expiration des commandes : {err:#}"),
+    }
+    let heads = match store.audit_heads_to_notify() {
+        Ok(heads) => heads,
+        Err(err) => {
+            log::error!("têtes d'audit : {err:#}");
+            return 0;
+        }
+    };
+    let mut sent = 0;
+    for (site, head) in heads {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            break;
+        }
+        let email = Email {
+            subject: format!("[vigie] {site} : journal des commandes"),
+            body: format!(
+                "Le journal d'audit des commandes de {site} a changé.\n\nTête de la chaîne : {head}\nRelevée le {}\n\nGarder cet e-mail : il prouve l'état du journal à cette date.\nVérifier : vigie site audit {site} --verify --head {head}\n",
+                crate::iso_utc(now)
+            ),
+        };
+        match notifier.send(&email, remaining) {
+            Ok(()) => {
+                if let Err(err) = store.mark_audit_notified(&site, &head, now) {
+                    log::error!("{site} : tête d'audit envoyée mais non notée : {err:#}");
+                }
+                sent += 1;
+            }
+            Err(err) => log::warn!("{site} : envoi de la tête d'audit échoué : {err}"),
+        }
+    }
+    sent
+}
+
 pub fn run_with(
     config: &Config,
     now: i64,
@@ -178,6 +241,13 @@ pub fn run_with(
         notifier,
         start + options.send_budget,
     )?;
+    summary.emails_sent += commands_housekeeping(
+        &mut store,
+        config,
+        now,
+        notifier,
+        start + options.send_budget,
+    );
     summary.emails_pending = store.pending_notifications(now)?;
     Ok(summary)
 }
