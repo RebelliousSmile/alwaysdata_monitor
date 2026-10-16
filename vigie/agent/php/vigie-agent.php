@@ -1230,7 +1230,7 @@ function load_logs_state(string $dir): ?array
     } catch (\JsonException) {
         $state = null;
     }
-    $valid = \is_array($state) && array_keys($state) === array_keys(empty_logs_state())
+    $valid = \is_array($state) && sorted_keys($state) === sorted_keys(empty_logs_state())
         && \is_int($state['seq']) && \is_string($state['file']) && preg_match(LOG_NAME, $state['file'], $m) === 1 && !isset($m[4])
         && \in_array($state['form'], [null, 'log', 'gz'], true) && \is_int($state['gen']) && $state['gen'] >= 0
         && \is_int($state['offset']) && $state['offset'] >= 0 && \is_int($state['inode'])
@@ -1241,14 +1241,23 @@ function load_logs_state(string $dir): ?array
         throw new UsageError("État des logs illisible ({$path}) : le supprimer fait repartir du fichier le plus récent.");
     }
 
-    return $state;
+    return array_replace(empty_logs_state(), $state);
 }
 
 function valid_pending(mixed $pending, array $state): bool
 {
-    return \is_array($pending) && array_keys($pending) === ['file', 'gen', 'start', 'end']
+    return \is_array($pending) && sorted_keys($pending) === ['end', 'file', 'gen', 'start']
         && $pending['file'] === $state['file'] && $pending['gen'] === $state['gen'] && $pending['start'] === $state['offset']
         && \is_int($pending['end']) && $pending['end'] > $pending['start'] && $pending['end'] - $pending['start'] <= MAX_LOG_RANGE;
+}
+
+/** Clés d'un tableau, triées : l'ordre d'écriture ne compte pas. */
+function sorted_keys(array $data): array
+{
+    $keys = array_keys($data);
+    sort($keys);
+
+    return $keys;
 }
 
 function save_logs_state(string $dir, array $state): void

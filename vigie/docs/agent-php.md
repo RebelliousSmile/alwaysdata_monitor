@@ -72,6 +72,8 @@ Les exemples visent le site A et le compte `<compte-site-a>`. Les commandes
    | `critical` | 30 chemins relatifs au plus, présence et empreinte |
    | `must_contain` | 10 règles `{"file": …, "text": …}` au plus |
    | `uploads` | Dossier à parcourir, `wp-content/uploads` par défaut pour `wordpress`, `null` pour ne rien parcourir |
+   | `commands` | Facultatif : canal de commandes, voir [Commandes du veilleur](#commandes-du-veilleur) |
+   | `logs` | Facultatif : logs HTTP poussés au veilleur, voir [Logs HTTP](#logs-http) |
 
 4. **Clé de signature** :
 
@@ -222,6 +224,47 @@ l'agent retire après chaque rapport la commande de son site
   nouvelle clé. Un 204 de rapport, non signé, ne fait jamais basculer.
 - Activer côté veilleur : `vigie site commands site-a enable`. Un site PHP
   déclaré `generic` dans `config.toml` doit y porter `runtime = "php"`.
+
+## Logs HTTP
+
+Facultatif. Avec une section `logs`, l'agent pousse, après le rapport et le
+retrait, les lignes nouvelles du log HTTP d'Alwaysdata à `/r/v1/logs`
+(contrat : [`logs.md`](./logs.md#transport-alwaysdata-issue-1)) :
+
+```json
+"logs": {
+  "dir": "/home/<compte-site-a>/admin/logs/http",
+  "hosts": ["site-a.example.org", "www.site-a.example.org"]
+}
+```
+
+| Clé | Rôle |
+| --- | ---- |
+| `dir` | Chemin absolu du dossier `admin/logs/http` du compte : l'agent y lit `<année>/http-<date>.log` et `.log.gz`, sans suivre de lien hors de lui |
+| `hosts` | 1 à 20 hôtes du site, en minuscules, sans port : seules leurs lignes partent (un fichier Alwaysdata couvre tout le compte) |
+
+- `endpoint` doit finir par `/r/v1/report` : les lots partent sur
+  `/r/v1/logs` du même veilleur.
+- Côté veilleur, `config.toml` active la réception pour le site :
+
+  ```toml
+  [sites.logs]
+  source = "alwaysdata"
+  hosts = ["site-a.example.org", "www.site-a.example.org"]
+  # tz = "Europe/Paris"   # seulement si les lignes n'ont pas de décalage
+  ```
+
+  Sans `source`, tout lot du site est refusé.
+- La position vit dans `logs.json` (0600, à côté de la clé), sous `flock` de
+  `logs.lock` : un passage concurrent saute les logs, pas les commandes. Un
+  état illisible ou ouvert arrête les logs (code 2) ; le supprimer fait
+  repartir du début du fichier le plus récent, relu au pire une fois.
+- Un lot envoyé et non accusé (réponse perdue, refus) est renvoyé à
+  l'identique au passage suivant : le veilleur ne le compte qu'une fois.
+- 20 lots de 44 Kio et 20 s au plus par passage : un retard se rattrape en
+  quelques passages, dans la limite de 50 Mo par jour côté veilleur.
+- Avec une rotation de clé non accusée, l'agent essaie aussi la nouvelle clé,
+  comme pour le rapport.
 
 ## Retrait
 
