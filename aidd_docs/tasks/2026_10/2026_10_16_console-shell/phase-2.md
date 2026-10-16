@@ -28,5 +28,5 @@ status: pending
 | Task | Acceptance criteria |
 | ---- | ------------------- |
 | 1 | Test de contrat du client contre le routeur du veilleur en processus (existant) étendu aux routes logs et à la pagination |
-| 2 | Un UA `<img src=x onerror=…>` s'affiche en texte ; site sans source : écran « pas encore disponible » |
+| 2 | Un nom de robot ou une métadonnée `<img src=x onerror=…>` servis par `/logs` s'affichent en texte ; site sans source : écran « pas encore disponible » |
 | 3 | 120 incidents : trois pages, sans doublon |
