@@ -15,10 +15,10 @@ est public.
 | Premier déploiement | **Fait** le 2026-10-15 : `monitor 0.1.0`, `/health` en 200 avec un tick postérieur à la bascule, route inconnue en 404 sans corps, HTTP redirigé en 308 vers HTTPS, `serve` sur `127.0.0.1:8080` seulement (8080 injoignable de l'extérieur), timer à la minute, base en 0600 dans `data/` |
 | Contrôles externes et alertes (phase 2) | **Fait** le 2026-10-15 : `monitor 0.2.0` déployé (commit 2b55edd), `/health` en 200 ; `status` en code 0, schéma v2, dernier tick à 26 s, site A contrôlé, aucun incident, trois en-têtes manquants (HSTS, `nosniff`, `frame-ancestors`) en information ; `test-alert` reçu par le destinataire (envoyé à 16:35:26 UTC) ; `config.toml`, `smtp-password` et la base en 0600 au propriétaire `monitor` |
 | Renommage en Vigie | **Fait** le 2026-10-15 : utilisateur `vigie` créé par `provision.sh`, `config.toml` (chemins réécrits), `smtp-password` et la base copiés vers `~vigie/vigie/` (base par `sqlite3 .backup`, `integrity_check` à `ok`, fichiers en 0600 au propriétaire `vigie`) ; `vigie 0.3.0` déployé (commit 208a73d), bascule à 20:23:38 UTC, base migrée en v4 au premier tick, `/health` en 200 avec un tick postérieur. Ancien `monitor` supprimé vers 20:47 UTC (unités, règle sudo, `10-monitor.conf` après `diff` identique à `10-vigie.conf`, utilisateur et dossier personnel) ; son dossier est archivé en 0600 dans `/root` |
-| Arrêt de `deploy.mjs` pendant la preuve HTTP | **Contourné, cause non établie** : au déploiement de la 0.3.0, le processus a pris fin moins d'une seconde après « Preuve HTTP », pendant le premier `fetch`, sans message ni sur stdout ni sur stderr, et le `finally` du verrou n'a pas tourné (`deploy.lock` rendu à la main). Le déploiement lui-même avait abouti. Non reproduit le 2026-10-16 : la même suite (`wsl` synchrones, puis `fetch` de `/health` sortie en pipe) se termine en code 0. Depuis, le verrou est rendu avant la preuve HTTP, qui n'écrit rien, et un arrêt avant la fin affiche l'étape et le code. Au prochain `--apply` : sans pipe, et relever le code de sortie |
+| Arrêt de `deploy.mjs` pendant la preuve HTTP | **Contourné, cause non établie** : au déploiement de la 0.3.0, le processus a pris fin moins d'une seconde après « Preuve HTTP », pendant le premier `fetch`, sans message ni sur stdout ni sur stderr, et le `finally` du verrou n'a pas tourné (`deploy.lock` rendu à la main). Le déploiement lui-même avait abouti. Non reproduit le 2026-10-16 : la même suite (`wsl` synchrones, puis `fetch` de `/health` sortie en pipe) se termine en code 0. Depuis, le verrou est rendu avant la preuve HTTP, qui n'écrit rien, et un arrêt avant la fin affiche l'étape et le code. Au prochain `--apply` : sans pipe, et relever le code de sortie. Le 2026-10-16, prévisualisation sans pipe en code 0 : le binaire en ligne est déjà celui du commit c874f74 (même sha256), et `--apply` s'arrêterait donc sur « Rien à envoyer » avant la preuve HTTP. La vérification attend le prochain changement du code Rust |
 | Relance de `serve` après kill | **Fait** : `kill -9` du PID 3259, relancé en PID 3336 en moins de 8 s |
 | Relance après reboot | **Fait** le 2026-10-15 (extinction puis rallumage depuis la console Hetzner) : démarrage à 15:52:12 UTC, `serve` actif à 15:52:11 en PID 1048, `caddy`, `ufw`, `ssh.socket` et le timer actifs, premier tick à 15:53:00, `/health` en 200, `status` en code 0, 8080 toujours injoignable de l'extérieur |
-| Cloisonnement | **Fait côté `vigie`** le 2026-10-16 (voir [Cloisonnement](#cloisonnement)) : dossiers en 0700, secrets et base en 0600, une seule règle sudo, unités à 3.1 sur `systemd-analyze security`. Le test d'un autre utilisateur est sans objet tant que Hermes n'est pas installé ; il reste à le refaire en root avec `nobody` |
+| Cloisonnement | **Fait côté `vigie`** le 2026-10-16 (voir [Cloisonnement](#cloisonnement)) : dossiers en 0700, secrets et base en 0600, une seule règle sudo, unités à 3.1 sur `systemd-analyze security`. **Fait** en root le 2026-10-16 : `sudo -u nobody cat config.toml` refusé (`Permission denied`, code 1) |
 | sodium sur le site A | **Fait** le 2026-10-15 : PHP 8.3.35 en ligne de commande (`php -r 'echo PHP_VERSION;'`), `sodium` dans `php -m` ; le CLI affiche aussi `Warning: Module "intl" is already loaded` à chaque lancement |
 | Sortie IPv4 et IPv6 du site A | **Fait** le 2026-10-15 : `curl -4` et `curl -6` vers un site externe en 200 depuis le compte du site A |
 | `/health` en IPv4 et IPv6 depuis le poste | **Fait** le 2026-10-15 : `curl -4` et `curl -6` en 200 |
@@ -163,9 +163,21 @@ Mesuré le 2026-10-16, en `vigie` :
   à 3.1 (`OK`).
 
 La relance de `serve` après `kill` et après un reboot est consignée dans le
-[Statut](#statut). Reste, en root : `sudo -u nobody cat
-/home/vigie/vigie/config.toml` doit être refusé. Le même test avec `hermes`
-attendra son installation.
+[Statut](#statut).
+
+Lecture par un autre utilisateur, mesurée en root le 2026-10-16 :
+
+```txt
+$ sudo -u nobody cat /home/vigie/vigie/config.toml; echo code=$?
+cat: /home/vigie/vigie/config.toml: Permission denied
+code=1
+$ stat -c "%a %U %n" /home/vigie /home/vigie/vigie /home/vigie/vigie/config.toml
+700 vigie /home/vigie
+700 vigie /home/vigie/vigie
+600 vigie /home/vigie/vigie/config.toml
+$ sudo -l -U vigie
+    (root) NOPASSWD: /usr/bin/systemctl restart vigie-serve.service
+```
 
 ## Plateforme du site A (Alwaysdata, 2026-10-15)
 
