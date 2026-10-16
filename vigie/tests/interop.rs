@@ -120,7 +120,7 @@ async fn the_ingestion_accepts_the_php_report_as_is() {
         ]
     );
     let agent = store.agent("site-a").expect("agent").expect("clé");
-    assert_eq!(agent.agent.as_deref(), Some("vigie-agent-php/0.1.0"));
+    assert_eq!(agent.agent.as_deref(), Some("vigie-agent-php/0.2.0"));
     let facts = store.last_facts("site-a").expect("facts").expect("relevé");
     assert!(facts.contains(r#""wp_version":"6.6.2""#), "{facts}");
     // Le premier rapport pose la référence des empreintes.
