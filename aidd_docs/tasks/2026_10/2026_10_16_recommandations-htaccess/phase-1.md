@@ -29,7 +29,7 @@ status: pending
 3. Validation par groupes (plan, « Decisions ») avec `now` injecté : bornes de `%{TIME}` selon la sorte du groupe, corpus d'UA protégés, CR/tabulation/NUL/continuation refusés ; `vectors.json` généré par un test Rust (`VIGIE_WRITE_VECTORS=1`, comme `commands-vectors.json`), dont un fuzz différentiel à graine fixe (lignes mutées : un octet changé, inséré, supprimé).
 3bis. Protections : IP protégées (veilleur, site, `protect_ips`), UA de Vigie et `/vigie-essai-*` exclus, littéral = jeton du catalogue, pas de règle d'UA pour `Unknown`, jetons génériques refusés.
 3ter. Intégrité : `compare()` admet les empreintes attendues d'une commande `htaccess-*` `served` ou `unknown` ; la référence suit `current_sha256` seulement s'il en fait partie.
-4. `site recommend` : reprend les groupes valides du bloc en place, retire les expirés, affiche le diff ; affiche robots.txt à poser à la main, le bloc, `previous_sha256` (dernier rapport) et `new_sha256` ; `--apply` met en file `htaccess-apply` (aperçu d'abord, comme `site command`) ; à la réussite, la référence d'intégrité de `.htaccess` passe à `new_sha256`.
+4. `site recommend` : bloc en place = dernier `htaccess-apply` `done` dont `current_sha256` égale l'empreinte du dernier rapport ; en reprend les groupes valides, retire les expirés, affiche le diff ; sans correspondance, `--apply` exige `--replace` ; affiche robots.txt à poser à la main, le bloc, `previous_sha256` (dernier rapport) et `new_sha256` ; `--apply` met en file `htaccess-apply` (aperçu d'abord, comme `site command`) ; à la réussite, la référence d'intégrité de `.htaccess` passe à `new_sha256`.
 
 ## Test acceptance criteria
 
@@ -39,4 +39,5 @@ status: pending
 | 2 | Golden files identiques |
 | 3 | Refusés : php_value, AddHandler, SetHandler, Include, auto_prepend_file, ligne d'espaces bizarres, guillemet non fermé, littéral trop long, `# END vigie` imbriqué, ligne finissant par `\\`, CR, tabulation, `.` non échappé, groupe sans `%{TIME}`, `[OR]` sur la dernière condition, `%{TIME}` passé ou au-delà de la borne, littéral touchant « Googlebot » ou un navigateur du corpus ; acceptés : chaque bloc golden |
 | 3bis | Le trafic du veilleur (UA `vigie/x`, IP du veilleur) et un UA de webhook : aucune proposition ; un UA `Unknown` : pas de règle d'UA |
+| 4bis | Bloc en place connu : groupes valides repris, expirés retirés ; `.htaccess` modifié hors de Vigie : `--apply` sans `--replace` refusé |
 | 4 | Rapport portant `new_sha256` envoyé avant le résultat `ok` : `agent:integrity/modified:.htaccess` ne s'ouvre pas ; reprise et retour arrière idem ; une empreinte hors des attendues l'ouvre |
