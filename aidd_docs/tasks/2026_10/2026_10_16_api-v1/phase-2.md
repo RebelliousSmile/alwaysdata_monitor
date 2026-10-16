@@ -32,4 +32,4 @@ status: pending
 | Task | Acceptance criteria |
 | ---- | ------------------- |
 | 1-2 | 120 incidents clos : 3 pages de 50/50/20 sans doublon ; un incident clos pendant le parcours n'est pas revu et aucun autre ne manque ; curseur forgé ou trop long → 400 ; `limit=0` ou `101` → 400 ; champs lus par la console 0.1.1 présents |
-| 3 | Site avec analyse : robots, règles et charge ; verdicts paginés triés par score, sans UA ni chemin ; instantané remplacé entre deux pages → 409 ; site avec source sans analyse → `null` ; site sans source → 404 uniforme |
+| 3 | Site avec analyse : robots, règles et charge ; verdicts paginés triés par score, sans UA ni chemin ; page 2 lue après un nouveau `tick` → valide ; instantané purgé → 409 `cursor_expired` ; `FakeClock` à 48 h + 1 → `/logs/ips` vide ; site avec source sans analyse → `null` ; site sans source → 404 uniforme |
