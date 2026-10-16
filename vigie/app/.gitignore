@@ -3,3 +3,4 @@ dist/
 *.local
 src-tauri/target/
 src-tauri/gen/schemas/
+src-tauri/gen/android/
