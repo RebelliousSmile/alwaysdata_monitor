@@ -31,6 +31,7 @@ pub fn config(database: PathBuf) -> Config {
         },
         database,
         api: None,
+        commands: None,
         sites: vec![site_a()],
     }
 }

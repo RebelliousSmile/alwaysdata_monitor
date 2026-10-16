@@ -2,32 +2,35 @@
 status: pending
 ---
 
-# Instruction: Signatures partagées et branchement à tick
+# Instruction: Constats, partage et branchement à tick
 
 ## Architecture projection
 
 ```txt
 .
 └── vigie/
-    ├── migrations/000N.sql   ✅ log_signatures (kind ip|ua, value, site, score, seen_at, expires_at)
+    ├── migrations/000N.sql   ✅ log_signatures (ua normalisé, site, score, seen_at, expires_at)
     ├── src/
-    │   ├── store.rs          ✏️ note, lecture et purge des signatures (30 j)
-    │   ├── analysis/shared.rs ✅ bonus de 15 points et mention pour une signature vue ailleurs
-    │   └── tick.rs           ✏️ par site ayant une source : lots bornés depuis le curseur, analyse, reconcile sous `logs`, curseur et entrées dans la même transaction
+    │   ├── analysis/findings.rs ✅ agrégats → Analysis structurée → constats agrégés et bornés sous le contrôle `logs`
+    │   ├── analysis/shared.rs   ✅ signatures d'UA de robots : normalisation, note, lecture, expiration à 30 j, 100 par site
+    │   ├── store.rs          ✏️ agrégats, curseur, signatures, purge et masquage à 30 j
+    │   └── tick.rs           ✏️ repli à tour de rôle (10 s en tout), constats, reconcile `logs`, close_unwatched reconnaît `logs`
     └── docs/
-        ├── logs.md           ✏️ section analyse : règles, ordre, constats, partage
-        └── decisions.md      ✏️ section #8
+        ├── logs.md           ✏️ analyse : règles, ordre, heure de référence, agrégats, constats, partage, limites, latence (dont : pic par minute approché ; une IP fraîchement admise après éviction reste sans score tant que l'erreur héritée dépasse le dixième de ses requêtes, ce qui n'est pas un verdict de trafic sain)
+        └── decisions.md      ✏️ section #8 (partage sans IP, timeout par entrée, protection au niveau d'action, AiUser protégé)
 ```
 
 ## Tasks to do
 
-1. Une IP au score ≥ 70 sur un site, ou un UA de classe `Tool`/`AiTraining` au-delà du seuil `repeated-ip`, est noté ; la note expire au bout de 30 jours, purgée par `tick`.
-2. L'analyse d'un autre site lit les signatures actives (hors son propre site) et applique le bonus, sans incident propre.
-3. `tick` : `LogSource` par site déclaré dans la configuration (aucune tant que #1 n'est pas livrée) ; `fetch` par lots de 5 000 tant que `more`, dans le budget du passage.
+1. `Analysis` : robots vus (éditeur, finalité, `robots_only`, `honours_robots`, volume, `protected`), verdicts d'IP (score, niveau, raisons, classe), dépassements de règles, charge ; gardée par site pour #13 et la console (#5).
+2. Constats : un par règle dépassée (clé = identifiant de règle ; détail : chiffres, au plus 5 IP ou chemins tronqués à 100 caractères) ; `sensitive-path` (information, une IP suffit) et `sensitive-path-many` (avertissement, 5 IP distinctes) ; `suspicious-ips` (avertissement, 5 pires IP) ; `bots-ai-training` (information) ; `load` (avertissement). Résolution des constats de fenêtre quand `now − référence` > fenêtre + `agent_silence`.
+3. Partage : signature d'UA notée quand le score propre d'une IP qui la porte est ≥ 70 et que l'UA est un robot non générique ; jamais d'IP.
+4. `tick` : sites ayant une source (#1) ; `close_unwatched` garde `logs` pour eux ; purge des profils à 48 h, des signatures et résumés à 30 j, masquage des détails `logs` clos à 30 j.
 
 ## Test acceptance criteria
 
 | Task | Acceptance criteria |
 | ---- | ------------------- |
-| 1-2 | Une IP nuisible sur le site A, vue avec un comportement moyen (score 55) sur le site B, y passe à 70 avec la mention ; au bout de 30 jours (`FakeClock`), plus de bonus |
-| 3 | Deux `tick` successifs sur une `MemorySource` ne comptent jamais deux fois une entrée |
+| 2 | 1 000 IP suspectes → un seul incident ; aucune IP ni chemin dans une clé d'incident ; `spike-404` résolu quand les données s'arrêtent depuis fenêtre + agent_silence (`FakeClock`) |
+| 3 | Un UA de robot noté sur le site A ajoute 15 points sur le site B, sans que B le renote par ce seul bonus ; aucune IP dans `log_signatures` ; expiration à 30 j |
+| 4 | Deux `tick` de suite sur une `MemorySource`, budget épuisé au milieu d'une série de lots : aucune entrée comptée deux fois, pas de clôture puis réouverture |
