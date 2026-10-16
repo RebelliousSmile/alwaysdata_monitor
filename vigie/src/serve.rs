@@ -31,6 +31,7 @@ use serde::Serialize;
 use crate::config::Config;
 use crate::ingest::{self, HEADER_SIGNATURE, HEADER_SITE, Reason, Refusal};
 use crate::store::Store;
+use crate::writer::Writer;
 
 /// Au-delà, `tick` est considéré comme arrêté (timer chaque minute).
 pub const TICK_MAX_AGE: i64 = 180;
@@ -85,6 +86,9 @@ pub(crate) struct AppState {
     /// Identifiants des sites de la configuration, dans son ordre.
     pub(crate) site_ids: Vec<String>,
     pub(crate) clock: Clock,
+    /// Seule connexion qui écrit dans `serve`. À n'appeler que depuis
+    /// `spawn_blocking` : `serve` tourne sur un runtime à un seul thread.
+    pub(crate) writer: Writer,
 }
 
 impl AppState {
@@ -99,6 +103,7 @@ pub fn router(config: Config) -> Router {
 
 pub fn router_with_clock(config: Config, clock: Clock) -> Router {
     let site_ids = config.sites.iter().map(|s| s.id.clone()).collect();
+    let writer = Writer::new(&config.database);
     Router::new()
         .route("/health", get(health_handler).fallback(not_found))
         .route("/r/v1/report", post(report_handler).fallback(not_found))
@@ -108,6 +113,7 @@ pub fn router_with_clock(config: Config, clock: Clock) -> Router {
             config,
             site_ids,
             clock,
+            writer,
         }))
 }
 
@@ -203,14 +209,23 @@ async fn report_handler(State(state): State<Arc<AppState>>, request: Request) ->
     let task_site = site.clone();
     let task_state = Arc::clone(&state);
     let outcome = tokio::task::spawn_blocking(move || {
-        ingest::ingest(
-            task_state.database(),
-            &task_state.site_ids,
-            task_site.as_deref(),
-            signature.as_deref(),
-            &bytes,
-            now,
-        )
+        let refusal = |reason| Refusal::new(task_site.as_deref(), reason);
+        let written = task_state.writer.write(|store| {
+            Ok(ingest::ingest(
+                store,
+                &task_state.site_ids,
+                task_site.as_deref(),
+                signature.as_deref(),
+                &bytes,
+                now,
+            ))
+        });
+        match written {
+            Ok(Some(result)) => result,
+            // Sans base, aucune clé : refusé comme un site inconnu.
+            Ok(None) => Err(refusal(Reason::UnknownSite)),
+            Err(err) => Err(refusal(Reason::Internal(format!("{err:#}")))),
+        }
     })
     .await;
     match outcome {

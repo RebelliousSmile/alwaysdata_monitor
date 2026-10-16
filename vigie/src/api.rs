@@ -77,6 +77,23 @@ fn open_devices(state: &AppState) -> anyhow::Result<Option<Store>> {
     }
 }
 
+/// Écrit par l'écrivain unique de `serve`, sous les mêmes conditions que
+/// [`open_devices`] : `None` si la base est absente ou précède le schéma de
+/// l'API. À appeler depuis `spawn_blocking`.
+fn write_devices<R>(
+    state: &AppState,
+    f: impl FnOnce(&mut Store) -> anyhow::Result<R>,
+) -> anyhow::Result<Option<R>> {
+    let written = state.writer.write(|store| {
+        if store.schema_version()? >= SCHEMA_CHECK_RESULTS {
+            f(store).map(Some)
+        } else {
+            Ok(None)
+        }
+    })?;
+    Ok(written.flatten())
+}
+
 /// Réponse portant un secret ou un état : jamais mise en cache.
 fn no_store(mut response: Response) -> Response {
     response
@@ -123,9 +140,11 @@ async fn pair_handler(State(state): State<Arc<AppState>>, request: Request) -> R
     let token_hash = device::hash(&token);
     let now = (state.clock)();
     let task_state = Arc::clone(&state);
-    let outcome = tokio::task::spawn_blocking(move || match open_devices(&task_state)? {
-        Some(mut store) => store.consume_pairing(&code_hash, &token_hash, now),
-        None => Ok(None),
+    let outcome = tokio::task::spawn_blocking(move || {
+        write_devices(&task_state, |store| {
+            store.consume_pairing(&code_hash, &token_hash, now)
+        })
+        .map(Option::flatten)
     })
     .await;
     match outcome {
@@ -176,12 +195,13 @@ impl FromRequestParts<Arc<AppState>> for Authenticated {
         let now = (state.clock)();
         let task_state = Arc::clone(state);
         let found = tokio::task::spawn_blocking(move || {
-            let Some(mut store) = open_devices(&task_state)? else {
+            let Some(store) = open_devices(&task_state)? else {
                 return Ok(None);
             };
             let device = store.device_by_token_hash(&token_hash)?;
             if let Some(device) = &device
-                && let Err(err) = store.touch_seen(device.id, now)
+                && let Err(err) =
+                    write_devices(&task_state, |writer| writer.touch_seen(device.id, now))
             {
                 // « Vu le » n'est qu'une indication : la requête passe.
                 log::warn!("appareil {} : « vu le » non écrit : {err:#}", device.id);
@@ -227,6 +247,26 @@ where
         None => Ok(None),
     })
     .await;
+    finish(route, outcome)
+}
+
+/// Comme [`with_store`], mais `f` écrit : il passe par l'écrivain unique de
+/// `serve`, qui lit aussi ce qu'il vient d'écrire.
+async fn with_writer<F>(state: &Arc<AppState>, route: &'static str, f: F) -> Response
+where
+    F: FnOnce(&mut Store) -> anyhow::Result<Response> + Send + 'static,
+{
+    let task_state = Arc::clone(state);
+    let outcome = tokio::task::spawn_blocking(move || write_devices(&task_state, f)).await;
+    finish(route, outcome)
+}
+
+/// Réponse d'une tâche de base : 500 sans corps sur base absente, erreur ou
+/// tâche interrompue.
+fn finish(
+    route: &'static str,
+    outcome: Result<anyhow::Result<Option<Response>>, tokio::task::JoinError>,
+) -> Response {
     match outcome {
         Ok(Ok(Some(response))) => response,
         Ok(Ok(None)) => {
@@ -626,7 +666,7 @@ async fn ack_handler(
         return StatusCode::NOT_FOUND.into_response();
     };
     let now = (state.clock)();
-    with_store(&state, "/api/v1/incidents/ack", move |_, mut store| {
+    with_writer(&state, "/api/v1/incidents/ack", move |store| {
         Ok(match store.ack(id, now)? {
             AckOutcome::Acked | AckOutcome::AlreadyAcked => {
                 log::info!("incident {id} acquitté par l'appareil {}", device.id);
@@ -751,7 +791,7 @@ async fn device_self_handler(
     Authenticated(device): Authenticated,
 ) -> Response {
     let now = (state.clock)();
-    with_store(&state, "/api/v1/devices/self", move |_, mut store| {
+    with_writer(&state, "/api/v1/devices/self", move |store| {
         Ok(match store.revoke_device(device.id, now)? {
             RevokeOutcome::Revoked | RevokeOutcome::AlreadyRevoked => {
                 log::info!(

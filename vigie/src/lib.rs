@@ -15,6 +15,7 @@ pub mod report;
 pub mod serve;
 pub mod store;
 pub mod tick;
+pub mod writer;
 
 /// Heure courante, en secondes Unix.
 pub fn now() -> i64 {
