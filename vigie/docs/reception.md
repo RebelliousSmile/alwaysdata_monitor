@@ -25,10 +25,11 @@ Cadences, comme en production : `tick` chaque minute, agent toutes les 5 min,
 | -------------------------- | ---------- | --------------------------- | ----------- |
 | Pire cas simulé (25 cas)   | 2026-10-16 | 299 s sur chaque canal      | validé      |
 | Reprise locale réelle      | 2026-10-16 | externe 239 s, agent 299 s  | validé      |
-| Production (fichier témoin)| —          | —                           | à faire     |
-| Sonde UptimeRobot          | —          | —                           | à faire     |
+| Production (fichier témoin)| 2026-10-16 | alerte à T0+56 s, clôture 2 min 35 s après la restauration | validé |
+| Sonde UptimeRobot          | 2026-10-16 | alerte 5 min après le 503, retour 3 min après la relance | validé |
 
-Réception **non prononcée** tant que les deux dernières lignes ne sont pas faites.
+Réception **prononcée le 2026-10-16** : les quatre mesures tiennent la
+promesse des 10 minutes.
 
 ## 1. Pire cas simulé
 
@@ -111,7 +112,7 @@ pire cas simulé (299 s).
 
 ## 3. Production, sans risque
 
-À faire, avec l'accord explicite de l'utilisateur.
+Fait le 2026-10-16, avec l'accord de l'utilisateur.
 
 On ne touche jamais `wp-config.php`, `.htaccess` ni l'installeur en production.
 On utilise un fichier témoin :
@@ -121,7 +122,31 @@ On utilise un fichier témoin :
 2. Le supprimer en notant T0 ; attendre l'e-mail et noter T_alerte.
 3. Le restaurer ; attendre l'e-mail de clôture.
 
-Résultat : à faire.
+Le témoin est restauré vide : même empreinte que celle de la référence, donc
+pas d'avertissement `agent:integrity`. Il reste en place, toujours dans
+`critical[]`, pour une prochaine reprise. La config d'avant le test est
+sauvegardée à côté de `config.json` (`config.json.bak-20261016`).
+
+Résultat du 2026-10-16 (heures lues dans la base du veilleur, colonnes
+`opened_at`, `open_notified_at`, `closed_at`, `close_notified_at` de
+l'incident) :
+
+| Heure (UTC) | Événement                                                        |
+| ----------- | ---------------------------------------------------------------- |
+| 06:22:58    | témoin posé, `.vigie-canary` ajouté à `critical[]`, `--dry-run` sans constat |
+| 06:25:09    | rapport sain, le témoin entre dans la référence sans incident    |
+| 06:55:04    | **T0** : `.vigie-canary` supprimé                                |
+| 06:55:08    | rapport de l'agent porteur du constat, incident ouvert (`critical-file`, critique) |
+| 06:56:00    | e-mail « Fichier critique absent : .vigie-canary », **T0+56 s**  |
+| 06:58:25    | témoin restauré                                                  |
+| 07:00:08    | rapport sain, incident clos                                      |
+| 07:01:00    | e-mail de clôture reçu (premier signal 06:55:08, rétabli 07:00:08), 2 min 35 s après la restauration |
+
+56 s est un meilleur cas : la tâche planifiée de l'agent est partie 4 s
+après la suppression. Le délai dépend du décalage entre l'incident et le
+passage suivant de l'agent ; le pire cas reste celui de la simulation
+(299 s). Critère de la tâche 4 tenu : alerte sous 10 min, e-mail de clôture
+après la restauration.
 
 ## 4. Surveillance du veilleur
 
@@ -130,15 +155,56 @@ Résultat : à faire.
 Une seule sonde externe : elle couvre la panne du VPS ou du veilleur, que le
 veilleur ne peut pas signaler lui-même.
 
-1. Remplacer la sonde UptimeRobot actuelle (mot-clé sur la page surveillée)
-   par une sonde HTTP(s) sur `/health` du veilleur, en alerte sur toute réponse
-   autre que 2xx. `/health` répond 503 quand le dernier `tick` a plus de 3 min.
-   Le contrôle `content` du veilleur reprend la vérification du mot-clé.
-2. Couper `tick` plus de 3 min, vérifier que UptimeRobot alerte, le réactiver.
-3. Relire les conditions de l'offre gratuite d'UptimeRobot pour un usage dans
-   une prestation payante ; consigner la réponse et sa source.
+1. Ajouter une sonde HTTP(s) UptimeRobot sur `/health` du veilleur, toutes
+   les 5 min, en alerte sur toute réponse autre que 2xx. `/health` répond 503
+   quand le dernier `tick` a plus de 3 min.
+2. Couper `vigie-tick.timer` une dizaine de minutes (3 min avant le 503, puis
+   jusqu'à 5 min avant le passage de la sonde), vérifier que UptimeRobot
+   alerte, le réactiver et attendre son e-mail de retour.
 
-Résultat : à faire.
+Écart au plan : la sonde par mot-clé sur la page surveillée **reste en place**
+au lieu d'être remplacée. L'offre gratuite compte 50 sondes, il n'y a pas à
+choisir ; elle sert de second avis indépendant du veilleur sur le contrôle
+`content` (voir `src/checks/content.rs`).
+
+Conditions de l'offre gratuite, consultées le 2026-10-16 :
+
+- [Conditions d'utilisation](https://uptimerobot.com/terms), section 3 :
+  « UptimeRobot is available for any use, including commercial and business
+  use. » Dernière entrée du journal des modifications : 2026-05-26.
+- [Fair Use Policy](https://uptimerobot.com/terms-fair-use/) (mise à jour du
+  2026-06-24), applicable à toutes les offres, même phrase.
+- Limites qui comptent ici, section 14 et section 2 : pas de revente ni de
+  marque blanche (« UptimeRobot data, status pages, alerts, and API responses
+  may not be repackaged, white-labeled, or offered to third parties ») et un
+  seul compte (« only having a single account »).
+
+Réponse : surveiller les sites d'une prestation payante avec l'offre gratuite
+est permis ; offrir au client les alertes ou une page de statut UptimeRobot
+(reconditionnées ou non) demande l'autorisation d'UptimeRobot. Les alertes
+d'UptimeRobot restent donc à usage interne ; ce que voit le client vient du
+veilleur. Des articles de tiers de
+2024 décrivent une offre gratuite réservée à un usage non commercial : ce
+n'est plus le texte en vigueur.
+
+Résultat du 2026-10-16 (sonde HTTP(s) sur `/health`, toutes les 5 min), relevé
+toutes les 10 s par `curl` sur `/health` :
+
+| Heure (UTC) | Événement                                                        |
+| ----------- | ---------------------------------------------------------------- |
+| 23:06:00    | dernier `tick` (`last_tick` 1792105560)                          |
+| 23:06:52    | `systemctl stop vigie-tick.timer`                                |
+| 23:09:00    | `/health` : 200, `age_seconds` 179                               |
+| 23:09:10    | `/health` : 503, `"status":"late"`, `age_seconds` 189            |
+| 23:14       | e-mail UptimeRobot « Monitor is DOWN », panne vue depuis Ashburn (USA) ; heure à la minute près, lue dans le client de messagerie (01:14 heure de Paris) |
+| 23:15:53    | `systemctl start vigie-tick.timer` (heure déduite : `date -u` à 23:17:03 après `sleep 70`) |
+| 23:17:03    | `/health` en local : 200                                         |
+| 23:19       | e-mail UptimeRobot « Monitor is UP », retour vu depuis l'Amérique du Nord (01:19 heure de Paris, à la minute près) |
+
+Délai : environ 5 min entre le 503 et l'e-mail, borné par l'intervalle de la
+sonde ; 8 min environ après le dernier `tick`. Retour : e-mail environ 3 min
+après la relance du timer. Critère de la tâche 5 tenu : UptimeRobot alerte
+quand `tick` est arrêté.
 
 ## Écarts au plan
 
