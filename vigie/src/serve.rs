@@ -10,6 +10,9 @@
 //! - `POST /r/v1/commands` sert à l'agent sa commande signée et reçoit le
 //!   résultat de la précédente (`command/pull.rs`,
 //!   `docs/protocole-commandes.md`), fermé tant que `[commands]` manque ;
+//! - `POST /r/v1/logs` reçoit les lots de logs signés des agents
+//!   (`logs/receive.rs`, `docs/logs.md`), fermé pour un site sans
+//!   `[sites.logs] source` ;
 //! - `/api/v1` sert la console, authentifiée par appareil (`api.rs`,
 //!   `docs/api-console.md`).
 //!
@@ -120,6 +123,10 @@ pub fn router_with(config: Config, clock: Arc<dyn Clock>, config_path: Option<Pa
         .route(
             crate::command::pull::ROUTE,
             post(commands_handler).fallback(not_found),
+        )
+        .route(
+            crate::logs::receive::ROUTE,
+            post(logs_handler).fallback(not_found),
         )
         .merge(crate::api::routes())
         .fallback(not_found)
@@ -397,6 +404,94 @@ async fn commands_handler(
     }
 }
 
+/// 204 si le lot est accepté ou déjà reçu, 404 sans corps sinon. Mêmes
+/// limites de taille et de délai que `/r/v1/report` ; la configuration est
+/// celle du démarrage, comme pour les rapports.
+async fn logs_handler(State(state): State<Arc<AppState>>, request: Request) -> StatusCode {
+    let (parts, body) = request.into_parts();
+    let header = |name: &str| {
+        parts
+            .headers
+            .get(name)
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_owned)
+    };
+    let site = header(HEADER_SITE);
+    let signature = header(HEADER_SIGNATURE);
+    let announced = header(CONTENT_LENGTH.as_str()).and_then(|v| v.parse::<u64>().ok());
+    let bytes = match read_agent_body(body, announced).await {
+        Ok(bytes) => bytes,
+        Err(reason) => return refuse_logs(Refusal::new(site.as_deref(), reason)),
+    };
+    let now = state.clock.unix();
+    let task_state = Arc::clone(&state);
+    let task_site = site.clone();
+    let outcome = tokio::task::spawn_blocking(move || {
+        let refusal = |reason| Refusal::new(task_site.as_deref(), reason);
+        let written = task_state.writer.write(|store| {
+            Ok(crate::logs::receive::receive(
+                store,
+                &task_state.config,
+                task_site.as_deref(),
+                signature.as_deref(),
+                &bytes,
+                now,
+            ))
+        });
+        match written {
+            Ok(Some(result)) => result,
+            Ok(None) => Err(refusal(Reason::UnknownSite)),
+            Err(err) => Err(refusal(Reason::Internal(format!("{err:#}")))),
+        }
+    })
+    .await;
+    match outcome {
+        Ok(Ok(received)) => {
+            let rid = crate::request_id::current();
+            let what = match &received.stored {
+                crate::logs::receive::Stored::Duplicate => "déjà reçu".to_owned(),
+                crate::logs::receive::Stored::Accepted {
+                    accepted,
+                    rejected,
+                    gap,
+                } => format!("{accepted} entrée(s), rejets {rejected:?}, trou de {gap} octet(s)"),
+            };
+            log::info!(
+                "[{rid}] lot de logs accepté (site {}, seq {}, {} gen {} {}..{}) : {what}",
+                received.site,
+                received.seq,
+                received.file,
+                received.generation,
+                received.start,
+                received.end
+            );
+            if received.skipped_files > 0 {
+                log::warn!(
+                    "[{rid}] site {} : {} fichier(s) de logs sautés par l'agent (introuvables ou tronqués)",
+                    received.site,
+                    received.skipped_files
+                );
+            }
+            StatusCode::NO_CONTENT
+        }
+        Ok(Err(refusal)) => refuse_logs(refusal),
+        Err(err) => refuse_logs(Refusal::new(
+            site.as_deref(),
+            Reason::Internal(format!("tâche interrompue : {err}")),
+        )),
+    }
+}
+
+fn refuse_logs(refusal: Refusal) -> StatusCode {
+    let rid = crate::request_id::current();
+    if matches!(refusal.reason, Reason::Internal(_)) {
+        log::error!("[{rid}] lot de logs : {refusal}");
+    } else {
+        log::warn!("[{rid}] lot de logs : {refusal}");
+    }
+    StatusCode::NOT_FOUND
+}
+
 fn refuse_pull(refusal: Refusal) -> axum::response::Response {
     use axum::response::IntoResponse;
     let rid = crate::request_id::current();
@@ -603,6 +698,7 @@ mod tests {
             "/.env",
             "/r/v1/report",
             "/r/v1/commands",
+            "/r/v1/logs",
             "/r/v1",
             "/api/v1",
             "/api/v1/inconnu",

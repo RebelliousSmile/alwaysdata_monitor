@@ -398,7 +398,7 @@ fn rotation(
         return Ok(Err("preuve de possession fausse"));
     }
     tx.execute(
-        "UPDATE site_keys SET pubkey = ?2 WHERE site = ?1",
+        "UPDATE site_keys SET pubkey = ?2, last_logs_seq = 0 WHERE site = ?1",
         params![site, new_bytes.as_slice()],
     )?;
     tx.execute("UPDATE reports SET last_seq = 0 WHERE site = ?1", [site])?;

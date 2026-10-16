@@ -2,8 +2,8 @@
 
 Client Windows et Android de l'API du veilleur (`/api/v1`, voir
 [`../docs/api-console.md`](../docs/api-console.md)). Tauri 2, Vue 3, Pinia.
-Le jeton d'appareil reste côté Rust, dans le dossier de données de
-l'application : aucune commande ne le renvoie au webview.
+Le jeton d'appareil reste côté Rust : aucune commande ne le renvoie au
+webview (voir « Jeton de l'appareil »).
 
 ## Installation
 
@@ -62,6 +62,32 @@ son jeton et la console l'oublie. Si le veilleur est injoignable, la console
 l'oublie quand même et affiche la commande `vigie device revoke <id>` à lancer
 sur le VPS. Un appareil révoqué depuis le VPS revient à Appairage à sa
 requête suivante.
+
+### Jeton de l'appareil
+
+`device.json` (dossier de données de l'application) ne porte que l'adresse
+du veilleur, le numéro et le nom de l'appareil. Le jeton est rangé à part :
+
+- Windows : Credential Manager, identifiant générique `vigie-console/device`,
+  persistance « ordinateur local » (il ne suit pas un profil itinérant) ;
+- Android : fichier privé de l'application dans son dossier `no_backup`.
+  L'APK interdit en plus la sauvegarde et le transfert vers un autre
+  téléphone (`allowBackup="false"`, `dataExtractionRules`) : un téléphone
+  restauré doit être appairé de nouveau.
+
+Réglages indique où vit le jeton. « Ancien fichier » : la console n'a pas pu
+le déplacer hors de `device.json` (trousseau verrouillé ou interdit) ; elle
+fonctionne quand même et réessaie à chaque lancement.
+
+- Mise à jour depuis la 0.1.1 : au premier lancement, le jeton de
+  `device.json` est rangé dans le trousseau (ou dans `no_backup`), relu, puis
+  `device.json` est réécrit sans lui. Une sauvegarde Android faite avant la
+  mise à jour garde l'ancien fichier : la révoquer au besoin
+  (`vigie device revoke <id>`).
+- Retour à la 0.1.1 : elle ne lit pas le nouveau `device.json`. Réappairer.
+- Stratégie de groupe Windows interdisant le Credential Manager : un appareil
+  déjà appairé le reste (« Ancien fichier »), mais un nouvel appairage est
+  refusé, et le jeton qu'il venait d'obtenir est révoqué aussitôt.
 
 Une adresse en http n'est acceptée que sur la boucle locale (`127.0.0.1`,
 `localhost`, `[::1]`), et seulement dans un build de debug.

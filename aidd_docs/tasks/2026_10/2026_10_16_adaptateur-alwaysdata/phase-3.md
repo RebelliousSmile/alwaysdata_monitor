@@ -1,5 +1,5 @@
 ---
-status: pending
+status: done
 ---
 
 # Instruction: LogSource Alwaysdata, rétention et contrat écrit

@@ -3,9 +3,10 @@
 
 pub mod client;
 pub mod pairing;
+pub mod secret;
 
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
 use tauri::{Manager, State};
@@ -13,55 +14,70 @@ use tauri::{Manager, State};
 use client::{
     ApiError, Client, ErrorKind, Incident, Overview, Settings, SiteDetail, SiteIncidents,
 };
+use secret::{SecretStore, TokenStorage};
 
 /// Appareil appairé, chargé en mémoire.
 struct Session {
     client: Client,
     stored: pairing::Stored,
+    storage: TokenStorage,
 }
 
 /// État partagé des commandes.
-struct Console {
+pub struct Console {
     data_dir: PathBuf,
+    secrets: Arc<dyn SecretStore>,
     session: Mutex<Option<Session>>,
 }
 
 /// Ce que le webview sait de l'appareil : jamais le jeton.
-#[derive(Debug, Serialize)]
-struct Status {
-    device_id: i64,
-    name: String,
-    url: String,
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Status {
+    pub device_id: i64,
+    pub name: String,
+    pub url: String,
+    /// Où vit le jeton ; `file_legacy` est le seul état dégradé.
+    pub token_storage: TokenStorage,
 }
 
 #[derive(Debug, Serialize)]
-struct Unpaired {
+pub struct Unpaired {
     /// `false` : veilleur injoignable, l'appareil reste à révoquer en CLI.
-    revoked: bool,
-    device_id: i64,
+    pub revoked: bool,
+    pub device_id: i64,
 }
 
 impl Status {
-    fn of(stored: &pairing::Stored) -> Self {
+    fn of(stored: &pairing::Stored, storage: TokenStorage) -> Self {
         Self {
             device_id: stored.device_id,
             name: stored.name.clone(),
             url: stored.url.clone(),
+            token_storage: storage,
         }
     }
 }
 
+fn not_paired() -> ApiError {
+    ApiError::new(ErrorKind::NotPaired, "cet appareil n'est pas appairé")
+}
+
 impl Console {
-    fn new(data_dir: PathBuf) -> Self {
-        let session = match pairing::load(&data_dir) {
-            Ok(Some(stored)) => Client::new(&stored.url).ok().map(|client| Session {
-                client: client.with_token(stored.token.clone()),
-                stored,
+    /// Charge l'appareil enregistré, en migrant au besoin un `device.json`
+    /// 0.1.1 (`pairing::open`). Un fichier illisible ou un jeton introuvable
+    /// laissent la console non appairée, sans rien effacer.
+    pub fn new(data_dir: PathBuf, secrets: Arc<dyn SecretStore>) -> Self {
+        let session = match pairing::open(&data_dir, secrets.as_ref()) {
+            Ok(Some(loaded)) => Client::new(&loaded.stored.url).ok().map(|client| Session {
+                client: client.with_token(loaded.token),
+                stored: loaded.stored,
+                storage: loaded.storage,
             }),
             _ => None,
         };
         Self {
             data_dir,
+            secrets,
             session: Mutex::new(session),
         }
     }
@@ -72,21 +88,96 @@ impl Console {
         self.session.lock().unwrap_or_else(|err| err.into_inner())
     }
 
+    pub fn status(&self) -> Option<Status> {
+        self.lock()
+            .as_ref()
+            .map(|session| Status::of(&session.stored, session.storage))
+    }
+
     /// Client de la session, cloné pour ne pas tenir le verrou pendant l'appel.
     fn client(&self) -> Result<Client, ApiError> {
         self.lock()
             .as_ref()
             .map(|session| session.client.clone())
-            .ok_or_else(|| ApiError::new(ErrorKind::NotPaired, "cet appareil n'est pas appairé"))
+            .ok_or_else(not_paired)
     }
 
+    /// Efface le jeton du store **et** le fichier, même si l'un échoue.
     fn forget(&self) -> Result<(), ApiError> {
         *self.lock() = None;
-        pairing::clear(&self.data_dir)
+        let secret = self.secrets.delete();
+        let file = pairing::clear(&self.data_dir);
+        file?;
+        secret?;
+        Ok(())
+    }
+
+    /// Range le jeton (écrit puis relu) et écrit `device.json`. En cas
+    /// d'échec, rien ne reste sur l'appareil.
+    fn keep(&self, stored: &pairing::Stored, token: &str) -> Result<(), ApiError> {
+        secret::put(self.secrets.as_ref(), token)?;
+        pairing::save(&self.data_dir, stored).inspect_err(|_| {
+            let _ = self.secrets.delete();
+        })
+    }
+
+    /// Appaire ce poste. Si le jeton reçu ne peut pas être rangé (trousseau
+    /// interdit par stratégie de groupe, disque plein), il est révoqué
+    /// aussitôt : aucun jeton valide ne reste orphelin.
+    pub async fn pair(&self, link: &str, allow_loopback: bool) -> Result<Status, ApiError> {
+        let link = pairing::parse_link(link, allow_loopback)?;
+        let client = Client::new(&link.url)?;
+        let paired = client.pair(&link.code).await?;
+        let stored = pairing::Stored {
+            url: link.url,
+            device_id: paired.device_id,
+            name: paired.name,
+        };
+        let client = client.with_token(paired.token.clone());
+        if let Err(err) = self.keep(&stored, &paired.token) {
+            let revoked = matches!(client.unpair().await, Ok(()));
+            let message = if revoked {
+                format!(
+                    "{} : appairage annulé, le veilleur a révoqué le jeton émis",
+                    err.message
+                )
+            } else {
+                format!(
+                    "{} : appairage annulé, mais le veilleur est injoignable ; sur le VPS : vigie device revoke {}",
+                    err.message, stored.device_id
+                )
+            };
+            return Err(ApiError::new(err.kind, message));
+        }
+        let status = Status::of(&stored, self.secrets.storage());
+        *self.lock() = Some(Session {
+            client,
+            stored,
+            storage: status.token_storage,
+        });
+        Ok(status)
+    }
+
+    /// Révoque l'appareil côté veilleur s'il répond, et efface toujours le
+    /// jeton et le fichier locaux.
+    pub async fn unpair(&self) -> Result<Unpaired, ApiError> {
+        let (client, device_id) = {
+            let session = self.lock();
+            let session = session.as_ref().ok_or_else(not_paired)?;
+            (session.client.clone(), session.stored.device_id)
+        };
+        let revoked = match client.unpair().await {
+            Ok(()) => true,
+            // Déjà révoqué côté veilleur : le résultat est le même.
+            Err(err) if err.kind == ErrorKind::Unauthorized => true,
+            Err(_) => false,
+        };
+        self.forget()?;
+        Ok(Unpaired { revoked, device_id })
     }
 
     /// Un 401 signifie un jeton révoqué : l'appareil n'est plus appairé.
-    async fn call<T, F>(&self, call: impl FnOnce(Client) -> F) -> Result<T, ApiError>
+    pub async fn call<T, F>(&self, call: impl FnOnce(Client) -> F) -> Result<T, ApiError>
     where
         F: Future<Output = Result<T, ApiError>>,
     {
@@ -102,51 +193,17 @@ impl Console {
 
 #[tauri::command]
 fn status(console: State<'_, Console>) -> Option<Status> {
-    console
-        .lock()
-        .as_ref()
-        .map(|session| Status::of(&session.stored))
+    console.status()
 }
 
 #[tauri::command]
 async fn pair(console: State<'_, Console>, link: String) -> Result<Status, ApiError> {
-    let link = pairing::parse_link(&link, cfg!(debug_assertions))?;
-    let client = Client::new(&link.url)?;
-    let paired = client.pair(&link.code).await?;
-    let stored = pairing::Stored {
-        url: link.url,
-        token: paired.token,
-        device_id: paired.device_id,
-        name: paired.name,
-    };
-    pairing::save(&console.data_dir, &stored)?;
-    let status = Status::of(&stored);
-    *console.lock() = Some(Session {
-        client: client.with_token(stored.token.clone()),
-        stored,
-    });
-    Ok(status)
+    console.pair(&link, cfg!(debug_assertions)).await
 }
 
-/// Révoque l'appareil côté veilleur s'il répond, et efface toujours le
-/// fichier local.
 #[tauri::command]
 async fn unpair(console: State<'_, Console>) -> Result<Unpaired, ApiError> {
-    let (client, device_id) = {
-        let session = console.lock();
-        let session = session
-            .as_ref()
-            .ok_or_else(|| ApiError::new(ErrorKind::NotPaired, "cet appareil n'est pas appairé"))?;
-        (session.client.clone(), session.stored.device_id)
-    };
-    let revoked = match client.unpair().await {
-        Ok(()) => true,
-        // Déjà révoqué côté veilleur : le résultat est le même.
-        Err(err) if err.kind == ErrorKind::Unauthorized => true,
-        Err(_) => false,
-    };
-    console.forget()?;
-    Ok(Unpaired { revoked, device_id })
+    console.unpair().await
 }
 
 #[tauri::command]
@@ -199,7 +256,8 @@ pub fn run() {
     builder
         .setup(|app| {
             let data_dir = app.path().app_data_dir()?;
-            app.manage(Console::new(data_dir));
+            let secrets = secret::platform(&data_dir);
+            app.manage(Console::new(data_dir, secrets));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -212,20 +270,127 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use secret::MemoryStore;
+
+    const TOKEN: &str = "jeton-fictif-0123456789abcdef";
+
+    fn stored() -> pairing::Stored {
+        pairing::Stored {
+            url: "https://vigie.example.org".into(),
+            device_id: 3,
+            name: "poste de test".into(),
+        }
+    }
 
     #[test]
     fn status_never_carries_the_token() {
-        let stored = pairing::Stored {
-            url: "https://vigie.example.org".into(),
-            token: "jeton-fictif-0123456789abcdef".into(),
-            device_id: 3,
-            name: "poste de test".into(),
-        };
-        let json = serde_json::to_string(&Status::of(&stored)).unwrap();
-        assert!(!json.contains(&stored.token), "{json}");
+        let json = serde_json::to_string(&Status::of(&stored(), TokenStorage::Keyring)).unwrap();
+        assert!(!json.contains(TOKEN), "{json}");
         assert_eq!(
             json,
-            r#"{"device_id":3,"name":"poste de test","url":"https://vigie.example.org"}"#
+            r#"{"device_id":3,"name":"poste de test","url":"https://vigie.example.org","token_storage":"keyring"}"#
         );
+    }
+
+    /// Console appairée sur `secrets`, dans un dossier temporaire.
+    fn paired(secrets: Arc<MemoryStore>) -> (tempfile::TempDir, Console) {
+        let dir = tempfile::tempdir().expect("dossier");
+        pairing::save(dir.path(), &stored()).expect("écrit");
+        secret::put(secrets.as_ref(), TOKEN).expect("rangé");
+        let console = Console::new(dir.path().to_path_buf(), secrets);
+        (dir, console)
+    }
+
+    #[test]
+    fn loads_the_device_and_its_token_storage() {
+        let secrets = Arc::new(MemoryStore::new());
+        let (_dir, console) = paired(secrets);
+        let status = console.status().expect("appairé");
+        assert_eq!(status.device_id, 3);
+        assert_eq!(status.token_storage, TokenStorage::Keyring);
+    }
+
+    #[test]
+    fn a_missing_token_leaves_the_console_unpaired_without_erasing() {
+        let dir = tempfile::tempdir().expect("dossier");
+        pairing::save(dir.path(), &stored()).expect("écrit");
+        let console = Console::new(dir.path().to_path_buf(), Arc::new(MemoryStore::new()));
+        assert_eq!(console.status(), None);
+        assert!(dir.path().join("device.json").exists());
+    }
+
+    #[test]
+    fn forget_erases_both_sides_even_if_one_fails() {
+        let secrets = Arc::new(MemoryStore::new());
+        let (dir, console) = paired(Arc::clone(&secrets));
+        secrets
+            .fail_delete
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        let err = console.forget().expect_err("entrée du store gardée");
+        assert_eq!(err.kind, ErrorKind::Storage);
+        assert!(!err.message.contains(TOKEN));
+        assert!(!dir.path().join("device.json").exists(), "fichier effacé");
+        assert_eq!(console.status(), None);
+        secrets
+            .fail_delete
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+        console.forget().expect("effacé");
+        assert_eq!(secrets.secret(), None);
+    }
+
+    /// Commandes exposées au webview : en ajouter une passe par ce test.
+    #[test]
+    fn the_command_list_is_frozen() {
+        let source = include_str!("lib.rs");
+        let start = source
+            .find("generate_handler![")
+            .expect("generate_handler!")
+            + 18;
+        let end = start + source[start..].find(']').expect("fin");
+        let commands: Vec<&str> = source[start..end]
+            .split(',')
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .collect();
+        assert_eq!(
+            commands,
+            [
+                "status",
+                "pair",
+                "unpair",
+                "overview",
+                "site",
+                "incidents",
+                "incident",
+                "ack",
+                "settings"
+            ]
+        );
+        let code = &source[..source.find("#[cfg(test)]").expect("tests")];
+        assert_eq!(code.matches("#[tauri::command]").count(), commands.len());
+    }
+
+    /// La console lit ; sa seule écriture est l'acquittement. Hors `pair`
+    /// et `unpair`, toute requête de `client.rs` est un GET.
+    #[test]
+    fn ack_is_the_only_write_besides_pairing() {
+        let source = include_str!("client.rs");
+        let code = &source[..source.find("#[cfg(test)]").expect("tests")];
+        let mut writes = Vec::new();
+        let mut function = "";
+        for line in code.lines() {
+            if let Some(rest) = line.trim().strip_prefix("pub async fn ") {
+                function = rest.split('(').next().unwrap_or_default();
+            }
+            for method in ["POST", "PUT", "PATCH", "DELETE"] {
+                if line.contains(&format!("Method::{method}")) {
+                    writes.push(format!("{function} {method}"));
+                }
+            }
+            for raw in [".post(", ".put(", ".patch(", ".delete("] {
+                assert!(!line.contains(raw), "requête hors de send : {line}");
+            }
+        }
+        assert_eq!(writes, ["pair POST", "ack POST", "unpair DELETE"]);
     }
 }

@@ -83,6 +83,22 @@ Plan : `aidd_docs/tasks/2026_10/2026_10_16_logsource/plan.md` ; contrat :
 | Une ligne n'est jamais rejetée pour sa longueur sous 4 Mio : chaque champ est tronqué ; l'agent coupe chaque ligne à 16 Kio | Un robot ne doit pas se cacher en gonflant sa ligne |
 | `fetch(from, max_entries)` et `Fetched.more` figés dès maintenant | Une borne ajoutée plus tard casserait chaque adaptateur |
 
+## Adaptateur Alwaysdata (issue #1)
+
+Plan : `aidd_docs/tasks/2026_10/2026_10_16_adaptateur-alwaysdata/plan.md`,
+relu en trois tours ; contrat : [`logs.md`](./logs.md#transport-alwaysdata-issue-1).
+
+| Décision du 2026-10-16 | Raison |
+| --- | --- |
+| L'agent pousse (`POST /r/v1/logs`), signé par sa clé de rapport avec le préfixe `vigie-logs-v1\n` ; le veilleur ne lit jamais l'hébergeur | Aucun accès FTP ou API stocké ; une signature ne vaut que pour son point d'entrée |
+| RGPD : rien de brut n'est stocké. Le veilleur normalise à la réception et n'écrit que des `Entry` (clés de query string, hôte du referer) ; 30 jours de conservation, purgés par `tick` | Les valeurs de query string n'existent jamais en base : rien à masquer après coup |
+| Filtre d'hôtes côté agent (`logs.hosts`, fail-closed) et refiltre au veilleur (`[sites.logs] hosts`, une ligne sans hôte est rejetée) | Minimisation : un fichier Alwaysdata couvre tout le compte |
+| Idempotence par limite haute de `(site, file, gen)` et lot `pending` renvoyé à l'identique ; un trou est admis et compté | Une réponse perdue ne double rien et ne bloque jamais l'agent |
+| Plafonds : 16 Kio par ligne, 44 Kio gardés et 4 Mio lus par lot, 20 lots et 20 s par passage côté agent ; 50 Mo par site et par jour UTC côté veilleur | 48 Kio en base64 font déjà 64 Kio ; bornes mémoire et CPU des deux côtés ; un retard se rattrape |
+| `log_entries.id` en `AUTOINCREMENT`, curseur de `AlwaysdataSource` = dernier id servi | Après une purge totale, un id redonné sous le curseur serait sauté en silence |
+| Un lot de logs ne vaut ni rapport ni preuve de vie | Le battement de cœur reste porté par le rapport |
+| Le chemin complet (`tests/logs_contract.rs`) rejette `apache-combined.log` en `host` | Fixture sans hôte en tête : hors format Alwaysdata, écartée par le filtre fail-closed |
+
 ## Typologie des sites (issue #2)
 
 Plan : `aidd_docs/tasks/2026_10/2026_10_16_typologie-kind/plan.md` ; contrat :
@@ -122,3 +138,13 @@ Plan : `aidd_docs/tasks/2026_10/2026_10_16_agent-commandes/plan.md`.
 | Le test de bout en bout parle en http à la boucle locale, pas en HTTPS ; il est hors de `cargo test` ordinaire et lancé en CI avec le PHP 8.1 épinglé | Le veilleur est en HTTP derrière Caddy ; pas de PHP dans le CI Rust ; la version visée est 8.1 |
 | La bascule de clé n'a lieu que sur une réponse signée, jamais sur un 204 | Un 204 forgé ou mal routé enfermerait l'agent dehors |
 
+
+## Console, poste de pilotage (issue #12)
+
+Plan : `aidd_docs/tasks/2026_10/2026_10_16_console-shell/plan.md`.
+
+| Décision du 2026-10-16 | Raison |
+| --- | --- |
+| Sous Windows, le jeton d'appareil vit dans le Credential Manager (`keyring-core` et `windows-native-keyring-store`, store construit explicitement, persistance `Local`, cible `vigie-console/device`) ; `device.json` ne garde que l'URL, l'id et le nom. Un `device.json` 0.1.1 est migré au lancement ; en cas d'échec, l'appareil reste appairé sur l'ancien fichier (`file_legacy`, affiché dans Réglages) et la migration est retentée | Exigence « keyring OS » de l'issue, sans copie du jeton par le profil itinérant ni appareil bloqué par une migration ratée |
+| Sous Android, le jeton reste dans un fichier 0600 du dossier `no_backup` de l'application, et le manifeste coupe sauvegarde et transfert (`allowBackup`, `dataExtractionRules`, vérifiés sur l'APK). Un store Keystore existe (`android-native-keyring-store`) ; il est écarté par choix (crate jeune, appels JNI), pas faute d'existence | Le bac à sable par application tient lieu de trousseau ; sans les règles d'extraction, le transfert vers un nouveau téléphone copierait le jeton et rendrait deux appareils indiscernables pour la révocation |
+| Sous une stratégie de groupe qui interdit le trousseau, un appareil déjà appairé reste appairé (fichier hérité), mais un nouvel appairage est refusé et le jeton émis aussitôt révoqué | Ne pas casser l'existant, ne pas créer de jeton hors trousseau |

@@ -16,5 +16,9 @@
   "commands": {
     "endpoint": "https://<sous-domaine-du-veilleur>/r/v1/commands",
     "pubkey": "<sortie de vigie commands pubkey>"
+  },
+  "logs": {
+    "dir": "/home/<compte-site-a>/admin/logs/http",
+    "hosts": ["site-a.example.org", "www.site-a.example.org"]
   }
 }
