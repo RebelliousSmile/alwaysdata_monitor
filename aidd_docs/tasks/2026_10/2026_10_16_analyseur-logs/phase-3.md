@@ -22,8 +22,8 @@ status: pending
 
 ## Tasks to do
 
-1. `Analysis` : robots vus (éditeur, finalité, `robots_only`, `honours_robots`, volume, `protected`), verdicts d'IP (score, niveau, raisons, classe), dépassements de règles, charge ; gardée par site pour #13 et la console (#5).
-2. Constats : un par règle dépassée (clé = identifiant de règle ; détail : chiffres, au plus 5 IP ou chemins tronqués à 100 caractères) ; `sensitive-path` (information, une IP suffit) et `sensitive-path-many` (avertissement, 5 IP distinctes) ; `suspicious-ips` (avertissement, 5 pires IP) ; `bots-ai-training` (information) ; `load` (avertissement). Résolution des constats de fenêtre quand `now − référence` > fenêtre + `agent_silence`.
+1. `Analysis` persistée en instantané à chaque passage (`log_analysis`, `log_verdicts` remplacés en une transaction ; lue par l'API de #5) : robots vus (éditeur, finalité, `robots_only`, `honours_robots`, volume, `protected`), verdicts d'IP (score, niveau, raisons, classe), dépassements de règles, charge ; gardée par site pour #13 et la console (#5).
+2. Constats (tout texte d'origine log dans un `detail` assaini à l'écriture : contrôles C0/C1/DEL/U+2028-2029/bidi → U+FFFD, chemins sans query string) : un par règle dépassée (clé = identifiant de règle ; détail : chiffres, au plus 5 IP ou chemins tronqués à 100 caractères) ; `sensitive-path` (information, une IP suffit) et `sensitive-path-many` (avertissement, 5 IP distinctes) ; `suspicious-ips` (avertissement, 5 pires IP) ; `bots-ai-training` (information) ; `load` (avertissement). Résolution des constats de fenêtre quand `now − référence` > fenêtre + `agent_silence`.
 3. Partage : signature d'UA notée quand le score propre d'une IP qui la porte est ≥ 70 et que l'UA est un robot non générique ; jamais d'IP.
 4. `tick` : sites ayant une source (#1) ; `close_unwatched` garde `logs` pour eux ; purge des profils à 48 h, des signatures et résumés à 30 j, masquage des détails `logs` clos à 30 j.
 
