@@ -142,7 +142,7 @@ onBeforeUnmount(stopClock)
 </script>
 
 <template>
-  <div class="flex min-h-screen bg-bg text-text">
+  <div class="flex min-h-screen bg-bg pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] text-text">
     <SideNav
       :in-site="inSite"
       :active="route.meta.nav"
