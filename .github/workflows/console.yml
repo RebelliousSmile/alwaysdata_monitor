@@ -107,6 +107,26 @@ jobs:
             vigie/app/src-tauri/target
           key: console-android-${{ hashFiles('vigie/app/src-tauri/Cargo.lock') }}
       - run: pnpm install --frozen-lockfile
+      # Sans keystore, Gradle en crée une à chaque run : l'APK suivant est
+      # refusé (INSTALL_FAILED_UPDATE_INCOMPATIBLE) et il faut désinstaller,
+      # ce qui efface l'appairage. Une keystore de debug fixe, tirée des
+      # secrets, permet d'installer par-dessus. Ses mots de passe sont les
+      # constantes publiques d'AGP : le secret sert à la stabilité, et à ce
+      # qu'aucun tiers ne signe une mise à jour acceptée par le téléphone.
+      # Secret absent : clé jetable et avertissement, le job passe quand même.
+      - name: keystore de debug
+        env:
+          DEBUG_KEYSTORE_BASE64: ${{ secrets.ANDROID_DEBUG_KEYSTORE_BASE64 }}
+        run: |
+          set -euo pipefail
+          if [ -z "${DEBUG_KEYSTORE_BASE64:-}" ]; then
+            echo "::warning::ANDROID_DEBUG_KEYSTORE_BASE64 absent : clé jetable, l'APK ne s'installera pas par-dessus le précédent."
+            exit 0
+          fi
+          mkdir -p "$HOME/.android"
+          printf '%s' "$DEBUG_KEYSTORE_BASE64" | base64 -d > "$HOME/.android/debug.keystore"
+          keytool -list -v -keystore "$HOME/.android/debug.keystore" \
+            -storepass android -alias androiddebugkey | grep -E 'Alias name|SHA256:'
       - run: pnpm exec tauri android init
         env:
           NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/${{ env.NDK_VERSION }}
