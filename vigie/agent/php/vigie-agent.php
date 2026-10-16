@@ -13,20 +13,21 @@ if (\PHP_SAPI !== 'cli') {
 // Agent Vigie, protocole v1 (vigie/docs/protocole-agent.md, vigie/docs/agent-php.md).
 //
 //   php vigie-agent.php              contrôles, rapport signé, envoi au veilleur
+//                                    (puis commandes et logs, s'ils sont configurés)
 //   php vigie-agent.php --dry-run    affiche le rapport sans le signer ni l'envoyer
 //   php vigie-agent.php --init       crée la paire de clés, affiche la clé publique
 //   --config <fichier>               sinon ~/.vigie-agent/config.json
 //
 // Lecture seule pour le site : l'agent n'écrit que dans son propre dossier, à
 // côté de la configuration (sa clé, à --init ; avec `commands`, l'état du canal
-// de commandes et une nouvelle clé en rotation). Le `seq` d'un rapport est
-// l'heure en ms.
+// de commandes et une nouvelle clé en rotation ; avec `logs`, la position de
+// lecture des logs). Le `seq` d'un rapport est l'heure en ms.
 // Codes de retour : 0 succès, 1 envoi échoué, 2 configuration ou usage,
 // 3 extension sodium absente.
 // Compatible PHP 8.1 (version du site A) : ni classes readonly, ni constantes
 // typées, ni json_validate.
 
-const VERSION = '0.2.0';
+const VERSION = '0.3.0';
 const AGENT = 'vigie-agent-php/' . VERSION;
 const KEY_FILE = 'secret.key';
 const MAX_BODY = 65536;
@@ -67,6 +68,10 @@ final class Config
         public readonly ?string $uploads,
         public readonly ?string $commandsEndpoint = null,
         public readonly ?string $commandsKey = null,
+        public readonly ?string $logsDir = null,
+        /** @var list<string> */
+        public readonly array $logsHosts = [],
+        public readonly ?string $logsEndpoint = null,
     ) {
     }
 }
@@ -114,6 +119,15 @@ function main(array $argv): int
                 pull_commands($config, $dir, $now);
             } catch (SendError|UsageError $e) {
                 fwrite(\STDERR, 'Commandes : ' . $e->getMessage() . "\n");
+                $code = $e instanceof UsageError ? 2 : 1;
+            }
+        }
+        if ($config->logsDir !== null) {
+            try {
+                // Heure relue : le rapport et le retrait ont pris du temps.
+                send_logs($config, $dir, time());
+            } catch (SendError|UsageError $e) {
+                fwrite(\STDERR, 'Logs : ' . $e->getMessage() . "\n");
                 $code = $e instanceof UsageError ? 2 : 1;
             }
         }
@@ -173,7 +187,7 @@ function load_config(string $path): Config
     if (!\is_array($data) || array_is_list($data) && $data !== []) {
         throw new UsageError('Configuration : un objet JSON est attendu.');
     }
-    $known = ['site', 'endpoint', 'root', 'kind', 'critical', 'must_contain', 'uploads', 'commands'];
+    $known = ['site', 'endpoint', 'root', 'kind', 'critical', 'must_contain', 'uploads', 'commands', 'logs'];
     foreach (array_keys($data) as $key) {
         if (!\in_array($key, $known, true)) {
             throw new UsageError("Configuration : clé inconnue « {$key} ».");
@@ -224,8 +238,12 @@ function load_config(string $path): Config
     }
 
     [$commandsEndpoint, $commandsKey] = commands_config($data['commands'] ?? null, $path);
+    [$logsDir, $logsHosts, $logsEndpoint] = logs_config($data['logs'] ?? null, $endpoint);
 
-    return new Config($site, $endpoint, rtrim($root, '/\\'), $kind, $critical, $mustContain, $uploads, $commandsEndpoint, $commandsKey);
+    return new Config(
+        $site, $endpoint, rtrim($root, '/\\'), $kind, $critical, $mustContain, $uploads, $commandsEndpoint, $commandsKey,
+        $logsDir, $logsHosts, $logsEndpoint,
+    );
 }
 
 function valid_endpoint(string $url): bool
@@ -729,16 +747,21 @@ function load_state(string $dir): array
     return $state;
 }
 
-/** Écriture atomique : fichier temporaire du même dossier, 0600, puis rename. */
 function save_state(string $dir, array $state): void
 {
-    $path = $dir . '/' . STATE_FILE;
+    save_private_json($dir, STATE_FILE, $state);
+}
+
+/** Écriture atomique : fichier temporaire du même dossier, 0600, puis rename. */
+function save_private_json(string $dir, string $name, array $data): void
+{
+    $path = $dir . '/' . $name;
     $tmp = @tempnam($dir, '.state-');
     if ($tmp === false) {
         throw new UsageError("Écriture de l'état impossible dans {$dir}.");
     }
     @chmod($tmp, 0600);
-    $json = json_encode($state, \JSON_UNESCAPED_SLASHES | \JSON_UNESCAPED_UNICODE | \JSON_THROW_ON_ERROR);
+    $json = json_encode($data, \JSON_UNESCAPED_SLASHES | \JSON_UNESCAPED_UNICODE | \JSON_THROW_ON_ERROR);
     if (@file_put_contents($tmp, $json) !== \strlen($json) || !@rename($tmp, $path)) {
         @unlink($tmp);
         throw new UsageError("Écriture de l'état impossible : {$path}.");
@@ -748,8 +771,14 @@ function save_state(string $dir, array $state): void
 /** Exécute $fn sous verrou exclusif de l'état ; rend son résultat. */
 function with_state(string $dir, callable $fn): mixed
 {
+    return with_lock($dir, STATE_LOCK, $fn, 'un autre passage de l\'agent tient le verrou : ce passage saute les commandes');
+}
+
+/** Exécute $fn sous verrou exclusif non bloquant ; $busy : message si déjà tenu. */
+function with_lock(string $dir, string $name, callable $fn, string $busy): mixed
+{
     private_dir($dir);
-    $lock = $dir . '/' . STATE_LOCK;
+    $lock = $dir . '/' . $name;
     if (is_link($lock)) {
         throw new UsageError("Verrou de l'état : lien symbolique refusé ({$lock}).");
     }
@@ -761,7 +790,7 @@ function with_state(string $dir, callable $fn): mixed
     }
     if (!flock($handle, \LOCK_EX | \LOCK_NB)) {
         fclose($handle);
-        throw new SendError('un autre passage de l\'agent tient le verrou : ce passage saute les commandes');
+        throw new SendError($busy);
     }
     try {
         return $fn();
@@ -1103,6 +1132,517 @@ function rotate_key(Config $config, string $dir, string $id, callable $result): 
     sodium_memzero($pair);
 
     return $result('ok', 'nouvelle clé créée', ['new_pubkey' => $public, 'proof' => $proof]);
+}
+
+// --- Logs (vigie/docs/logs.md) -----------------------------------------
+//
+// Facultatif. Avec une section `logs`, l'agent pousse après le rapport et le
+// retrait les lignes nouvelles du log HTTP d'Alwaysdata
+// (`<logs.dir>/<année>/http-<date>.log`, compressé en `.log.gz` par
+// l'hébergeur), par lots signés sur `vigie-logs-v1\n`. Seules les lignes de
+// `logs.hosts` partent. La position d'octet vit dans `logs.json`, à côté de
+// la clé, sous `flock` de `logs.lock` : un passage lent des logs ne fait pas
+// sauter les commandes. Elle n'avance qu'après un 204 ; un lot envoyé est
+// d'abord écrit `pending`, et renvoyé à l'identique au passage suivant : le
+// veilleur le déduplique par sa plage.
+
+const DOMAIN_LOGS = "vigie-logs-v1\n";
+const LOGS_STATE = 'logs.json';
+const LOGS_LOCK = 'logs.lock';
+/** Une ligne est coupée à 16 Kio ; la suite est jetée jusqu'au \n. */
+const MAX_LOG_LINE = 16384;
+/** Octets gardés par lot, au plus : 44 Kio font 60 076 octets en base64. */
+const MAX_LOG_CHUNK = 45056;
+/** Plage lue par lot, au plus : même constante que le veilleur (MAX_RANGE). */
+const MAX_LOG_RANGE = 4 * 1024 * 1024;
+const MAX_LOG_BATCHES = 20;
+const MAX_LOG_SECONDS = 20;
+const MAX_LOG_HOSTS = 20;
+/** Les fichiers datés de plus de 30 jours (date du nom) sont ignorés. */
+const LOG_MAX_AGE = 30 * 86400;
+/** Un fichier est clos une heure après la première vue d'un fichier plus récent. */
+const LOG_CLOSE_AFTER = 3600;
+/** Empreinte de tête : 256 premiers octets (décompressés pour un .gz). */
+const LOG_HEAD = 256;
+const LOG_NAME = '/^http-(\d{4})-(\d{2})-(\d{2})\.log(\.gz)?$/';
+
+/** Lecteur d'un fichier de logs ouvert pour un passage ; $carry : ligne lue, pas encore prise. */
+final class LogReader
+{
+    public ?array $carry = null;
+
+    /** @param resource $handle */
+    public function __construct(public $handle, public int $pos, public string $form)
+    {
+    }
+}
+
+/** @return array{0: ?string, 1: list<string>, 2: ?string} dossier, hôtes, point d'entrée des lots */
+function logs_config(mixed $logs, string $endpoint): array
+{
+    if ($logs === null) {
+        return [null, [], null];
+    }
+    if (!\is_array($logs) || array_is_list($logs) || array_diff(array_keys($logs), ['dir', 'hosts']) !== [] || \count($logs) !== 2) {
+        throw new UsageError('Configuration : logs est {"dir": …, "hosts": […]}, sans autre clé.');
+    }
+    if (!\is_string($logs['dir']) || !is_absolute($logs['dir'])) {
+        throw new UsageError('Configuration : logs.dir attendu, chemin absolu du dossier admin/logs/http.');
+    }
+    $hosts = $logs['hosts'];
+    if (!\is_array($hosts) || !array_is_list($hosts) || $hosts === [] || \count($hosts) > MAX_LOG_HOSTS) {
+        throw new UsageError('Configuration : logs.hosts est une liste de 1 à ' . MAX_LOG_HOSTS . ' hôtes.');
+    }
+    foreach ($hosts as $host) {
+        if (!\is_string($host) || preg_match('/^[a-z0-9.-]{1,253}$/', $host) !== 1) {
+            throw new UsageError('Configuration : logs.hosts contient un hôte invalide (minuscules, sans port).');
+        }
+    }
+    if (\count(array_unique($hosts)) !== \count($hosts)) {
+        throw new UsageError('Configuration : hôte en double dans logs.hosts.');
+    }
+    if (preg_match('#/r/v1/report$#', $endpoint) !== 1) {
+        throw new UsageError('Configuration : avec logs, endpoint doit finir par /r/v1/report.');
+    }
+
+    return [rtrim($logs['dir'], '/\\'), $hosts, substr($endpoint, 0, -\strlen('report')) . 'logs'];
+}
+
+/** État vide : aucun fichier suivi. */
+function empty_logs_state(): array
+{
+    return ['seq' => 0, 'file' => null, 'form' => null, 'gen' => 0, 'offset' => 0, 'inode' => 0,
+        'head_len' => 0, 'head_sha256' => '', 'next_seen_at' => null, 'pending' => null];
+}
+
+/** null : pas d'état (premier passage, ou état perdu). */
+function load_logs_state(string $dir): ?array
+{
+    $path = $dir . '/' . LOGS_STATE;
+    clearstatcache(true, $path);
+    if (!file_exists($path) && !is_link($path)) {
+        return null;
+    }
+    private_file($path, LOGS_STATE);
+    $raw = @file_get_contents($path, false, null, 0, READ_MAX_BYTES);
+    try {
+        $state = \is_string($raw) ? json_decode($raw, true, 8, \JSON_THROW_ON_ERROR) : null;
+    } catch (\JsonException) {
+        $state = null;
+    }
+    $valid = \is_array($state) && array_keys($state) === array_keys(empty_logs_state())
+        && \is_int($state['seq']) && \is_string($state['file']) && preg_match(LOG_NAME, $state['file'], $m) === 1 && !isset($m[4])
+        && \in_array($state['form'], [null, 'log', 'gz'], true) && \is_int($state['gen']) && $state['gen'] >= 0
+        && \is_int($state['offset']) && $state['offset'] >= 0 && \is_int($state['inode'])
+        && \is_int($state['head_len']) && $state['head_len'] >= 0 && $state['head_len'] <= LOG_HEAD && \is_string($state['head_sha256'])
+        && ($state['next_seen_at'] === null || \is_int($state['next_seen_at']))
+        && ($state['pending'] === null || valid_pending($state['pending'], $state));
+    if (!$valid) {
+        throw new UsageError("État des logs illisible ({$path}) : le supprimer fait repartir du fichier le plus récent.");
+    }
+
+    return $state;
+}
+
+function valid_pending(mixed $pending, array $state): bool
+{
+    return \is_array($pending) && array_keys($pending) === ['file', 'gen', 'start', 'end']
+        && $pending['file'] === $state['file'] && $pending['gen'] === $state['gen'] && $pending['start'] === $state['offset']
+        && \is_int($pending['end']) && $pending['end'] > $pending['start'] && $pending['end'] - $pending['start'] <= MAX_LOG_RANGE;
+}
+
+function save_logs_state(string $dir, array $state): void
+{
+    save_private_json($dir, LOGS_STATE, $state);
+}
+
+/**
+ * Fichiers de logs de l'année courante et de la précédente, de 30 jours au
+ * plus, par nom (`http-AAAA-MM-JJ.log`) : chemin du `.log` et du `.log.gz`.
+ * Ni lien symbolique, ni fichier hors du dossier.
+ *
+ * @return array<string, array{log: ?string, gz: ?string}>
+ */
+function list_log_files(string $dirReal, int $now): array
+{
+    $year = (int) gmdate('Y', $now);
+    $oldest = gmdate('Y-m-d', $now - LOG_MAX_AGE);
+    $files = [];
+    foreach ([$year - 1, $year] as $y) {
+        $sub = $dirReal . '/' . $y;
+        if (is_link($sub) || !is_dir($sub)) {
+            continue;
+        }
+        foreach (scandir($sub) ?: [] as $name) {
+            if (preg_match(LOG_NAME, $name, $m) !== 1 || (int) $m[1] !== $y || "{$m[1]}-{$m[2]}-{$m[3]}" < $oldest) {
+                continue;
+            }
+            $path = $sub . '/' . $name;
+            $real = realpath($path);
+            if (is_link($path) || !is_file($path) || $real === false || !inside($dirReal, $real)) {
+                continue;
+            }
+            $base = "http-{$m[1]}-{$m[2]}-{$m[3]}.log";
+            $files[$base] ??= ['log' => null, 'gz' => null];
+            $files[$base][isset($m[4]) ? 'gz' : 'log'] = $path;
+        }
+    }
+    ksort($files, \SORT_STRING);
+
+    return $files;
+}
+
+/** Premier fichier de la liste après $name, par ordre de nom. */
+function next_log_file(array $files, string $name): ?string
+{
+    foreach (array_keys($files) as $candidate) {
+        if (strcmp($candidate, $name) > 0) {
+            return $candidate;
+        }
+    }
+
+    return null;
+}
+
+/** Position au début d'un autre fichier, génération 0, empreinte à relever. */
+function move_to_file(array &$state, string $name): void
+{
+    $state = ['seq' => $state['seq']] + array_replace(empty_logs_state(), ['file' => $name]);
+}
+
+/** Fichier remplacé : génération suivante, depuis le début, lot en attente abandonné. */
+function restart_file(array &$state): void
+{
+    ++$state['gen'];
+    $state['offset'] = 0;
+    $state['pending'] = null;
+    $state['head_len'] = 0;
+    $state['head_sha256'] = '';
+}
+
+/**
+ * Ouvre le fichier de la position et s'y place. Vérifie qu'il n'a pas été
+ * remplacé (empreinte de tête, inode entre deux lectures de même forme, .log
+ * raccourci), relève ou élargit l'empreinte. Un .gz s'ouvre une fois par
+ * passage, l'avance décompressée comptant dans le délai du passage.
+ *
+ * @return array{0: ?LogReader, 1: string} lecteur et issue : ok, missing, truncated, timeout
+ */
+function open_log_position(array &$state, string $path, string $form, int $deadline): array
+{
+    clearstatcache(true, $path);
+    $inode = (int) @fileinode($path);
+    $handle = @fopen(($form === 'gz' ? 'compress.zlib://' : '') . $path, 'rb');
+    if ($handle === false) {
+        return [null, 'missing'];
+    }
+    $head = '';
+    while (\strlen($head) < LOG_HEAD && ($bytes = fread($handle, LOG_HEAD - \strlen($head))) !== false && $bytes !== '') {
+        $head .= $bytes;
+    }
+    if ($state['head_len'] > 0) {
+        $short = \strlen($head) < $state['head_len'];
+        if ($form === 'gz' && $short && \strlen($head) < $state['offset']) {
+            fclose($handle);
+
+            return [null, 'truncated'];
+        }
+        $replaced = ($state['form'] === $form && $state['inode'] !== $inode)
+            || $short
+            || !hash_equals($state['head_sha256'], hash('sha256', substr($head, 0, $state['head_len'])))
+            || ($form === 'log' && (int) @filesize($path) < $state['offset']);
+        if ($replaced) {
+            restart_file($state);
+        }
+    }
+    // Relevé, ou élargissement jusqu'à 256 octets d'une tête déjà vérifiée.
+    $state['form'] = $form;
+    $state['inode'] = $inode;
+    $state['head_len'] = \strlen($head);
+    $state['head_sha256'] = hash('sha256', $head);
+    $offset = $state['offset'];
+    if ($form === 'log' || $offset <= \strlen($head)) {
+        if (fseek($handle, $offset) !== 0) {
+            fclose($handle);
+
+            return [null, 'missing'];
+        }
+    } else {
+        $left = $offset - \strlen($head);
+        while ($left > 0) {
+            if (hrtime(true) > $deadline) {
+                fclose($handle);
+
+                return [null, 'timeout'];
+            }
+            $bytes = fread($handle, min($left, 1 << 20));
+            if ($bytes === false || $bytes === '') {
+                fclose($handle);
+
+                return [null, 'truncated'];
+            }
+            $left -= \strlen($bytes);
+        }
+    }
+
+    return [new LogReader($handle, $offset, $form), 'ok'];
+}
+
+/** Hôte d'une ligne : premier jeton, minuscules, sans port ; null s'il est illisible. */
+function log_host(string $line): ?string
+{
+    $space = strpos($line, ' ');
+    if ($space === false || $space === 0) {
+        return null;
+    }
+    $host = (string) preg_replace('/:\d+$/', '', strtolower(substr($line, 0, $space)));
+    $host = rtrim($host, '.');
+
+    return preg_match('/^[a-z0-9.-]{1,253}$/', $host) === 1 ? $host : null;
+}
+
+/**
+ * Ligne suivante, sans lire au-delà de $limit : état (line, eof, incomplete,
+ * limit), octets lus du fichier, octets gardés (16 Kio au plus, suivis de
+ * \n si la ligne a été coupée). Une ligne sans fin de ligne n'est prise que
+ * dans un fichier clos.
+ *
+ * @return array{0: string, 1: int, 2: ?string}
+ */
+function next_log_line(LogReader $reader, int $limit, bool $closed): array
+{
+    if ($reader->carry !== null) {
+        $line = $reader->carry;
+        $reader->carry = null;
+
+        return $line;
+    }
+    $room = $limit - $reader->pos;
+    if ($room <= 0) {
+        return ['limit', 0, null];
+    }
+    $want = min(MAX_LOG_LINE, $room);
+    $line = fgets($reader->handle, $want + 1);
+    if ($line === false || $line === '') {
+        return ['eof', 0, null];
+    }
+    $read = \strlen($line);
+    if ($line[$read - 1] === "\n") {
+        return ['line', $read, $line];
+    }
+    if ($read < $want) {
+        return $closed ? ['line', $read, $line] : ['incomplete', $read, null];
+    }
+    // Ligne trop longue : le début part, la suite est jetée jusqu'au \n.
+    $kept = $line . "\n";
+    while (($room = $limit - $reader->pos - $read) > 0) {
+        $rest = fgets($reader->handle, min(65536, $room) + 1);
+        if ($rest === false || $rest === '') {
+            return $closed ? ['line', $read, $kept] : ['incomplete', $read, null];
+        }
+        $read += \strlen($rest);
+        if ($rest[\strlen($rest) - 1] === "\n") {
+            return ['line', $read, $kept];
+        }
+    }
+
+    return ['line', $read, $kept];
+}
+
+/**
+ * Lit un lot depuis la position du lecteur : exactement jusqu'à $end (renvoi
+ * d'un lot en attente), ou jusqu'aux bornes ($chunkMax octets gardés, 4 Mio
+ * lus). Rend les octets gardés, la fin de la plage lue, et si les données
+ * disponibles sont épuisées.
+ *
+ * @param list<string> $hosts
+ * @return array{0: string, 1: int, 2: bool}
+ */
+function read_log_batch(LogReader $reader, ?int $end, bool $closed, array $hosts, int $chunkMax): array
+{
+    $start = $reader->pos;
+    $limit = $end ?? $start + MAX_LOG_RANGE;
+    $chunk = '';
+    while ($end === null || $reader->pos < $end) {
+        // Place pour une ligne entière, sinon le lot se ferme avant elle.
+        if ($end === null && $reader->carry === null && $reader->pos - $start > MAX_LOG_RANGE - MAX_LOG_LINE) {
+            break;
+        }
+        [$what, $read, $kept] = next_log_line($reader, $limit, $closed);
+        if ($what === 'limit') {
+            break;
+        }
+        if ($what !== 'line') {
+            if ($what === 'incomplete') {
+                // Ligne en cours d'écriture : relue au passage suivant.
+                fseek($reader->handle, $reader->pos);
+            }
+
+            return [$chunk, $reader->pos, true];
+        }
+        $keep = $kept !== null && \in_array(log_host($kept), $hosts, true);
+        if ($keep && $end === null && \strlen($chunk) + \strlen($kept) > $chunkMax) {
+            $reader->carry = [$what, $read, $kept];
+            break;
+        }
+        $reader->pos += $read;
+        if ($keep) {
+            $chunk .= $kept;
+        }
+    }
+
+    return [$chunk, $reader->pos, false];
+}
+
+/** Corps exact d'un lot, tel qu'il sera signé et envoyé. */
+function log_batch_body(Config $config, int $seq, int $now, array $range, int $skipped, string $chunk): string
+{
+    return json_encode([
+        'v' => 1,
+        'type' => 'logs',
+        'site' => $config->site,
+        'seq' => $seq,
+        'sent_at' => $now,
+        'agent' => AGENT,
+        'file' => $range['file'],
+        'gen' => $range['gen'],
+        'start' => $range['start'],
+        'end' => $range['end'],
+        'skipped_files' => min($skipped, 1000),
+        'chunk' => base64_encode($chunk),
+    ], \JSON_UNESCAPED_SLASHES | \JSON_UNESCAPED_UNICODE | \JSON_THROW_ON_ERROR);
+}
+
+/** Octets gardés par lot pour que le corps signé tienne dans 64 Kio, même avec les plus grands nombres. */
+function log_chunk_max(Config $config): int
+{
+    $big = \PHP_INT_MAX;
+    $envelope = \strlen(log_batch_body($config, $big, $big, ['file' => 'http-0000-00-00.log', 'gen' => $big, 'start' => $big, 'end' => $big], 1000, ''));
+
+    return min(MAX_LOG_CHUNK, intdiv(MAX_BODY - $envelope, 4) * 3);
+}
+
+/**
+ * Envoie un lot : `pending` et `seq` écrits d'abord, puis POST signé, avec
+ * repli sur la nouvelle clé d'une rotation non accusée. Vrai sur un 204.
+ */
+function send_log_batch(Config $config, string $dir, array &$state, array $range, string $chunk, int $skipped, int $now): bool
+{
+    $state['pending'] = $range;
+    foreach ([load_secret($dir), pending_new_secret($dir)] as $secret) {
+        if ($secret === null) {
+            continue;
+        }
+        $state['seq'] = max($state['seq'] + 1, (int) floor(microtime(true) * 1000));
+        save_logs_state($dir, $state);
+        $body = log_batch_body($config, $state['seq'], $now, $range, $skipped, $chunk);
+        $signature = base64_encode(sodium_crypto_sign_detached(DOMAIN_LOGS . $body, $secret));
+        sodium_memzero($secret);
+        if (post_signed($config, (string) $config->logsEndpoint, $body, $signature)['status'] === 204) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+/** Un passage des logs, sous le verrou `logs.lock`. */
+function send_logs(Config $config, string $dir, int $now): void
+{
+    with_lock($dir, LOGS_LOCK, static function () use ($config, $dir, $now): void {
+        logs_pass($config, $dir, $now);
+    }, 'un autre passage lit les logs : ce passage les saute');
+}
+
+function logs_pass(Config $config, string $dir, int $now): void
+{
+    $dirReal = realpath((string) $config->logsDir);
+    if ($dirReal === false || !is_dir($dirReal)) {
+        throw new UsageError("Dossier des logs introuvable : {$config->logsDir}.");
+    }
+    $deadline = hrtime(true) + MAX_LOG_SECONDS * 1_000_000_000;
+    $chunkMax = log_chunk_max($config);
+    $files = list_log_files($dirReal, $now);
+    $state = load_logs_state($dir);
+    if ($state === null) {
+        if ($files === []) {
+            return;
+        }
+        // Sans état : début du fichier le plus récent, génération plus grande
+        // que toute génération antérieure.
+        $state = array_replace(empty_logs_state(), [
+            'file' => array_key_last($files),
+            'gen' => max($now * 1000, (int) floor(microtime(true) * 1000)),
+        ]);
+        save_logs_state($dir, $state);
+    }
+    $skipped = 0;
+    $sent = 0;
+    $reader = null;
+    try {
+        while ($sent < MAX_LOG_BATCHES && hrtime(true) < $deadline) {
+            $name = $state['file'];
+            $next = next_log_file($files, $name);
+            if ($next !== null && $state['next_seen_at'] === null) {
+                $state['next_seen_at'] = $now;
+                save_logs_state($dir, $state);
+            }
+            if ($reader === null) {
+                $paths = $files[$name] ?? ['log' => null, 'gz' => null];
+                $form = $paths['log'] !== null ? 'log' : 'gz';
+                [$reader, $outcome] = $paths[$form] === null ? [null, 'missing'] : open_log_position($state, $paths[$form], $form, $deadline);
+                if ($outcome === 'timeout') {
+                    return;
+                }
+                if ($reader === null) {
+                    // Introuvable (purgé, trop ancien) ou archive tronquée : fichier suivant.
+                    if ($next === null) {
+                        return;
+                    }
+                    ++$skipped;
+                    move_to_file($state, $next);
+                    save_logs_state($dir, $state);
+                    continue;
+                }
+                save_logs_state($dir, $state);
+            }
+            $closed = $reader->form === 'gz' || ($state['next_seen_at'] !== null && $now - $state['next_seen_at'] >= LOG_CLOSE_AFTER);
+            $pending = $state['pending'];
+            [$chunk, $end, $exhausted] = read_log_batch($reader, $pending['end'] ?? null, $closed, $config->logsHosts, $chunkMax);
+            if ($pending !== null && $end !== $pending['end']) {
+                // La plage en attente ne se relit plus à l'identique : fichier remplacé.
+                restart_file($state);
+                save_logs_state($dir, $state);
+                fclose($reader->handle);
+                $reader = null;
+                continue;
+            }
+            if ($end === $state['offset']) {
+                // Rien de neuf : fichier ouvert, ou clos et fini.
+                if (!$closed || !$exhausted || $next === null) {
+                    return;
+                }
+                move_to_file($state, $next);
+                save_logs_state($dir, $state);
+                fclose($reader->handle);
+                $reader = null;
+                continue;
+            }
+            $range = ['file' => $name, 'gen' => $state['gen'], 'start' => $state['offset'], 'end' => $end];
+            if (!send_log_batch($config, $dir, $state, $range, $chunk, $skipped, $now)) {
+                throw new SendError('lot de logs refusé (raison dans journalctl -u vigie-serve) : renvoyé au prochain passage');
+            }
+            $state['offset'] = $end;
+            $state['pending'] = null;
+            save_logs_state($dir, $state);
+            $skipped = 0;
+            ++$sent;
+        }
+    } finally {
+        if ($reader !== null) {
+            fclose($reader->handle);
+        }
+    }
 }
 
 if (get_included_files()[0] === __FILE__) {
