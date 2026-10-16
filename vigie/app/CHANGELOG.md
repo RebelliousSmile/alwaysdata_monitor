@@ -3,6 +3,16 @@
 Versions de la console (`vigie/app`), publiées par les tags `console-vX.Y.Z`.
 Le veilleur a son propre historique.
 
+## À venir
+
+- Jeton de l'appareil hors de `device.json` : Credential Manager sous Windows,
+  fichier privé du dossier `no_backup` sous Android. Un `device.json` de la
+  0.1.1 est migré au premier lancement ; en cas d'échec, l'appareil reste
+  appairé et Réglages l'indique. Retour à la 0.1.1 : réappairer.
+- Android : sauvegarde et transfert d'appareil désactivés.
+- Garde-fous verrouillés par des tests : capacités, absence de `v-html`,
+  plugins `fs`, `shell` et `http` interdits, liste des commandes figée.
+
 ## 0.1.1
 
 - Android : l'en-tête ne passe plus sous la barre d'état, ni la barre du bas

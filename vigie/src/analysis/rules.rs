@@ -49,7 +49,7 @@ impl RuleError {
 }
 
 /// Ce que l'on compte : par IP ou pour tout le site.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize, serde::Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Scope {
     Ip,
@@ -204,6 +204,10 @@ pub const DEFAULT_IDS: [&str; 7] = [
     "brute-force",
     "repeated-ip",
 ];
+
+/// Clés des constats qui ne viennent pas d'une règle (`findings.rs`) : une
+/// règle ajoutée ne peut pas les prendre.
+pub const RESERVED_IDS: [&str; 3] = ["suspicious-ips", "bots-ai-training", "load"];
 
 /// Les règles par défaut, dans l'ordre de [`DEFAULT_IDS`].
 pub fn defaults() -> Vec<Rule> {
@@ -378,13 +382,28 @@ impl CompiledRule {
     /// L'entrée compte pour la règle : méthode, statut et chemin, du moins
     /// coûteux au plus coûteux.
     pub fn matches(&self, entry: &Entry) -> bool {
+        self.matches_request(entry) && self.matches_path(&entry.path)
+    }
+
+    /// Méthode et statut seulement : le test peu coûteux, avant le chemin.
+    pub fn matches_request(&self, entry: &Entry) -> bool {
         (self.methods.is_empty()
             || entry
                 .method
                 .as_ref()
                 .is_some_and(|m| self.methods.contains(m)))
             && (self.statuses.is_empty() || self.statuses.iter().any(|r| r.contains(&entry.status)))
-            && (self.paths.is_empty() || self.paths.iter().any(|g| g.matches(&entry.path)))
+    }
+
+    /// Le chemin seul ; le repli (`fold.rs`) en garde le résultat par chemin
+    /// distinct d'un lot.
+    pub fn matches_path(&self, path: &str) -> bool {
+        self.paths.is_empty() || self.paths.iter().any(|g| g.matches(path))
+    }
+
+    /// La règle filtre sur le chemin.
+    pub fn has_paths(&self) -> bool {
+        !self.paths.is_empty()
     }
 }
 
@@ -434,6 +453,16 @@ pub fn compile_rules(
     }
     if global.len() + site.len() > MAX_RULES {
         return Err(RuleError(format!("{MAX_RULES} règles ajoutées au plus")));
+    }
+    if let Some(rule) = global
+        .iter()
+        .chain(site)
+        .find(|r| RESERVED_IDS.contains(&r.id.as_str()))
+    {
+        return Err(RuleError::rule(
+            &rule.id,
+            "identifiant réservé à un constat de l'analyse",
+        ));
     }
     let defaults = defaults();
     let mut seen = HashSet::new();

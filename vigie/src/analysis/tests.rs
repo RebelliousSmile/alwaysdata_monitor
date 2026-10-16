@@ -365,8 +365,16 @@ fn glob_fuzz_never_panics_and_stays_fast() {
     let start = Instant::now();
     let _ = worst.matches(&path);
     slowest = slowest.max(start.elapsed());
+    // 50 ms en release (moins de 1 ms mesuré). En debug, le pire cas prend
+    // déjà 30 ms seul et dépasse 50 ms quand les tests lourds du repli
+    // (`fold_tests.rs`) tournent en parallèle : borne large.
+    let bound = if cfg!(debug_assertions) {
+        Duration::from_millis(250)
+    } else {
+        Duration::from_millis(50)
+    };
     assert!(
-        slowest < Duration::from_millis(50),
+        slowest < bound,
         "correspondance la plus lente : {slowest:?}"
     );
 }
