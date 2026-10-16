@@ -1,6 +1,6 @@
 ---
 objective: "Chaque case de l'issue #3 renvoie à une preuve dans le dépôt, et l'issue peut être fermée."
-status: in-progress
+status: implemented
 issue_number: 3
 ---
 
