@@ -1,0 +1,166 @@
+name: console
+
+# Console (vigie/app), et sources du veilleur : tests/contract.rs appelle le
+# client de la console contre le routeur du veilleur, un changement de l'API
+# doit le rejouer. Le reste du veilleur a son propre workflow.
+on:
+  push:
+    paths:
+      - "vigie/app/**"
+      - "vigie/src/**"
+      - "vigie/Cargo.*"
+      - "vigie/tests/support/**"
+      - ".github/workflows/console.yml"
+  pull_request:
+    paths:
+      - "vigie/app/**"
+      - "vigie/src/**"
+      - "vigie/Cargo.*"
+      - "vigie/tests/support/**"
+      - ".github/workflows/console.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: vigie/app
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      # Bibliothèques du webview Linux, nécessaires pour compiler tauri.
+      - name: dépendances système (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+      # Version lue dans le champ packageManager de package.json.
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+        with:
+          package_json_file: vigie/app/package.json
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "20"
+          cache: pnpm
+          cache-dependency-path: vigie/app/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm test
+      # generate_context! embarque dist : il doit exister avant cargo.
+      - run: pnpm exec vite build
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master
+        with:
+          toolchain: "1.93.0" # même version que vigie/app/src-tauri/rust-toolchain.toml
+          components: clippy, rustfmt
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            vigie/app/src-tauri/target
+          key: console-${{ runner.os }}-${{ hashFiles('vigie/app/src-tauri/Cargo.lock') }}
+      - run: cargo fmt --check
+        working-directory: vigie/app/src-tauri
+      - run: cargo clippy --locked --all-targets -- -D warnings
+        working-directory: vigie/app/src-tauri
+      - run: cargo test --locked --all-targets
+        working-directory: vigie/app/src-tauri
+
+  # APK de debug, comme lyremember : SDK, NDK et gen/android sont produits
+  # dans le job, rien n'est installé sur le poste. L'APK est un artefact du
+  # run, à télécharger sur le téléphone. La signature release viendra avec
+  # le workflow de release (phase 5).
+  android:
+    name: android
+    runs-on: ubuntu-24.04
+    env:
+      NDK_VERSION: 27.0.12077973
+    defaults:
+      run:
+        working-directory: vigie/app
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+        with:
+          package_json_file: vigie/app/package.json
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "20"
+          cache: pnpm
+          cache-dependency-path: vigie/app/pnpm-lock.yaml
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
+        with:
+          distribution: temurin
+          java-version: "17"
+      # Par défaut, la v3.2.2 demande aussi le paquet « tools », retiré du
+      # SDK : sdkmanager échoue. platform-tools suffit à Gradle.
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3.2.2
+        with:
+          packages: platform-tools
+          log-accepted-android-sdk-licenses: false
+      - run: sdkmanager "ndk;${{ env.NDK_VERSION }}"
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master
+        with:
+          toolchain: "1.93.0" # même version que vigie/app/src-tauri/rust-toolchain.toml
+          targets: aarch64-linux-android
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            vigie/app/src-tauri/target
+          key: console-android-${{ hashFiles('vigie/app/src-tauri/Cargo.lock') }}
+      - run: pnpm install --frozen-lockfile
+      # Sans keystore, Gradle en crée une à chaque run : l'APK suivant est
+      # refusé (INSTALL_FAILED_UPDATE_INCOMPATIBLE) et il faut désinstaller,
+      # ce qui efface l'appairage. Une keystore de debug fixe, tirée des
+      # secrets, permet d'installer par-dessus. Ses mots de passe sont les
+      # constantes publiques d'AGP : le secret sert à la stabilité, et à ce
+      # qu'aucun tiers ne signe une mise à jour acceptée par le téléphone.
+      # Secret absent : clé jetable et avertissement, le job passe quand même.
+      - name: keystore de debug
+        env:
+          DEBUG_KEYSTORE_BASE64: ${{ secrets.ANDROID_DEBUG_KEYSTORE_BASE64 }}
+        run: |
+          set -euo pipefail
+          if [ -z "${DEBUG_KEYSTORE_BASE64:-}" ]; then
+            echo "::warning::ANDROID_DEBUG_KEYSTORE_BASE64 absent : clé jetable, l'APK ne s'installera pas par-dessus le précédent."
+            exit 0
+          fi
+          mkdir -p "$HOME/.android"
+          printf '%s' "$DEBUG_KEYSTORE_BASE64" | base64 -d > "$HOME/.android/debug.keystore"
+          keytool -list -v -keystore "$HOME/.android/debug.keystore" \
+            -storepass android -alias androiddebugkey | grep -E 'Alias name|SHA256:'
+      - run: pnpm exec tauri android init
+        env:
+          NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/${{ env.NDK_VERSION }}
+      # Une seule ABI (arm64) et un profil dev allégé : sans cela, l'APK de
+      # debug de lyremember pesait 746 Mo.
+      - run: pnpm exec tauri android build --apk --debug --target aarch64
+        env:
+          NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/${{ env.NDK_VERSION }}
+          CARGO_PROFILE_DEV_DEBUG: "false"
+          CARGO_PROFILE_DEV_STRIP: symbols
+          CARGO_PROFILE_DEV_OPT_LEVEL: "z"
+      - name: APK
+        id: apk
+        run: |
+          APK=$(find src-tauri/gen/android -path "*/debug/*.apk" -type f | head -1)
+          test -n "$APK" || { echo "aucun APK produit"; exit 1; }
+          ls -l "$APK"
+          echo "path=vigie/app/$APK" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: vigie-console-debug-apk
+          path: ${{ steps.apk.outputs.path }}
+          retention-days: 14
+          if-no-files-found: error

@@ -242,6 +242,9 @@ mod tests {
             opened_at: 0,
             closed_at: Some(60),
             acked_at: None,
+            open_notified_at: None,
+            close_notified_at: None,
+            last_reminder_at: None,
         }
     }
 

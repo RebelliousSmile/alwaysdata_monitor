@@ -11,6 +11,7 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result};
 use rusqlite::{Connection, ErrorCode, OpenFlags, OptionalExtension, TransactionBehavior, params};
 
+use crate::device::{self, Hash};
 use crate::facts;
 use crate::finding::{Finding, Severity};
 
@@ -70,6 +71,34 @@ const MIGRATIONS: &[&str] = &[
         files TEXT NOT NULL,
         set_at INTEGER NOT NULL
     );",
+    // 5 : appareils de la console et codes d'appairage (`device.rs`). Seules
+    // les empreintes SHA-256 sont gardées, jamais un jeton ni un code.
+    // AUTOINCREMENT : l'id d'un appareil révoqué n'est jamais redonné.
+    "CREATE TABLE devices (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        token_hash BLOB NOT NULL UNIQUE CHECK (length(token_hash) = 32),
+        created_at INTEGER NOT NULL,
+        seen_at INTEGER,
+        revoked_at INTEGER
+    );
+    CREATE TABLE pairings (
+        id INTEGER PRIMARY KEY,
+        code_hash BLOB NOT NULL UNIQUE CHECK (length(code_hash) = 32),
+        name TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        expires_at INTEGER NOT NULL,
+        used_at INTEGER,
+        device_id INTEGER REFERENCES devices(id)
+    );",
+    // 6 : résultat du dernier passage de chaque contrôle, pour la console :
+    // `ok`, `finding` ou `error`, gravité et détail du constat le plus grave,
+    // durée, valeurs observées en JSON. NULL pour un passage antérieur.
+    "ALTER TABLE check_runs ADD COLUMN result TEXT;
+    ALTER TABLE check_runs ADD COLUMN severity TEXT;
+    ALTER TABLE check_runs ADD COLUMN detail TEXT;
+    ALTER TABLE check_runs ADD COLUMN duration_ms INTEGER;
+    ALTER TABLE check_runs ADD COLUMN observed TEXT;",
 ];
 
 /// Version de schéma à partir de laquelle les incidents existent.
@@ -78,6 +107,13 @@ pub const SCHEMA_INCIDENTS: usize = 2;
 pub const SCHEMA_AGENTS: usize = 3;
 /// Version de schéma à partir de laquelle les références d'empreintes existent.
 pub const SCHEMA_BASELINE: usize = 4;
+/// Version de schéma à partir de laquelle les appareils de la console existent.
+pub const SCHEMA_DEVICES: usize = 5;
+/// Version de schéma à partir de laquelle le résultat des passages existe.
+pub const SCHEMA_CHECK_RESULTS: usize = 6;
+
+/// « Vu le » d'un appareil n'est réécrit qu'après ce délai, en secondes.
+pub const SEEN_PERIOD: i64 = 60;
 
 /// Au plus un rapport accepté par site pendant cette durée, en secondes.
 pub const REPORT_MIN_GAP: i64 = 60;
@@ -99,6 +135,112 @@ pub struct Incident {
     pub opened_at: i64,
     pub closed_at: Option<i64>,
     pub acked_at: Option<i64>,
+    pub open_notified_at: Option<i64>,
+    pub close_notified_at: Option<i64>,
+    pub last_reminder_at: Option<i64>,
+}
+
+/// Issue du dernier passage d'un contrôle.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RunResult {
+    /// Concluant, sans constat.
+    Ok,
+    /// Concluant, avec au moins un constat.
+    Finding,
+    /// Non concluant.
+    Error,
+}
+
+impl RunResult {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Ok => "ok",
+            Self::Finding => "finding",
+            Self::Error => "error",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "ok" => Some(Self::Ok),
+            "finding" => Some(Self::Finding),
+            "error" => Some(Self::Error),
+            _ => None,
+        }
+    }
+}
+
+/// Résultat d'un passage, à enregistrer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RunRecord {
+    pub result: RunResult,
+    /// Gravité du constat le plus grave.
+    pub severity: Option<Severity>,
+    /// Détail du constat le plus grave, ou raison de l'échec.
+    pub detail: Option<String>,
+    pub duration_ms: Option<i64>,
+    /// Valeurs observées, en JSON.
+    pub observed: Option<String>,
+}
+
+impl RunRecord {
+    /// Passage concluant : le constat le plus grave le résume.
+    pub fn concluded(findings: &[Finding]) -> Self {
+        // `max_by_key` garde le dernier des ex æquo : on veut le premier.
+        let worst = findings
+            .iter()
+            .fold(None::<&Finding>, |kept, f| match kept {
+                Some(kept) if kept.severity >= f.severity => Some(kept),
+                _ => Some(f),
+            });
+        Self {
+            result: if worst.is_some() {
+                RunResult::Finding
+            } else {
+                RunResult::Ok
+            },
+            severity: worst.map(|f| f.severity),
+            detail: worst.map(|f| f.detail.clone()),
+            duration_ms: None,
+            observed: None,
+        }
+    }
+
+    /// Passage non concluant.
+    pub fn failed(message: &str) -> Self {
+        Self {
+            result: RunResult::Error,
+            severity: None,
+            detail: Some(message.to_owned()),
+            duration_ms: None,
+            observed: None,
+        }
+    }
+
+    pub fn with_duration(mut self, duration: Duration) -> Self {
+        self.duration_ms = Some(i64::try_from(duration.as_millis()).unwrap_or(i64::MAX));
+        self
+    }
+
+    pub fn with_observed(mut self, observed: Option<String>) -> Self {
+        self.observed = observed;
+        self
+    }
+}
+
+/// Dernier passage d'un contrôle, tel qu'enregistré.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CheckRun {
+    pub site: String,
+    pub check_name: String,
+    pub last_run: i64,
+    /// `None` pour un passage antérieur au schéma 6, ou marqué sans résultat.
+    pub result: Option<RunResult>,
+    pub severity: Option<Severity>,
+    pub detail: Option<String>,
+    pub duration_ms: Option<i64>,
+    /// Valeurs observées, en JSON.
+    pub observed: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -107,6 +249,44 @@ pub enum AckOutcome {
     AlreadyClosed,
     AlreadyAcked,
     Acked,
+}
+
+/// Appareil de la console. Son jeton n'est connu que de lui.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Device {
+    pub id: i64,
+    pub name: String,
+    pub created_at: i64,
+    pub seen_at: Option<i64>,
+    pub revoked_at: Option<i64>,
+}
+
+/// Code d'appairage ni utilisé ni expiré.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Pairing {
+    pub id: i64,
+    pub name: String,
+    pub created_at: i64,
+    pub expires_at: i64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RevokeOutcome {
+    NotFound,
+    AlreadyRevoked,
+    Revoked,
+}
+
+const DEVICE_COLUMNS: &str = "id, name, created_at, seen_at, revoked_at";
+
+fn device_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Device> {
+    Ok(Device {
+        id: row.get(0)?,
+        name: row.get(1)?,
+        created_at: row.get(2)?,
+        seen_at: row.get(3)?,
+        revoked_at: row.get(4)?,
+    })
 }
 
 /// Agent déclaré d'un site, et état de ses rapports.
@@ -192,8 +372,8 @@ fn agent_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Agent> {
     })
 }
 
-const INCIDENT_COLUMNS: &str =
-    "id, key, site, check_name, severity, detail, opened_at, closed_at, acked_at";
+const INCIDENT_COLUMNS: &str = "id, key, site, check_name, severity, detail, opened_at, closed_at,
+     acked_at, open_notified_at, close_notified_at, last_reminder_at";
 
 fn incident_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Incident> {
     let severity: String = row.get(4)?;
@@ -209,7 +389,55 @@ fn incident_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Incident> {
         opened_at: row.get(6)?,
         closed_at: row.get(7)?,
         acked_at: row.get(8)?,
+        open_notified_at: row.get(9)?,
+        close_notified_at: row.get(10)?,
+        last_reminder_at: row.get(11)?,
     })
+}
+
+fn check_run_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CheckRun> {
+    let result: Option<String> = row.get(3)?;
+    let severity: Option<String> = row.get(4)?;
+    Ok(CheckRun {
+        site: row.get(0)?,
+        check_name: row.get(1)?,
+        last_run: row.get(2)?,
+        result: result.as_deref().and_then(RunResult::parse),
+        severity: severity.as_deref().and_then(Severity::parse),
+        detail: row.get(5)?,
+        duration_ms: row.get(6)?,
+        observed: row.get(7)?,
+    })
+}
+
+/// Enregistre le dernier passage d'un contrôle, à la place du précédent.
+fn record_result_in(
+    conn: &Connection,
+    site: &str,
+    check: &str,
+    now: i64,
+    record: &RunRecord,
+) -> Result<()> {
+    conn.execute(
+        "INSERT INTO check_runs
+           (site, check_name, last_run, result, severity, detail, duration_ms, observed)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+         ON CONFLICT (site, check_name) DO UPDATE SET last_run = excluded.last_run,
+           result = excluded.result, severity = excluded.severity,
+           detail = excluded.detail, duration_ms = excluded.duration_ms,
+           observed = excluded.observed",
+        params![
+            site,
+            check,
+            now,
+            record.result.as_str(),
+            record.severity.map(Severity::as_str),
+            record.detail,
+            record.duration_ms,
+            record.observed
+        ],
+    )?;
+    Ok(())
 }
 
 /// Historique des passages conservé, en secondes.
@@ -352,13 +580,37 @@ impl Store {
             .optional()?)
     }
 
+    /// Marque un passage sans résultat connu (préparation des tests, reprise).
     pub fn record_run(&mut self, site: &str, check: &str, now: i64) -> Result<()> {
         self.conn.execute(
             "INSERT INTO check_runs (site, check_name, last_run) VALUES (?1, ?2, ?3)
-             ON CONFLICT (site, check_name) DO UPDATE SET last_run = excluded.last_run",
+             ON CONFLICT (site, check_name) DO UPDATE SET last_run = excluded.last_run,
+               result = NULL, severity = NULL, detail = NULL, duration_ms = NULL,
+               observed = NULL",
             params![site, check, now],
         )?;
         Ok(())
+    }
+
+    /// Enregistre le dernier passage d'un contrôle et son résultat.
+    pub fn record_result(
+        &mut self,
+        site: &str,
+        check: &str,
+        now: i64,
+        record: &RunRecord,
+    ) -> Result<()> {
+        record_result_in(&self.conn, site, check, now, record)
+    }
+
+    /// Dernier passage de chaque contrôle, avec son résultat, par site.
+    pub fn check_results(&self) -> Result<Vec<CheckRun>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT site, check_name, last_run, result, severity, detail, duration_ms, observed
+             FROM check_runs ORDER BY site, check_name",
+        )?;
+        let rows = stmt.query_map([], check_run_from_row)?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
     /// Dernier passage de chaque contrôle, par site.
@@ -428,6 +680,16 @@ impl Store {
 
     pub fn open_incidents(&self) -> Result<Vec<Incident>> {
         self.incidents_where("closed_at IS NULL", &[])
+    }
+
+    /// Incidents d'un site clos depuis `since`, les plus récents d'abord.
+    pub fn closed_incidents(&self, site: &str, since: i64) -> Result<Vec<Incident>> {
+        let mut found = self.incidents_where(
+            "site = ?1 AND closed_at IS NOT NULL AND closed_at >= ?2",
+            &[&site, &since],
+        )?;
+        found.sort_by(|a, b| b.closed_at.cmp(&a.closed_at).then(b.id.cmp(&a.id)));
+        Ok(found)
     }
 
     /// E-mails d'ouverture à envoyer, y compris pour un incident déjà clos :
@@ -706,15 +968,32 @@ impl Store {
                 }
             }
         }
+        // Contrôles touchés : ceux du rapport, ceux qui ont un incident
+        // ouvert, et ceux déjà passés, pour qu'un contrôle redevenu sain
+        // garde un résultat « ok ». L'intégrité dès qu'une référence existe.
         let mut checks: Vec<String> = {
             let mut stmt = tx.prepare(
                 "SELECT DISTINCT check_name FROM incidents
-                 WHERE site = ?1 AND closed_at IS NULL AND check_name LIKE 'agent:%'",
+                 WHERE site = ?1 AND closed_at IS NULL AND check_name LIKE 'agent:%'
+                 UNION
+                 SELECT check_name FROM check_runs
+                 WHERE site = ?1 AND check_name LIKE 'agent:%'",
             )?;
             let rows = stmt.query_map([site], |row| row.get(0))?;
             rows.collect::<rusqlite::Result<_>>()?
         };
         checks.extend(findings.iter().map(|f| f.check.clone()));
+        let has_baseline: bool = tx
+            .query_row(
+                "SELECT 1 FROM baselines WHERE site = ?1",
+                [site],
+                |_| Ok(()),
+            )
+            .optional()?
+            .is_some();
+        if has_baseline {
+            checks.push(facts::check_name());
+        }
         checks.sort();
         checks.dedup();
         for check in &checks {
@@ -724,10 +1003,156 @@ impl Store {
                 .cloned()
                 .collect();
             reconcile_in(&tx, site, check, &of_check, now)?;
+            record_result_in(&tx, site, check, now, &RunRecord::concluded(&of_check))?;
         }
         reconcile_in(&tx, site, crate::checks::heartbeat::NAME, &[], now)?;
         tx.commit()?;
         Ok(ReportOutcome::Accepted)
+    }
+
+    /// Enregistre un code d'appairage, par son empreinte.
+    pub fn create_pairing(
+        &mut self,
+        code_hash: &Hash,
+        name: &str,
+        now: i64,
+        expires_at: i64,
+    ) -> Result<i64> {
+        self.conn.execute(
+            "INSERT INTO pairings (code_hash, name, created_at, expires_at)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![code_hash.as_slice(), name, now, expires_at],
+        )?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    /// Échange un code contre un appareil, en une transaction : le code est
+    /// marqué utilisé et l'appareil créé avec l'empreinte de son jeton. `None`
+    /// si le code est inconnu, déjà utilisé ou expiré ; rien n'est écrit.
+    pub fn consume_pairing(
+        &mut self,
+        code_hash: &Hash,
+        token_hash: &Hash,
+        now: i64,
+    ) -> Result<Option<Device>> {
+        let tx = self
+            .conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        // id, empreinte, nom, expiration, utilisation.
+        type PairingRow = (i64, Vec<u8>, String, i64, Option<i64>);
+        let pairing: Option<PairingRow> = tx
+            .query_row(
+                "SELECT id, code_hash, name, expires_at, used_at FROM pairings
+                 WHERE code_hash = ?1",
+                [code_hash.as_slice()],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
+            )
+            .optional()?;
+        let Some((pairing_id, stored, name, expires_at, used_at)) = pairing else {
+            return Ok(None);
+        };
+        if !same_hash(&stored, code_hash) || used_at.is_some() || now >= expires_at {
+            return Ok(None);
+        }
+        tx.execute(
+            "INSERT INTO devices (name, token_hash, created_at) VALUES (?1, ?2, ?3)",
+            params![name, token_hash.as_slice(), now],
+        )?;
+        let device_id = tx.last_insert_rowid();
+        tx.execute(
+            "UPDATE pairings SET used_at = ?2, device_id = ?3 WHERE id = ?1",
+            params![pairing_id, now, device_id],
+        )?;
+        tx.commit()?;
+        Ok(Some(Device {
+            id: device_id,
+            name,
+            created_at: now,
+            seen_at: None,
+            revoked_at: None,
+        }))
+    }
+
+    /// Appareil actif (non révoqué) dont le jeton a cette empreinte.
+    pub fn device_by_token_hash(&self, token_hash: &Hash) -> Result<Option<Device>> {
+        let sql = format!(
+            "SELECT {DEVICE_COLUMNS}, token_hash FROM devices
+             WHERE token_hash = ?1 AND revoked_at IS NULL"
+        );
+        let found = self
+            .conn
+            .query_row(&sql, [token_hash.as_slice()], |row| {
+                Ok((device_from_row(row)?, row.get::<_, Vec<u8>>(5)?))
+            })
+            .optional()?;
+        Ok(found
+            .filter(|(_, stored)| same_hash(stored, token_hash))
+            .map(|(device, _)| device))
+    }
+
+    /// Met à jour « vu le », au plus une fois par [`SEEN_PERIOD`].
+    pub fn touch_seen(&mut self, id: i64, now: i64) -> Result<()> {
+        self.conn.execute(
+            "UPDATE devices SET seen_at = ?2
+             WHERE id = ?1 AND (seen_at IS NULL OR seen_at <= ?2 - ?3)",
+            params![id, now, SEEN_PERIOD],
+        )?;
+        Ok(())
+    }
+
+    pub fn devices(&self) -> Result<Vec<Device>> {
+        let sql = format!("SELECT {DEVICE_COLUMNS} FROM devices ORDER BY id");
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows = stmt.query_map([], device_from_row)?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// Codes d'appairage encore utilisables.
+    pub fn pending_pairings(&self, now: i64) -> Result<Vec<Pairing>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, name, created_at, expires_at FROM pairings
+             WHERE used_at IS NULL AND expires_at > ?1 ORDER BY id",
+        )?;
+        let rows = stmt.query_map([now], |row| {
+            Ok(Pairing {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                created_at: row.get(2)?,
+                expires_at: row.get(3)?,
+            })
+        })?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// Révoque un appareil : son jeton est refusé dès la requête suivante.
+    pub fn revoke_device(&mut self, id: i64, now: i64) -> Result<RevokeOutcome> {
+        let revoked: Option<Option<i64>> = self
+            .conn
+            .query_row(
+                "SELECT revoked_at FROM devices WHERE id = ?1",
+                [id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        match revoked {
+            None => Ok(RevokeOutcome::NotFound),
+            Some(Some(_)) => Ok(RevokeOutcome::AlreadyRevoked),
+            Some(None) => {
+                self.conn.execute(
+                    "UPDATE devices SET revoked_at = ?2 WHERE id = ?1",
+                    params![id, now],
+                )?;
+                Ok(RevokeOutcome::Revoked)
+            }
+        }
     }
 
     /// Dernier relevé (`facts`) accepté d'un site, en JSON.
@@ -739,6 +1164,11 @@ impl Store {
             })
             .optional()?)
     }
+}
+
+/// Empreinte lue en base, comparée en temps constant.
+fn same_hash(stored: &[u8], expected: &Hash) -> bool {
+    <&Hash>::try_from(stored).is_ok_and(|stored| device::ct_eq(stored, expected))
 }
 
 /// Cœur de [`Store::reconcile`], dans une transaction ouverte par l'appelant.
@@ -834,6 +1264,202 @@ mod tests {
         let store = Store::open(&path).expect("reopen");
         assert_eq!(store.schema_version().expect("version"), MIGRATIONS.len());
         assert_eq!(store.last_tick().expect("last"), Some(1_000));
+    }
+
+    #[test]
+    fn upgrades_a_filled_v4_database_without_loss() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("vigie.db");
+        {
+            let conn = Connection::open(&path).expect("raw");
+            for migration in &MIGRATIONS[..SCHEMA_BASELINE] {
+                conn.execute_batch(migration).expect("migration");
+            }
+            conn.pragma_update(None, "user_version", SCHEMA_BASELINE as i64)
+                .expect("v4");
+            conn.execute_batch(
+                "INSERT INTO ticks (at) VALUES (1000);
+                 INSERT INTO incidents (key, site, check_name, severity, detail, opened_at)
+                   VALUES ('site-a/content/', 'site-a', 'content', 'critical', 'absent', 900);
+                 INSERT INTO site_keys (site, pubkey, added_at) VALUES ('site-a', zeroblob(32), 800);
+                 INSERT INTO reports (site, last_seq, last_valid_at, agent, facts, files)
+                   VALUES ('site-a', 7, 950, 'php/1', '{}', '{\"a\":\"b\"}');
+                 INSERT INTO baselines (site, files, set_at) VALUES ('site-a', '{}', 960);",
+            )
+            .expect("données v4");
+        }
+        let store = Store::open(&path).expect("open");
+        assert_eq!(store.schema_version().expect("version"), MIGRATIONS.len());
+        assert_eq!(store.last_tick().expect("tick"), Some(1000));
+        let open = store.open_incidents().expect("incidents");
+        assert_eq!(open.len(), 1);
+        assert_eq!(open[0].detail, "absent");
+        let agent = store.agent("site-a").expect("agent").expect("présent");
+        assert_eq!(agent.last_seq, 7);
+        assert_eq!(
+            store.baseline("site-a").expect("baseline").map(|b| b.1),
+            Some(960)
+        );
+        assert!(store.devices().expect("devices").is_empty());
+    }
+
+    #[test]
+    fn upgrades_a_filled_v5_database_without_loss() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("vigie.db");
+        {
+            let conn = Connection::open(&path).expect("raw");
+            for migration in &MIGRATIONS[..SCHEMA_DEVICES] {
+                conn.execute_batch(migration).expect("migration");
+            }
+            conn.pragma_update(None, "user_version", SCHEMA_DEVICES as i64)
+                .expect("v5");
+            conn.execute_batch(
+                "INSERT INTO check_runs (site, check_name, last_run) VALUES ('site-a', 'content', 900);
+                 INSERT INTO devices (name, token_hash, created_at) VALUES ('pc', zeroblob(32), 800);",
+            )
+            .expect("données v5");
+        }
+        let store = Store::open(&path).expect("open");
+        assert_eq!(
+            store.schema_version().expect("version"),
+            SCHEMA_CHECK_RESULTS
+        );
+        let runs = store.check_results().expect("runs");
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].last_run, 900);
+        // Passage antérieur : aucun résultat inventé.
+        assert_eq!(runs[0].result, None);
+        assert_eq!(runs[0].severity, None);
+        assert_eq!(runs[0].duration_ms, None);
+        assert_eq!(runs[0].observed, None);
+        assert_eq!(store.devices().expect("devices").len(), 1);
+    }
+
+    #[test]
+    fn records_the_result_of_a_run() {
+        let (_dir, mut store) = temp_store();
+        let findings = [
+            Finding::new("site-a", "exposed", Severity::Warning, "a", "premier"),
+            Finding::new("site-a", "exposed", Severity::Critical, "b", "grave"),
+            Finding::new("site-a", "exposed", Severity::Critical, "c", "grave aussi"),
+        ];
+        let record = RunRecord::concluded(&findings)
+            .with_duration(Duration::from_millis(42))
+            .with_observed(Some("{\"http_status\":200}".into()));
+        store
+            .record_result("site-a", "exposed", 100, &record)
+            .expect("record");
+        let run = &store.check_results().expect("runs")[0];
+        assert_eq!(run.result, Some(RunResult::Finding));
+        assert_eq!(run.severity, Some(Severity::Critical));
+        assert_eq!(run.detail.as_deref(), Some("grave"));
+        assert_eq!(run.duration_ms, Some(42));
+        assert_eq!(run.observed.as_deref(), Some("{\"http_status\":200}"));
+
+        store
+            .record_result("site-a", "exposed", 200, &RunRecord::failed("délai"))
+            .expect("failed");
+        let run = &store.check_results().expect("runs")[0];
+        assert_eq!(run.last_run, 200);
+        assert_eq!(run.result, Some(RunResult::Error));
+        assert_eq!(run.severity, None);
+        assert_eq!(run.detail.as_deref(), Some("délai"));
+        assert_eq!(run.observed, None);
+
+        store.record_run("site-a", "exposed", 300).expect("run");
+        let run = &store.check_results().expect("runs")[0];
+        assert_eq!((run.last_run, run.result), (300, None));
+    }
+
+    #[test]
+    fn a_pairing_code_gives_one_device_once() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut store = Store::open(&dir.path().join("vigie.db")).expect("open");
+        let code = device::hash("code");
+        store
+            .create_pairing(&code, "téléphone", 1_000, 1_600)
+            .expect("pairing");
+        assert_eq!(store.pending_pairings(1_000).expect("pending").len(), 1);
+        let token = device::hash("jeton");
+        let device = store
+            .consume_pairing(&code, &token, 1_100)
+            .expect("consume")
+            .expect("appareil");
+        assert_eq!(device.name, "téléphone");
+        assert!(store.pending_pairings(1_100).expect("pending").is_empty());
+        // Rejoué : rien, et le jeton déjà remis reste valable.
+        let other = device::hash("autre");
+        assert_eq!(
+            store.consume_pairing(&code, &other, 1_200).expect("replay"),
+            None
+        );
+        assert_eq!(store.devices().expect("devices").len(), 1);
+        assert_eq!(
+            store
+                .device_by_token_hash(&token)
+                .expect("lookup")
+                .map(|d| d.id),
+            Some(device.id)
+        );
+        assert_eq!(store.device_by_token_hash(&other).expect("lookup"), None);
+        // Inconnu, puis expiré.
+        assert_eq!(
+            store
+                .consume_pairing(&device::hash("inconnu"), &other, 1_200)
+                .expect("unknown"),
+            None
+        );
+        let late = device::hash("tard");
+        store
+            .create_pairing(&late, "pc", 1_000, 1_600)
+            .expect("pairing");
+        assert_eq!(
+            store
+                .consume_pairing(&late, &other, 1_600)
+                .expect("expired"),
+            None
+        );
+        assert_eq!(store.devices().expect("devices").len(), 1);
+    }
+
+    #[test]
+    fn seen_is_rewritten_once_a_minute_and_revocation_is_immediate() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut store = Store::open(&dir.path().join("vigie.db")).expect("open");
+        let code = device::hash("code");
+        let token = device::hash("jeton");
+        store
+            .create_pairing(&code, "pc", 1_000, 1_600)
+            .expect("pairing");
+        let id = store
+            .consume_pairing(&code, &token, 1_000)
+            .expect("consume")
+            .expect("appareil")
+            .id;
+        let seen = |store: &Store| store.devices().expect("devices")[0].seen_at;
+        store.touch_seen(id, 1_010).expect("touch");
+        assert_eq!(seen(&store), Some(1_010));
+        store
+            .touch_seen(id, 1_010 + SEEN_PERIOD - 1)
+            .expect("touch");
+        assert_eq!(seen(&store), Some(1_010));
+        store.touch_seen(id, 1_010 + SEEN_PERIOD).expect("touch");
+        assert_eq!(seen(&store), Some(1_010 + SEEN_PERIOD));
+
+        assert_eq!(
+            store.revoke_device(id, 2_000).expect("revoke"),
+            RevokeOutcome::Revoked
+        );
+        assert_eq!(store.device_by_token_hash(&token).expect("lookup"), None);
+        assert_eq!(
+            store.revoke_device(id, 2_001).expect("revoke"),
+            RevokeOutcome::AlreadyRevoked
+        );
+        assert_eq!(
+            store.revoke_device(99, 2_001).expect("revoke"),
+            RevokeOutcome::NotFound
+        );
     }
 
     #[test]

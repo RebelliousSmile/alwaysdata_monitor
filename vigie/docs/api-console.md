@@ -1,0 +1,347 @@
+# API de la console, version 1
+
+La console (application Windows et Android) lit l'état du veilleur par
+`/api/v1`. Chaque installation de la console est un **appareil** : elle reçoit
+un jeton qui lui est propre, une seule fois, en échange d'un code d'appairage
+créé sur le VPS. Le veilleur ne garde que l'empreinte SHA-256 des jetons et
+des codes : ni l'un ni l'autre n'est écrit en clair, en base comme au journal.
+
+Ce document est le contrat. `vigie/src/device.rs`, `vigie/src/api.rs`,
+`vigie/tests/api_auth.rs`, `vigie/tests/api_read.rs` et `vigie/tests/cli.rs`
+en reprennent chaque règle.
+
+## Configuration
+
+```toml
+[api]
+public_url = "https://veilleur.example.org"
+```
+
+`public_url` est l'adresse publique du veilleur, telle que la console
+l'appelle. Elle doit être en https ; http n'est admis que sur la boucle locale
+(`127.0.0.1`, `::1`, `localhost`), pour les essais. Sans section `[api]`,
+`vigie device pair` est refusé ; les routes `/api/v1` restent montées.
+
+## Appairage
+
+Sur le VPS, en SSH :
+
+```console
+$ vigie device pair --name téléphone
+<QR code>
+
+vigie://pair?u=https%3A%2F%2Fveilleur.example.org&c=<code>
+
+appairage de « téléphone » : à scanner ou à coller dans la console avant 2026-10-16T14:10:00Z (10 min), une seule fois
+```
+
+- **Code** : 16 octets tirés par `getrandom`, en base64url sans remplissage
+  (22 caractères). Valable 10 minutes, utilisable une seule fois.
+- **Lien** : `vigie://pair?u=<public_url>&c=<code>`, paramètres encodés en
+  `application/x-www-form-urlencoded`. Le QR code et la ligne de texte portent
+  exactement le même lien : collé tel quel sous Windows, il donne à la fois
+  l'adresse du veilleur et le code.
+- **QR code** : caractères Unicode, deux modules par caractère (`▀ ▄ █` et
+  espace), zone de silence comprise. Les modules clairs sont pleins : il est
+  prévu pour un terminal à **fond sombre**. Sur un fond clair, il apparaît
+  inversé et la plupart des lecteurs le refusent ; coller alors le lien.
+- **Nom** : celui de `--name`, 64 caractères au plus, sans caractère de
+  contrôle. La console n'en choisit pas : le code seul suffit.
+
+La console envoie ensuite le code :
+
+```http
+POST /api/v1/pair HTTP/1.1
+Content-Type: application/json
+
+{"code":"<code>"}
+```
+
+Corps de 1 Ko au plus, reçu en entier en 10 s au plus. Réponse :
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+Cache-Control: no-store
+
+{"token":"<jeton>","device_id":1,"name":"téléphone"}
+```
+
+- **Jeton** : 32 octets tirés par `getrandom`, en base64url sans remplissage
+  (43 caractères). Il n'est remis qu'ici : perdu, il faut appairer de nouveau.
+- La consommation du code et la création de l'appareil se font dans une même
+  transaction : deux requêtes simultanées avec le même code donnent un seul
+  appareil.
+
+## Authentification
+
+Toute autre route de `/api/v1` exige :
+
+```http
+Authorization: Bearer <jeton>
+```
+
+Le veilleur hache le jeton présenté et cherche un appareil **actif** de même
+empreinte (comparaison en temps constant). Un jeton de plus de 128 caractères
+est refusé sans être haché. La date « vu le » de l'appareil est mise à jour au
+plus une fois par minute ; son échec n'est que journalisé, la requête passe.
+
+## Révocation
+
+```console
+$ vigie device list
+appareils : 1
+  #1  téléphone  actif, vu il y a 2 min  (appairé le 2026-10-16T14:02:11Z)
+$ vigie device revoke 1
+appareil 1 révoqué : son jeton est refusé dès maintenant
+```
+
+La révocation prend effet à la requête suivante : aucun cache de jeton.
+`device list` montre aussi les codes en attente, par nom et date d'expiration,
+jamais le code lui-même. Un appareil révoqué reste listé, avec sa date de
+révocation.
+
+## Routes
+
+| Route | Réponse | Écrans |
+| ----- | ------- | ------ |
+| `POST /api/v1/pair` | `{token, device_id, name}` (voir Appairage) | appairage |
+| `GET /api/v1/overview` | sites triés par état, avec leur constat le plus grave | Main, ATraiter, Etats |
+| `GET /api/v1/sites/{id}` | incidents ouverts, contrôles et dernier relevé de l'agent | ATraiter, Dispo, Controles, Parametres, Etats |
+| `GET /api/v1/sites/{id}/incidents` | incidents fermés depuis 30 jours | Dispo |
+| `GET /api/v1/incidents/{id}` | un incident, ouvert ou fermé | Alerte |
+| `POST /api/v1/incidents/{id}/ack` | l'incident acquitté | Alerte |
+| `GET /api/v1/settings` | sites, fréquences, destinataire masqué, appareils | Parametres, Reglages |
+| `DELETE /api/v1/devices/self` | 204, sans corps | Reglages |
+
+Toutes, sauf `pair`, exigent le jeton. Les heures sont des secondes Unix (UTC) ;
+un champ sans valeur connue vaut `null`, jamais zéro ni une valeur par défaut.
+Les tableaux ne sont jamais `null` : vides, ils valent `[]`.
+
+### Incident
+
+Forme commune à toutes les routes qui renvoient un incident :
+
+```json
+{
+  "id": 12,
+  "key": "site-a/exposed/.env",
+  "site": "site-a",
+  "check": "exposed",
+  "severity": "critical",
+  "detail": "fichier exposé : /.env",
+  "opened_at": 1792000000,
+  "closed_at": null,
+  "acked_at": null,
+  "open_notified_at": 1792000060,
+  "close_notified_at": null,
+  "last_reminder_at": null,
+  "state": "open"
+}
+```
+
+- `severity` : `info`, `warning` ou `critical`. Un `info` n'est jamais envoyé
+  par e-mail et ne compte pas dans l'état du site.
+- `state` : `closed` si `closed_at` est posé, sinon `acked` si `acked_at` est
+  posé, sinon `open`.
+- `open_notified_at`, `last_reminder_at` et `close_notified_at` sont les dates
+  d'envoi des e-mails d'ouverture, de dernier rappel et de rétablissement :
+  ATraiter et Alerte en tirent les e-mails envoyés.
+
+### `GET /api/v1/overview`
+
+```json
+{
+  "server_time": 1792000000,
+  "last_tick": 1791999970,
+  "sites": [
+    {
+      "id": "site-a",
+      "url": "https://site-a.example.org/",
+      "kind": "wordpress",
+      "state": "non_compliant",
+      "open_count": 2,
+      "worst": { "...": "un incident" },
+      "last_read": 1791999940
+    }
+  ]
+}
+```
+
+- `last_tick` : `null` tant qu'aucun tick n'a tourné.
+- `kind` : `generic`, `wordpress` ou `prestashop`.
+- `open_count` : avertissements et critiques ouverts.
+- `worst` : le plus grave d'entre eux, le plus ancien à gravité égale ; `null`
+  s'il n'y en a aucun.
+- `last_read` : dernier passage d'un contrôle encore surveillé ou dernier
+  rapport d'agent accepté, le plus récent des deux ; `null` si aucun.
+- Les sites sont triés par état (voir État d'un site), puis dans l'ordre du
+  fichier de configuration.
+
+### `GET /api/v1/sites/{id}`
+
+```json
+{
+  "id": "site-a",
+  "url": "https://site-a.example.org/",
+  "kind": "wordpress",
+  "interval": 300,
+  "agent_silence": 900,
+  "state": "to_check",
+  "last_read": 1791999940,
+  "agent": {
+    "declared_at": 1791000000,
+    "last_report_at": 1791999940,
+    "agent": "vigie-agent 1.0.0",
+    "facts": { "...": "relevé de l'agent, tel qu'envoyé" }
+  },
+  "open_incidents": [ { "...": "un incident" } ],
+  "checks": [
+    {
+      "name": "tls",
+      "interval": 3600,
+      "last_run": 1791999000,
+      "result": "ok",
+      "severity": null,
+      "detail": null,
+      "duration_ms": 212,
+      "observed": { "tls_not_after": 1798912000 }
+    }
+  ]
+}
+```
+
+- `agent` : `null` si aucun agent n'est déclaré. `last_report_at`, `agent` et
+  `facts` valent `null` avant le premier rapport accepté.
+- `open_incidents` : tous les incidents ouverts du site, y compris `info`, du
+  plus grave au moins grave, puis du plus ancien.
+- `checks` : d'abord les contrôles externes applicables au type du site
+  (`content`, `installer` hors `generic`, `exposed`, `tls`, `headers`), puis,
+  si un agent est déclaré, `heartbeat` et chaque contrôle `agent:*` déjà passé.
+  - `interval` : secondes entre deux passages. `tls` et `headers` passent au
+    plus une fois par heure. `heartbeat` porte le silence d'agent toléré ;
+    les contrôles `agent:*` valent `null`, ils suivent les rapports.
+  - `last_run` : `null` si le contrôle n'a jamais tourné. Tous les champs
+    suivants sont alors `null` aussi.
+  - `result` : `ok` (concluant, sans constat), `finding` (concluant, avec au
+    moins un constat) ou `error` (non concluant) ; `null` pour un passage
+    enregistré avant le schéma 6.
+  - `severity` et `detail` : le constat le plus grave d'un `finding`, ou la
+    raison d'un `error` (dans `detail`, `severity` restant `null`).
+  - `duration_ms` : durée du passage ; `null` pour les contrôles d'agent.
+  - `observed` : valeurs mesurées, `null` si aucune. `http_status` pour
+    `content`, `tls_not_after` (secondes Unix) pour `tls`, présent même sans
+    alerte. Un contrôle sauté parce que le site est injoignable n'a pas de
+    passage : il ne reçoit aucune valeur.
+- Identifiant absent de la configuration : 404.
+
+### `GET /api/v1/sites/{id}/incidents`
+
+```json
+{ "site": "site-a", "since": 1789408000, "incidents": [ { "...": "un incident" } ] }
+```
+
+Incidents du site fermés depuis `since` (maintenant moins 30 jours), du plus
+récemment fermé au plus ancien. Les incidents ouverts sont dans
+`GET /api/v1/sites/{id}`. Identifiant absent de la configuration : 404.
+
+### `GET /api/v1/incidents/{id}`
+
+L'incident, ouvert ou fermé. Identifiant inconnu ou non entier : 404.
+
+### `POST /api/v1/incidents/{id}/ack`
+
+Même effet que `vigie ack <id>` : les rappels s'arrêtent, la clôture
+automatique et son e-mail restent. Corps de la requête ignoré.
+
+- 200 et l'incident, `state` à `acked`. Sur un incident déjà acquitté, la même
+  réponse, `acked_at` inchangé.
+- 409, corps vide, si l'incident est fermé : la base n'est pas modifiée.
+- 404 si l'identifiant est inconnu.
+- Le journal du veilleur note l'id de l'appareil qui a acquitté.
+
+### `GET /api/v1/settings`
+
+```json
+{
+  "sites": [
+    {
+      "id": "site-a",
+      "url": "https://site-a.example.org/",
+      "kind": "wordpress",
+      "interval": 300,
+      "agent_silence": 900,
+      "agent": true,
+      "checks": { "content": 300, "exposed": 300, "headers": 3600, "installer": 300, "tls": 3600 }
+    }
+  ],
+  "alerts": { "to": "a***@e***.org" },
+  "reminder_period": 86400,
+  "public_url": "https://veilleur.example.org",
+  "devices": [
+    { "id": 1, "name": "téléphone", "created_at": 1792000000, "seen_at": 1792000300, "revoked_at": null, "current": true }
+  ]
+}
+```
+
+- `alerts.to` : le destinataire, réduit à la première lettre de la partie
+  locale, du nom de domaine, et à l'extension. Ni l'expéditeur, ni le relais
+  SMTP, ni `password_file` ne sont exposés.
+- `public_url` : `null` sans section `[api]`.
+- `devices` : tous les appareils, révoqués compris ; `current` désigne celui
+  qui fait la requête.
+
+### `DELETE /api/v1/devices/self`
+
+L'appareil appelant se révoque, comme `vigie device revoke <id>` : 204 sans
+corps, puis 401 pour toute requête avec ce jeton. C'est la seule écriture sur
+les appareils accessible par l'API ; `vigie device list` montre ensuite
+l'appareil révoqué.
+
+## État d'un site
+
+Calculé par le veilleur seul (`SiteState` dans `vigie/src/api.rs`) ; la
+console l'affiche sans le recalculer. Le premier cas qui s'applique l'emporte :
+
+| Ordre | `state` | Règle |
+| ----- | ------- | ----- |
+| 1 | `non_compliant` | Un incident critique ouvert, hors `heartbeat`. |
+| 2 | `blind` | Un incident `heartbeat` ouvert (silence d'agent) : le veilleur ne voit plus le site de l'intérieur. |
+| 3 | `to_check` | Un avertissement ouvert, ou le dernier passage d'un contrôle surveillé non concluant (`error`). |
+| 4 | `first_read` | Aucun passage, aucun rapport, aucun incident : rien n'est encore connu. |
+| 5 | `ok` | Tout le reste. |
+
+L'ordre est aussi celui de l'écran Main. `first_read` n'est pas dans l'ordre
+des maquettes (non conforme, aveugle, à vérifier, OK) : il est placé avant
+`ok`, parce qu'un site jamais lu ne doit pas passer pour un site sain.
+
+## Écrans
+
+| Écran | Données |
+| ----- | ------- |
+| Main | `overview` : `state`, `worst`, `open_count`, `last_read` de chaque site. |
+| ATraiter | `overview`, puis `sites/{id}` des sites concernés : incidents ouverts, e-mails envoyés tirés des dates de notification. |
+| Alerte | `incidents/{id}`, action Acquitter par `incidents/{id}/ack`. |
+| Dispo | `sites/{id}` (contrôles externes, `duration_ms`, `last_run`, `tls_not_after`) et `sites/{id}/incidents`. |
+| Controles | `sites/{id}` : `checks`, externes et d'agent. |
+| Parametres | `settings` (site concerné) et `sites/{id}` (`interval`, `agent_silence`). |
+| Reglages | `settings` : `alerts.to`, `devices`, `public_url` ; retrait par `devices/self`. |
+| Etats | `state` à `blind` ou `first_read`, `server_time` et `last_read` pour la fraîcheur, échec réseau pour « hors ligne ». |
+
+## Codes de réponse
+
+| Code | Cas |
+| ---- | --- |
+| 200 | Succès, avec `Cache-Control: no-store`. |
+| 204 | `DELETE /api/v1/devices/self` réussi, corps vide. |
+| 401 | Code inconnu, expiré, déjà utilisé, corps illisible, trop gros ou trop lent ; jeton absent, mal formé, inconnu ou révoqué ; base absente ou antérieure au schéma 6. **Corps vide**, quelle qu'en soit la raison : le journal du veilleur seul dit laquelle. Toujours vérifié avant le 404 d'un site ou d'un incident : leur existence ne se devine pas sans jeton. |
+| 404 | Site absent de la configuration, incident inconnu ; route ou méthode inconnue. Corps vide (le même 404 que le reste du veilleur). |
+| 409 | Acquittement d'un incident fermé, corps vide. |
+| 500 | Erreur interne (base illisible, tirage aléatoire impossible), corps vide. |
+
+## Base de données
+
+L'API ne crée jamais la base et ne la migre pas : `vigie serve` applique les
+migrations au démarrage, `vigie device pair` aussi. Tant que la base est
+absente ou antérieure au schéma 6 (appareils au schéma 5, résultat des
+passages au schéma 6), toute requête reçoit 401.

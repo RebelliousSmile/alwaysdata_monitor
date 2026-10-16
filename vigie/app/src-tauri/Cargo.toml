@@ -1,0 +1,43 @@
+[package]
+name = "vigie-console"
+version = "0.1.1"
+description = "Console Vigie : client de l'API du veilleur"
+edition = "2024"
+rust-version = "1.93"
+publish = false
+
+[lib]
+# Le suffixe `_lib` évite, sous Windows, la collision entre la bibliothèque
+# et l'exécutable du même nom.
+name = "vigie_console_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# TLS par rustls et le fournisseur ring, racines de webpki-roots : le même
+# comportement sous Windows et Android, sans aws-lc ni magasin du système.
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls-no-provider"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+webpki-roots = "1"
+url = "2"
+
+# Scan du QR code d'appairage : Android seulement, Windows colle le lien.
+[target.'cfg(any(target_os = "android", target_os = "ios"))'.dependencies]
+tauri-plugin-barcode-scanner = "2"
+
+[dev-dependencies]
+# Test de contrat : le client contre le routeur du veilleur, en processus.
+vigie = { path = "../.." }
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio"] }
+tokio = { version = "1", features = ["macros", "net", "rt-multi-thread"] }
+tempfile = "3"
+
+[profile.release]
+codegen-units = 1
+lto = true
+strip = true

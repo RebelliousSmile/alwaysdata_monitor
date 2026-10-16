@@ -25,7 +25,7 @@ use vigie::checks::{CheckError, CheckKind, Ctx};
 use vigie::config::{Alerts, Config, Site, SiteKind};
 use vigie::finding::{Finding, Severity};
 use vigie::http::{Http, Trust};
-use vigie::store::{REMINDER_PERIOD, Store};
+use vigie::store::{REMINDER_PERIOD, RunResult, Store};
 use vigie::tick::{self, Options};
 
 const HOME: &str = include_str!("fixtures/home.html");
@@ -231,6 +231,7 @@ fn site(base: &str) -> Site {
 fn config(dir: &Path, base: &str) -> Config {
     Config {
         database: dir.join("data").join("vigie.db"),
+        api: None,
         alerts: Alerts {
             to: "alertes@example.org".into(),
             from: "vigie@example.org".into(),
@@ -445,6 +446,88 @@ fn certificates_close_to_expiry_or_for_another_name_are_reported() {
     assert_eq!(findings.len(), 1, "{findings:?}");
     assert_eq!(findings[0].key, "invalid");
     assert_eq!(findings[0].severity, Severity::Critical);
+}
+
+#[test]
+fn every_external_check_records_its_result_and_tls_its_expiry() {
+    let fixture = Fixture::with_certificate(Mode::Healthy, 80 * DAY, "127.0.0.1");
+    let dir = tempfile::tempdir().expect("tempdir");
+    let config = config(dir.path(), &fixture.base());
+    let mail = MemoryNotifier::new();
+    tick::run_with(&config, T0, &fixture.options(), &mail).expect("tick");
+    // 80 jours : loin des seuils, aucun incident TLS.
+    assert!(
+        open_keys(&config).iter().all(|k| !k.contains("/tls/")),
+        "{:?}",
+        open_keys(&config)
+    );
+
+    let runs = Store::open(&config.database)
+        .expect("base")
+        .check_results()
+        .expect("résultats");
+    let mut names: Vec<&str> = runs.iter().map(|r| r.check_name.as_str()).collect();
+    names.sort_unstable();
+    let mut expected: Vec<&str> = CheckKind::ALL
+        .into_iter()
+        .filter(|k| k.applies(&config.sites[0]))
+        .map(CheckKind::name)
+        .collect();
+    expected.sort_unstable();
+    assert_eq!(names, expected);
+    for run in &runs {
+        assert_eq!(run.last_run, T0, "{run:?}");
+        assert!(run.result.is_some(), "{run:?}");
+        assert!(run.duration_ms.is_some_and(|ms| ms >= 0), "{run:?}");
+    }
+
+    let tls = runs.iter().find(|r| r.check_name == "tls").expect("tls");
+    assert_eq!(tls.result, Some(RunResult::Ok), "{tls:?}");
+    let observed: serde_json::Value =
+        serde_json::from_str(tls.observed.as_deref().expect("observé")).expect("json");
+    let not_after = observed["tls_not_after"].as_i64().expect("expiration");
+    let in_80_days = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .expect("horloge")
+        .as_secs()
+        + 80 * DAY;
+    assert!(
+        (not_after - in_80_days as i64).abs() < 3600,
+        "{not_after} / {in_80_days}"
+    );
+
+    let content = runs
+        .iter()
+        .find(|r| r.check_name == "content")
+        .expect("content");
+    assert_eq!(content.result, Some(RunResult::Ok), "{content:?}");
+    assert_eq!(content.observed.as_deref(), Some("{\"http_status\":200}"));
+}
+
+#[test]
+fn an_unreachable_site_records_the_finding_as_its_result() {
+    let port = {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        listener.local_addr().expect("adresse").port()
+    };
+    let dir = tempfile::tempdir().expect("tempdir");
+    let config = config(dir.path(), &format!("https://127.0.0.1:{port}"));
+    tick::run_with(&config, T0, &Options::default(), &MemoryNotifier::new()).expect("tick");
+    let runs = Store::open(&config.database)
+        .expect("base")
+        .check_results()
+        .expect("résultats");
+    // Les contrôles sautés n'ont pas de passage : rien d'inventé.
+    assert_eq!(runs.len(), 1, "{runs:?}");
+    assert_eq!(runs[0].result, Some(RunResult::Finding));
+    assert_eq!(runs[0].severity, Some(Severity::Critical));
+    assert!(
+        runs[0]
+            .detail
+            .as_deref()
+            .is_some_and(|d| d.starts_with("injoignable"))
+    );
+    assert_eq!(runs[0].observed, None);
 }
 
 #[test]
