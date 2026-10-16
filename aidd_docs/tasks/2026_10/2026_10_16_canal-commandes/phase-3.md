@@ -1,5 +1,5 @@
 ---
-status: pending
+status: done
 ---
 
 # Instruction: CLI `vigie site command` et contrat écrit
@@ -9,26 +9,30 @@ status: pending
 ```txt
 .
 └── vigie/
-    ├── src/main.rs                 ✏️ commands init-key|pubkey ; site commands enable|disable ; site command <site> <name> [--param …] [--apply] ; site command-cancel ; site audit [--verify]
-    ├── tests/cli.rs                ✏️ aperçu sans écriture, --apply, refus
+    ├── src/main.rs                 ✏️ commands init-keys|pubkey ; site commands enable|disable ; site command <site> <name> [--force] [--apply] ; site command-cancel ; site audit <site> [--verify [--head <hash>]]
+    ├── src/serve.rs                ✏️ commentaire d'en-tête : routes
+    ├── src/tick.rs                 ✏️ expiration, unknown, e-mails d'ancre de l'audit (audit_notified)
+    ├── tests/cli.rs                ✏️ aperçu sans écriture, --apply, refus, audit
+    ├── tests/fixtures/commands-vectors.json ✅ vecteurs : réponse valide, préfixe faux, horodatage altéré, autre site, commande expirée, nonce différent ; réponses avec acked et accepted vrai/faux ; retrait signé avec le préfixe vigie-pull-v1 et sans (refusé) ; preuve vigie-rotate-v1
     └── docs/
-        ├── protocole-commandes.md  ✏️ contrat complet (requête, réponse, signatures, états, audit)
-        ├── protocole-agent.md      ✏️ renvoi vers protocole-commandes.md
-        └── decisions.md            ✏️ section canal de commandes
+        ├── protocole-commandes.md  ✏️ contrat complet : retrait, réponse, signatures, états, résultat et accusé, rotate-key, audit, ce que le canal ne protège pas, rotation de la clé de commandes
+        ├── protocole-agent.md      ✏️ routes existantes, renvoi
+        ├── hebergement.md          ✏️ secrets : clés de commandes et d'audit ; ordre de déploiement de [commands]
+        └── decisions.md            ✏️ section #10
 ```
 
 ## Tasks to do
 
-1. `vigie site command site-a ping` : aperçu (site, runtime, commande, paramètres, effets), rien n'est écrit ; `--apply` crée la commande et affiche son id.
-2. Refus lisibles : site inconnu, désactivé, runtime non admis, commande déjà en vol, clé absente.
-3. `site commands enable|disable` : kill-switch ; `disable` annule la commande `pending` (audit).
-4. `site audit site-a` : JSONL ; `--verify` : code 0 si la chaîne et les signatures tiennent, 1 sinon, avec l'entrée fautive.
-5. `protocole-commandes.md` : de quoi écrire un agent sans lire le code Rust, avec un vecteur de test (clé, horodatage, corps, signature) en JSON dans `tests/fixtures/commands-vector.json`, que #6 consommera.
+1. `vigie site command site-a ping` : aperçu (site, runtime, commande, paramètres, effets, empreinte de typologie), rien n'est écrit ; `--apply` crée la commande, affiche son id.
+2. Refus lisibles : site inconnu, désactivé, runtime non admis, commande indisponible, commande déjà en vol, `unknown` sans `--force`, `[commands]` absent.
+3. `site audit` : JSONL ; `--verify` : 0 si chaîne et signatures tiennent (et la tête attendue si donnée), 1 sinon, avec l'entrée fautive.
+4. Procédure de rotation de la clé de commandes : nouvelle clé, réinstallation de chaque agent avec la nouvelle clé publique, ancienne clé détruite.
+5. Les vecteurs de test se vérifient dans `tests/commands.rs` ; #6 les consommera côté PHP.
 
 ## Test acceptance criteria
 
 | Task | Acceptance criteria |
 | ---- | ------------------- |
-| 1    | L'aperçu ne modifie pas la base (octets identiques) |
-| 3    | Après `disable`, un retrait ne reçoit plus rien |
-| 5    | Le vecteur se vérifie dans `tests/commands.rs` |
+| 1 | L'aperçu ne modifie pas la base (octets identiques) |
+| 3 | Une entrée altérée ou une tête attendue absente donne le code 1 |
+| 5 | Chaque vecteur a son verdict attendu |

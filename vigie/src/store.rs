@@ -41,6 +41,11 @@ const MIGRATIONS: &[&str] = &[
     // 7 : valeurs isolées du veilleur (clé, valeur, date), dont l'empreinte de
     // la typologie vue par `serve` et par `tick` (`config::typology_fingerprint`).
     include_str!("../migrations/0007.sql"),
+    // 8 : canal de commandes (`command/`) : activation et séquences par site,
+    // file des commandes (une seule non close par site, index unique partiel),
+    // journal d'audit en ajout seul (déclencheurs) chaîné par site, et dernier
+    // hash envoyé par e-mail comme ancre externe.
+    include_str!("../migrations/0008.sql"),
 ];
 
 /// Version de schéma à partir de laquelle les incidents existent.
@@ -55,6 +60,8 @@ pub const SCHEMA_DEVICES: usize = 5;
 pub const SCHEMA_CHECK_RESULTS: usize = 6;
 /// Version de schéma à partir de laquelle la table `meta` existe.
 pub const SCHEMA_META: usize = 7;
+/// Version de schéma à partir de laquelle le canal de commandes existe.
+pub const SCHEMA_COMMANDS: usize = 8;
 
 /// Empreinte de la typologie chargée par `serve` à son démarrage.
 pub const META_TYPOLOGY_SERVE: &str = "typology.serve";
@@ -393,7 +400,7 @@ fn record_result_in(
 const TICK_RETENTION: i64 = 7 * 24 * 3600;
 
 pub struct Store {
-    conn: Connection,
+    pub(crate) conn: Connection,
 }
 
 /// Au-delà, une base toujours occupée fait échouer l'ouverture.
@@ -1968,7 +1975,7 @@ mod tests {
             assert!(!migration.contains('\r'), "migration {} en CRLF", i + 1);
         }
         let (_dir, store) = temp_store();
-        assert_eq!(store.schema_version().expect("version"), 7);
+        assert_eq!(store.schema_version().expect("version"), 8);
         let mut stmt = store
             .conn
             .prepare("SELECT type, name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name")
@@ -1979,11 +1986,17 @@ mod tests {
             .collect::<rusqlite::Result<_>>()
             .expect("rows");
         let expected = [
+            ("index", "command_audit_site"),
+            ("index", "commands_one_open"),
             ("index", "incidents_open_key"),
             ("index", "incidents_site_check"),
             ("index", "ticks_at"),
+            ("table", "audit_notified"),
             ("table", "baselines"),
             ("table", "check_runs"),
+            ("table", "command_audit"),
+            ("table", "command_sites"),
+            ("table", "commands"),
             ("table", "devices"),
             ("table", "incidents"),
             ("table", "meta"),
@@ -1991,6 +2004,8 @@ mod tests {
             ("table", "reports"),
             ("table", "site_keys"),
             ("table", "ticks"),
+            ("trigger", "command_audit_no_delete"),
+            ("trigger", "command_audit_no_update"),
         ];
         let objects: Vec<(&str, &str)> = objects
             .iter()

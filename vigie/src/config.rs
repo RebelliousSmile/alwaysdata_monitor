@@ -37,6 +37,9 @@ pub struct Config {
     pub database: PathBuf,
     /// API de la console ; sans elle, `device pair` est refusé.
     pub api: Option<Api>,
+    /// Canal de commandes (`docs/protocole-commandes.md`) ; sans lui, aucune
+    /// commande n'est créée ni servie.
+    pub commands: Option<Commands>,
     pub alerts: Alerts,
     #[serde(default)]
     pub sites: Vec<Site>,
@@ -50,6 +53,18 @@ pub struct Api {
     /// « https hors boucle locale » est appliquée par `device pair`, pour
     /// qu'une adresse mal saisie n'arrête ni `serve` ni `tick`.
     pub public_url: String,
+}
+
+/// Clés du canal de commandes : fichiers 0600 dans un dossier 0700, au
+/// propriétaire du veilleur, ouverts sans suivre de lien (`command/key.rs`).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Commands {
+    /// Clé de signature des réponses de `/r/v1/commands`, lue par `serve`
+    /// seulement.
+    pub key_file: PathBuf,
+    /// Clé de signature du journal d'audit, lue par `serve`, `tick` et la CLI.
+    pub audit_key_file: PathBuf,
 }
 
 /// Envoi par un relais SMTP authentifié, en STARTTLS obligatoire.
@@ -369,6 +384,22 @@ impl Config {
             return Err(format!(
                 "alerts.password_file doit être un chemin absolu (reçu : {pw})"
             ));
+        }
+        if let Some(commands) = &self.commands {
+            for (key, path) in [
+                ("commands.key_file", &commands.key_file),
+                ("commands.audit_key_file", &commands.audit_key_file),
+            ] {
+                let shown = path.to_string_lossy();
+                if !(path.is_absolute() || shown.starts_with('/')) {
+                    return Err(format!("{key} doit être un chemin absolu (reçu : {shown})"));
+                }
+            }
+            if commands.key_file == commands.audit_key_file {
+                return Err(
+                    "commands.key_file et commands.audit_key_file doivent être deux fichiers : une clé par usage".into(),
+                );
+            }
         }
         if let Some(api) = &self.api
             && !is_plausible_base_url(&api.public_url)
