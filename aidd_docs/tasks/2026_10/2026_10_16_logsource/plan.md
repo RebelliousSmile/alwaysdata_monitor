@@ -1,6 +1,6 @@
 ---
 objective: "Le contrat de l'analyse de logs est figé : une Entry aux types fixés, une normalisation commune qui tient les entrées hostiles, un trait LogSource dyn-compatible, et un jeu de fixtures que les adaptateurs (#1) et l'analyseur (#8) partagent."
-status: in-progress
+status: done
 issue_number: 7
 ---
 

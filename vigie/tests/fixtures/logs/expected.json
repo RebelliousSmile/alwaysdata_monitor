@@ -1,0 +1,49 @@
+{
+  "reference_now_ms": 1792108800000,
+  "files": {
+    "alwaysdata-standard.log": {
+      "tz": null,
+      "lines": 10,
+      "accepted": 8,
+      "rejected": {
+        "malformed": 1,
+        "status": 1
+      }
+    },
+    "alwaysdata-advanced.log": {
+      "tz": null,
+      "lines": 5,
+      "accepted": 5,
+      "rejected": {}
+    },
+    "apache-combined.log": {
+      "tz": "Europe/Paris",
+      "lines": 3,
+      "accepted": 3,
+      "rejected": {}
+    },
+    "alwaysdata-rotated.log.gz": {
+      "tz": null,
+      "lines": 5,
+      "accepted": 5,
+      "rejected": {}
+    },
+    "hostile-bytes.log": {
+      "tz": null,
+      "lines": 4,
+      "accepted": 3,
+      "rejected": {
+        "malformed": 1
+      }
+    },
+    "hostile-clock.log": {
+      "tz": null,
+      "lines": 5,
+      "accepted": 3,
+      "rejected": {
+        "future": 1,
+        "timestamp": 1
+      }
+    }
+  }
+}
