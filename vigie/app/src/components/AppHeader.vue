@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { RouteLocationRaw } from 'vue-router'
 import AppIcon from '@/components/AppIcon.vue'
+import type { IconName } from '@/lib/icons'
 
 // En-tête collant. « Relire » reste toujours à la même place, juste avant
 // l'accès aux réglages ou aux paramètres.
@@ -13,6 +14,8 @@ defineProps<{
   backLabel?: string
   settings?: RouteLocationRaw
   settingsLabel?: string
+  /** Engrenage pour les réglages globaux, curseurs pour ceux d'un site. */
+  settingsIcon?: IconName
   reloadLabel?: string
   /** Logo de Vigie à la place du retour (Mes sites). */
   brand?: boolean
@@ -66,7 +69,7 @@ defineEmits<{ reload: [] }>()
       :aria-label="settingsLabel ?? 'Paramètres'"
       class="flex h-tap w-tap flex-none items-center justify-center text-text-2"
     >
-      <AppIcon name="settings" />
+      <AppIcon :name="settingsIcon ?? 'settings'" />
     </RouterLink>
   </header>
 </template>

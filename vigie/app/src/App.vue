@@ -58,6 +58,7 @@ const header = computed(() => {
       brand: true,
       settings: { name: 'reglages' } as RouteLocationRaw,
       settingsLabel: 'Réglages globaux',
+      settingsIcon: 'gear' as const,
       reloadLabel: 'Tout relire maintenant',
     }
   }
