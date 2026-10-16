@@ -1,6 +1,6 @@
 ---
 objective: "La Console Vigie, installée depuis une release GitHub sur Windows et sur Android, s'appaire au veilleur et affiche ses vraies données. Les écrans des maquettes sans source de données sont présents, signalés « pas encore disponible »."
-status: blocked
+status: in-progress
 ---
 
 <!-- Fill or omit these sections; never add, rename, or reorder one. -->
