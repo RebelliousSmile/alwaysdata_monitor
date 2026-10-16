@@ -74,6 +74,7 @@ fn site(id: &str, kind: SiteKind, interval: u64) -> Site {
         id: id.into(),
         url: format!("https://{id}.example.org/"),
         kind,
+        runtime: None,
         keyword_url: None,
         keyword: None,
         interval,
@@ -607,6 +608,8 @@ async fn settings_show_the_configuration_without_any_secret() {
     assert_eq!(sites[0]["agent"], false);
     assert_eq!(sites[1]["agent"], true);
     assert_eq!(sites[1]["kind"], "wordpress");
+    assert_eq!(sites[1]["runtime"], "php", "impliqué par le CMS");
+    assert!(sites[0]["runtime"].is_null(), "generic sans runtime");
     assert_eq!(
         sites[1]["checks"],
         serde_json::json!({

@@ -1,6 +1,6 @@
 ---
 objective: "Chaque site porte deux axes déclarés par l'exploitant, CMS et runtime ; chaque contrôle déclare les CMS auxquels il s'applique et chaque commande les runtimes qui l'admettent, et une commande hors runtime est refusée avant d'exister, dès le premier contrat de /r/v1/commands."
-status: pending
+status: done
 issue_number: 2
 ---
 

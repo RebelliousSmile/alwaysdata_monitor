@@ -236,6 +236,24 @@ $ sudo -l -U vigie
     (root) NOPASSWD: /usr/bin/systemctl restart vigie-serve.service
 ```
 
+## Typologie des sites (issue #2)
+
+`runtime` est une clé nouvelle de `[[sites]]`. La configuration refuse toute
+clé inconnue (`deny_unknown_fields`) :
+
+1. **déployer d'abord** le binaire qui connaît `runtime` ;
+2. **poser ensuite** `runtime = "…"` dans `config.toml` ;
+3. relancer `serve` (`sudo systemctl restart vigie-serve.service`), qui ne lit
+   la configuration qu'à son démarrage. `vigie status` affiche l'empreinte de
+   la typologie du fichier, de `tick` et de `serve`, et dit « serve à
+   redémarrer » quand celle de `serve` diffère ou manque.
+
+Retour au binaire précédent : retirer d'abord `runtime` de `config.toml`, sinon
+l'ancien `tick` refuse la configuration. Ce binaire ne connaît pas non plus le
+schéma 7 de la base (table `meta`) : `tick` s'arrête sur « binaire trop
+ancien ». Le retour arrière demande donc aussi la base sauvegardée avant le
+déploiement.
+
 ## Secrets
 
 Inventaire tenu par le socle (issue #9). Aucun secret ne passe par une variable

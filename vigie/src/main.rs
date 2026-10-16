@@ -16,13 +16,14 @@ use clap::{Parser, Subcommand};
 use ed25519_dalek::VerifyingKey;
 
 use vigie::alert::{self, Notifier, SmtpNotifier};
+use vigie::capability;
 use vigie::clock::{Clock, SystemClock};
-use vigie::config::{self, ConfigError};
+use vigie::config::{self, ConfigError, Runtime};
 use vigie::device::{self, PAIRING_TTL};
 use vigie::finding::Severity;
 use vigie::store::{
-    AckOutcome, Agent, KeyOutcome, RevokeOutcome, SCHEMA_AGENTS, SCHEMA_DEVICES, SCHEMA_INCIDENTS,
-    Store,
+    AckOutcome, Agent, KeyOutcome, META_TYPOLOGY_SERVE, META_TYPOLOGY_TICK, RevokeOutcome,
+    SCHEMA_AGENTS, SCHEMA_DEVICES, SCHEMA_INCIDENTS, SCHEMA_META, Store,
 };
 use vigie::{human_age, iso_utc, serve, tick};
 
@@ -260,7 +261,13 @@ fn site(config: &config::Config, action: SiteAction, now: i64) -> anyhow::Result
             let agents = read_agents(config)?;
             for site in &config.sites {
                 let agent = agents.iter().find(|a| a.site == site.id);
-                println!("{}\t{}\t{}", site.id, site.url, agent_state(agent, now));
+                println!(
+                    "{}\t{}\t{}\t{}",
+                    site.id,
+                    site.url,
+                    agent_state(agent, now),
+                    site.effective_runtime().map_or("-", Runtime::as_str)
+                );
             }
         }
         SiteAction::Add { id, pubkey } => {
@@ -268,7 +275,16 @@ fn site(config: &config::Config, action: SiteAction, now: i64) -> anyhow::Result
             let key = parse_pubkey(&pubkey)?;
             let mut store = Store::open(&config.database)?;
             match store.add_key(&id, &key, now)? {
-                KeyOutcome::Done => println!("clé de l'agent de {id} enregistrée"),
+                KeyOutcome::Done => {
+                    println!("clé de l'agent de {id} enregistrée");
+                    let site = config.sites.iter().find(|s| s.id == id);
+                    if site.is_some_and(|s| capability::allowed(s).is_empty()) {
+                        eprintln!(
+                            "attention : {id} n'admet aucune commande (runtime absent ou non admis) ; \
+                             poser `runtime = \"php\"` dans config.toml pour un site PHP déclaré generic"
+                        );
+                    }
+                }
                 KeyOutcome::AlreadyPresent => {
                     bail!("{id} a déjà une clé : `vigie site rotate-key {id}` pour la remplacer")
                 }
@@ -421,6 +437,49 @@ fn device(config: &config::Config, action: DeviceAction, now: i64) -> anyhow::Re
     Ok(())
 }
 
+/// Empreinte de la typologie du fichier, de `tick` et de `serve` : `serve` lit
+/// la configuration une seule fois, à son démarrage.
+fn print_typology(config: &config::Config, store: Option<&Store>) -> anyhow::Result<()> {
+    let file = config::typology_fingerprint(config);
+    println!("typologie : {}", short(&file));
+    let Some(store) = store.filter(|s| s.schema_version().is_ok_and(|v| v >= SCHEMA_META)) else {
+        println!(
+            "  tick : inconnue ; serve : inconnue (base absente ou antérieure au schéma {SCHEMA_META})"
+        );
+        return Ok(());
+    };
+    let read = |key| -> anyhow::Result<Option<(String, i64)>> {
+        Ok(store.meta(key)?.and_then(|(value, at)| {
+            serde_json::from_str::<config::TypologyRecord>(&value)
+                .ok()
+                .map(|record| (record.fingerprint, at))
+        }))
+    };
+    for (who, key) in [("tick", META_TYPOLOGY_TICK), ("serve", META_TYPOLOGY_SERVE)] {
+        match read(key)? {
+            Some((fingerprint, at)) => println!(
+                "  {who} : {}{} (notée le {})",
+                short(&fingerprint),
+                if fingerprint == file {
+                    ""
+                } else {
+                    ", différente du fichier"
+                },
+                iso_utc(at)
+            ),
+            None => println!("  {who} : aucune"),
+        }
+    }
+    if read(META_TYPOLOGY_SERVE)?.is_none_or(|(fingerprint, _)| fingerprint != file) {
+        println!("  serve à redémarrer : sa typologie n'est pas celle du fichier");
+    }
+    Ok(())
+}
+
+fn short(fingerprint: &str) -> &str {
+    &fingerprint[..fingerprint.len().min(12)]
+}
+
 fn status(config: &config::Config, now: i64) -> anyhow::Result<()> {
     // Lecteur : `status` ne crée pas la base et ne la migre pas.
     let store = Store::open_read(&config.database)?;
@@ -438,6 +497,7 @@ fn status(config: &config::Config, now: i64) -> anyhow::Result<()> {
             None
         }
     };
+    print_typology(config, store.as_ref())?;
     let (code, health) = serve::health(last_tick, now);
     match (health.last_tick, health.age_seconds) {
         (Some(at), Some(age)) => println!(

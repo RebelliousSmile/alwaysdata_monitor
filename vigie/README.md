@@ -21,7 +21,7 @@ Sur le veilleur, toujours appeler le binaire par son chemin complet.
 | `~/vigie/bin/vigie tick` | Lancé chaque minute par `vigie-tick.timer` : lance les contrôles dus, ouvre ou clôt les incidents, envoie les e-mails |
 | `~/vigie/bin/vigie check <site> --once` | Lance tous les contrôles d'un site et affiche les constats, sans écrire dans la base ni envoyer d'e-mail ; code 1 si un constat est à traiter |
 | `~/vigie/bin/vigie status` | Dernier passage, sites et dernier contrôle, incidents ouverts avec leur âge, état de l'agent de chaque site, informations (en-têtes manquants), notifications en attente ; code 1 si `tick` est en retard |
-| `~/vigie/bin/vigie site list` | Sites de la configuration et état de leur agent : sans agent, clé sans rapport, âge du dernier rapport accepté |
+| `~/vigie/bin/vigie site list` | Sites de la configuration, état de leur agent (sans agent, clé sans rapport, âge du dernier rapport accepté) et, en dernière colonne, leur runtime effectif (`-` sans runtime) |
 | `~/vigie/bin/vigie site add <site> --pubkey <base64>` | Enregistre la clé publique Ed25519 (32 octets) de l'agent d'un site de la configuration ; refusé si le site a déjà une clé |
 | `~/vigie/bin/vigie site rotate-key <site> --pubkey <base64>` | Remplace la clé : un rapport signé par l'ancienne est refusé dès maintenant |
 | `~/vigie/bin/vigie site accept <site>` | Prend les empreintes du dernier rapport comme référence et clôt les incidents d'intégrité : à lancer après une modification voulue d'un fichier critique |

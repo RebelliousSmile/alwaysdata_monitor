@@ -111,7 +111,7 @@ mod tests {
     fn a_newer_schema_is_written_without_migrating() {
         let (_dir, path) = migrated_database();
         let conn = rusqlite::Connection::open(&path).expect("raw");
-        conn.pragma_update(None, "user_version", 7).expect("bump");
+        conn.pragma_update(None, "user_version", 99).expect("bump");
         drop(conn);
         let writer = Writer::new(&path);
         writer
@@ -119,7 +119,7 @@ mod tests {
             .expect("écriture acceptée")
             .expect("base présente");
         let store = Store::open_read(&path).expect("open_read").expect("base");
-        assert_eq!(store.schema_version().expect("version"), 7);
+        assert_eq!(store.schema_version().expect("version"), 99);
         assert_eq!(store.last_tick().expect("last"), Some(1_000));
     }
 
