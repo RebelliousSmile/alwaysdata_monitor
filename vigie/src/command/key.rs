@@ -20,6 +20,8 @@ use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 
 /// Retrait de l'agent, signé par sa clé de rapport.
 pub const DOMAIN_PULL: &[u8] = b"vigie-pull-v1\n";
+/// Lot de logs de l'agent (`/r/v1/logs`), signé par sa clé de rapport.
+pub const DOMAIN_LOGS: &[u8] = b"vigie-logs-v1\n";
 /// Réponse de `/r/v1/commands`, signée par la clé de commandes.
 pub const DOMAIN_COMMANDS: &[u8] = b"vigie-commands-v1\n";
 /// Entrée du journal d'audit, signée par la clé d'audit.
