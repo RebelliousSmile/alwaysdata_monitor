@@ -3,7 +3,6 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicI64, Ordering};
 
 use axum::body::Body;
 use axum::http::{Method, Request, StatusCode};
@@ -16,6 +15,7 @@ mod veilleur;
 
 use vigie::alert::MemoryNotifier;
 use vigie::checks::CheckKind;
+use vigie::clock::{Clock, FakeClock};
 use vigie::config::{Api, Config, Site, SiteKind};
 use vigie::device::{self, PAIRING_TTL};
 use vigie::finding::{Finding, Severity};
@@ -31,7 +31,7 @@ const SLOW: i64 = 3600;
 struct Veilleur {
     _dir: tempfile::TempDir,
     config: Config,
-    clock: Arc<AtomicI64>,
+    clock: Arc<FakeClock>,
 }
 
 struct Reply {
@@ -96,7 +96,7 @@ impl Veilleur {
         Self {
             _dir: dir,
             config,
-            clock: Arc::new(AtomicI64::new(T0)),
+            clock: Arc::new(FakeClock::new(T0)),
         }
     }
 
@@ -109,7 +109,7 @@ impl Veilleur {
     }
 
     fn now(&self) -> i64 {
-        self.clock.load(Ordering::SeqCst)
+        self.clock.unix()
     }
 
     /// Appareil appairé comme par la console : son jeton.
@@ -132,10 +132,9 @@ impl Veilleur {
     }
 
     async fn send(&self, request: Request<Body>) -> Reply {
-        let clock = Arc::clone(&self.clock);
         let router = serve::router_with_clock(
             self.config.clone(),
-            Arc::new(move || clock.load(Ordering::SeqCst)),
+            Arc::clone(&self.clock) as Arc<dyn Clock>,
         );
         let response = router.oneshot(request).await.expect("response");
         let status = response.status();
@@ -516,7 +515,7 @@ async fn an_acked_incident_gets_no_more_reminders() {
     assert_eq!(json["acked_at"], T0);
     assert_eq!(json["closed_at"], Value::Null);
     // Rejoué : même réponse, la date d'acquittement ne bouge pas.
-    v.clock.fetch_add(30, Ordering::SeqCst);
+    v.clock.advance(30);
     let again = v.call(Method::POST, &path, &token).await;
     assert_eq!(again.status, StatusCode::OK);
     assert_eq!(again.json()["acked_at"], T0);

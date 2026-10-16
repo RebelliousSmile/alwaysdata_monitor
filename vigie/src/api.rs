@@ -150,7 +150,7 @@ async fn pair_handler(State(state): State<Arc<AppState>>, request: Request) -> R
     };
     let code_hash = device::hash(&code);
     let token_hash = device::hash(&token);
-    let now = (state.clock)();
+    let now = state.clock.unix();
     let task_state = Arc::clone(&state);
     let outcome = tokio::task::spawn_blocking(move || {
         write_devices(&task_state, |store| {
@@ -215,7 +215,7 @@ impl FromRequestParts<Arc<AppState>> for Authenticated {
             .filter(|t| !t.is_empty() && t.len() <= device::MAX_SECRET_LEN)
             .ok_or(ApiError::UNAUTHORIZED)?;
         let token_hash = device::hash(token);
-        let now = (state.clock)();
+        let now = state.clock.unix();
         let task_state = Arc::clone(state);
         let rid = request_id::current();
         let found = tokio::task::spawn_blocking(move || {
@@ -493,7 +493,7 @@ async fn overview_handler(
     State(state): State<Arc<AppState>>,
     Authenticated(_device): Authenticated,
 ) -> Response {
-    let now = (state.clock)();
+    let now = state.clock.unix();
     with_store(&state, "/api/v1/overview", move |state, store| {
         let agents = store.agents()?;
         let open = store.open_incidents()?;
@@ -666,7 +666,7 @@ async fn site_incidents_handler(
     let Some(index) = site_index(&state, id) else {
         return ApiError::NOT_FOUND.into_response();
     };
-    let since = (state.clock)() - CLOSED_WINDOW;
+    let since = state.clock.unix() - CLOSED_WINDOW;
     with_store(&state, "/api/v1/sites/incidents", move |state, store| {
         let site = &state.site_ids[index];
         let closed = store.closed_incidents(site, since)?;
@@ -705,7 +705,7 @@ async fn ack_handler(
     let Some(id) = incident_id(id) else {
         return ApiError::NOT_FOUND.into_response();
     };
-    let now = (state.clock)();
+    let now = state.clock.unix();
     let rid = request_id::current();
     with_writer(&state, "/api/v1/incidents/ack", move |store| {
         Ok(match store.ack(id, now)? {
@@ -835,7 +835,7 @@ async fn device_self_handler(
     State(state): State<Arc<AppState>>,
     Authenticated(device): Authenticated,
 ) -> Response {
-    let now = (state.clock)();
+    let now = state.clock.unix();
     let rid = request_id::current();
     with_writer(&state, "/api/v1/devices/self", move |store| {
         Ok(match store.revoke_device(device.id, now)? {

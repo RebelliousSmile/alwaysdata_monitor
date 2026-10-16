@@ -28,6 +28,7 @@ use axum::http::header::CONTENT_LENGTH;
 use axum::routing::{get, post};
 use serde::Serialize;
 
+use crate::clock::{Clock, SystemClock};
 use crate::config::Config;
 use crate::ingest::{self, HEADER_SIGNATURE, HEADER_SITE, Reason, Refusal};
 use crate::store::Store;
@@ -77,15 +78,12 @@ pub fn health(last_tick: Option<i64>, now: i64) -> (StatusCode, Health) {
     }
 }
 
-/// Heure courante en secondes Unix ; remplaçable dans les tests.
-pub type Clock = Arc<dyn Fn() -> i64 + Send + Sync>;
-
 pub(crate) struct AppState {
     /// Configuration lue au démarrage : la console en publie une partie.
     pub(crate) config: Config,
     /// Identifiants des sites de la configuration, dans son ordre.
     pub(crate) site_ids: Vec<String>,
-    pub(crate) clock: Clock,
+    pub(crate) clock: Arc<dyn Clock>,
     /// Seule connexion qui écrit dans `serve`. À n'appeler que depuis
     /// `spawn_blocking` : `serve` tourne sur un runtime à un seul thread.
     pub(crate) writer: Writer,
@@ -98,10 +96,10 @@ impl AppState {
 }
 
 pub fn router(config: Config) -> Router {
-    router_with_clock(config, Arc::new(crate::now))
+    router_with_clock(config, Arc::new(SystemClock))
 }
 
-pub fn router_with_clock(config: Config, clock: Clock) -> Router {
+pub fn router_with_clock(config: Config, clock: Arc<dyn Clock>) -> Router {
     let site_ids = config.sites.iter().map(|s| s.id.clone()).collect();
     let writer = Writer::new(&config.database);
     Router::new()
@@ -131,7 +129,7 @@ async fn health_handler(State(state): State<Arc<AppState>>) -> (StatusCode, Json
     .await;
     match last {
         Ok(Ok(last)) => {
-            let (code, body) = health(last, (state.clock)());
+            let (code, body) = health(last, state.clock.unix());
             (code, Json(body))
         }
         Ok(Err(err)) => {
@@ -213,7 +211,7 @@ async fn report_handler(State(state): State<Arc<AppState>>, request: Request) ->
         Err(_) => return refuse(Refusal::new(site.as_deref(), Reason::TooSlow)),
     };
 
-    let now = (state.clock)();
+    let now = state.clock.unix();
     let task_site = site.clone();
     let task_state = Arc::clone(&state);
     let outcome = tokio::task::spawn_blocking(move || {

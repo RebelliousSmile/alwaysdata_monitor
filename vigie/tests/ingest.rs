@@ -6,7 +6,6 @@
 
 use std::path::Path;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicI64, Ordering};
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
@@ -19,6 +18,7 @@ use tower::ServiceExt;
 
 use vigie::alert::MemoryNotifier;
 use vigie::checks::CheckKind;
+use vigie::clock::{Clock, FakeClock};
 use vigie::config::{Alerts, Config, Site, SiteKind};
 use vigie::ingest::{self, HEADER_SIGNATURE, HEADER_SITE, Reason};
 use vigie::store::{Agent, Store};
@@ -62,7 +62,7 @@ fn signing_key(seed: u8) -> SigningKey {
 
 struct Harness {
     config: Config,
-    clock: Arc<AtomicI64>,
+    clock: Arc<FakeClock>,
     mail: MemoryNotifier,
     _dir: tempfile::TempDir,
 }
@@ -83,25 +83,24 @@ impl Harness {
             .expect("add_key");
         Self {
             config,
-            clock: Arc::new(AtomicI64::new(T0)),
+            clock: Arc::new(FakeClock::new(T0)),
             mail: MemoryNotifier::new(),
             _dir: dir,
         }
     }
 
     fn set_now(&self, now: i64) {
-        self.clock.store(now, Ordering::SeqCst);
+        self.clock.set(now);
     }
 
     fn now(&self) -> i64 {
-        self.clock.load(Ordering::SeqCst)
+        self.clock.unix()
     }
 
     async fn post(&self, request: Request<Body>) -> (StatusCode, Vec<u8>) {
-        let clock = Arc::clone(&self.clock);
         let router = serve::router_with_clock(
             self.config.clone(),
-            Arc::new(move || clock.load(Ordering::SeqCst)),
+            Arc::clone(&self.clock) as Arc<dyn Clock>,
         );
         let response = router.oneshot(request).await.expect("réponse");
         let status = response.status();
@@ -486,7 +485,7 @@ async fn a_report_without_a_database_is_a_silent_404_and_creates_nothing() {
     let dir = tempfile::tempdir().expect("tempdir");
     let config = config(dir.path());
     let body = serde_json::to_vec(&report(1, T0, json!([]))).expect("json");
-    let response = serve::router_with_clock(config.clone(), Arc::new(|| T0))
+    let response = serve::router_with_clock(config.clone(), Arc::new(FakeClock::new(T0)))
         .oneshot(signed("site-a", &key, body))
         .await
         .expect("réponse");

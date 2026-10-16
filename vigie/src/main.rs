@@ -16,6 +16,7 @@ use clap::{Parser, Subcommand};
 use ed25519_dalek::VerifyingKey;
 
 use vigie::alert::{self, Notifier, SmtpNotifier};
+use vigie::clock::{Clock, SystemClock};
 use vigie::config::{self, ConfigError};
 use vigie::device::{self, PAIRING_TTL};
 use vigie::finding::Severity;
@@ -23,7 +24,7 @@ use vigie::store::{
     AckOutcome, Agent, KeyOutcome, RevokeOutcome, SCHEMA_AGENTS, SCHEMA_DEVICES, SCHEMA_INCIDENTS,
     Store,
 };
-use vigie::{human_age, iso_utc, now, serve, tick};
+use vigie::{human_age, iso_utc, serve, tick};
 
 /// Code de retour d'une configuration invalide ou introuvable.
 const EXIT_CONFIG: u8 = 2;
@@ -154,18 +155,20 @@ fn main() -> ExitCode {
 fn run(cli: Cli) -> anyhow::Result<()> {
     let path = config::resolve_path(cli.config)?;
     let config = config::load(&path)?;
+    // Une seule lecture de l'heure par commande (`clock.rs`).
+    let now = SystemClock.unix();
     match cli.command {
         Command::Serve { ip, port } => serve::run(config, ip, port),
-        Command::Tick => tick::run(&config, now()),
-        Command::Check { site, once: _ } => check(&config, &site),
-        Command::Status => status(&config),
-        Command::Site { action } => site(&config, action),
-        Command::Ack { id } => ack(&config, id),
-        Command::Device { action } => device(&config, action),
+        Command::Tick => tick::run(&config, now),
+        Command::Check { site, once: _ } => check(&config, &site, now),
+        Command::Status => status(&config, now),
+        Command::Site { action } => site(&config, action, now),
+        Command::Ack { id } => ack(&config, id, now),
+        Command::Device { action } => device(&config, action, now),
         Command::TestAlert => {
             let notifier = SmtpNotifier::new(config.alerts.clone());
             notifier
-                .send(&alert::test_email(now()), Duration::from_secs(30))
+                .send(&alert::test_email(now), Duration::from_secs(30))
                 .map_err(anyhow::Error::msg)?;
             println!("e-mail de test envoyé à {}", config.alerts.to);
             Ok(())
@@ -173,8 +176,8 @@ fn run(cli: Cli) -> anyhow::Result<()> {
     }
 }
 
-fn check(config: &config::Config, site: &str) -> anyhow::Result<()> {
-    let report = tick::check_once(config, site, &tick::Options::default())?;
+fn check(config: &config::Config, site: &str, now: i64) -> anyhow::Result<()> {
+    let report = tick::check_once(config, site, &tick::Options::default(), now)?;
     let mut alarming = 0;
     for (kind, result) in report {
         match result {
@@ -251,8 +254,7 @@ fn agent_state(agent: Option<&Agent>, now: i64) -> String {
     }
 }
 
-fn site(config: &config::Config, action: SiteAction) -> anyhow::Result<()> {
-    let now = now();
+fn site(config: &config::Config, action: SiteAction, now: i64) -> anyhow::Result<()> {
     match action {
         SiteAction::List => {
             let agents = read_agents(config)?;
@@ -323,9 +325,9 @@ fn site(config: &config::Config, action: SiteAction) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn ack(config: &config::Config, id: i64) -> anyhow::Result<()> {
+fn ack(config: &config::Config, id: i64, now: i64) -> anyhow::Result<()> {
     let mut store = Store::open(&config.database)?;
-    match store.ack(id, now())? {
+    match store.ack(id, now)? {
         AckOutcome::Acked => println!("incident {id} acquitté : plus de rappel"),
         AckOutcome::AlreadyAcked => println!("incident {id} déjà acquitté"),
         AckOutcome::AlreadyClosed => println!("incident {id} déjà clos"),
@@ -334,8 +336,7 @@ fn ack(config: &config::Config, id: i64) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn device(config: &config::Config, action: DeviceAction) -> anyhow::Result<()> {
-    let now = now();
+fn device(config: &config::Config, action: DeviceAction, now: i64) -> anyhow::Result<()> {
     match action {
         DeviceAction::Pair { name } => {
             let Some(api) = &config.api else {
@@ -420,8 +421,7 @@ fn device(config: &config::Config, action: DeviceAction) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn status(config: &config::Config) -> anyhow::Result<()> {
-    let now = now();
+fn status(config: &config::Config, now: i64) -> anyhow::Result<()> {
     // Lecteur : `status` ne crée pas la base et ne la migre pas.
     let store = Store::open_read(&config.database)?;
     let last_tick = match &store {
