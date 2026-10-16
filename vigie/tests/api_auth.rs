@@ -10,6 +10,9 @@ use axum::http::{Request, StatusCode};
 use http_body_util::BodyExt;
 use tower::ServiceExt;
 
+#[path = "support/veilleur.rs"]
+mod veilleur;
+
 use vigie::device::{self, PAIRING_TTL};
 use vigie::serve;
 use vigie::store::Store;
@@ -35,7 +38,7 @@ impl Reply {
 }
 
 impl Veilleur {
-    /// Base migrée en v5, comme après le démarrage de `serve`.
+    /// Base migrée au dernier schéma, comme après le démarrage de `serve`.
     fn new() -> Self {
         let dir = tempfile::tempdir().expect("tempdir");
         let db = dir.path().join("vigie.db");
@@ -79,8 +82,7 @@ impl Veilleur {
     async fn send(&self, request: Request<Body>) -> Reply {
         let clock = Arc::clone(&self.clock);
         let router = serve::router_with_clock(
-            self.db.clone(),
-            vec!["site-a".into()],
+            veilleur::config(self.db.clone()),
             Arc::new(move || clock.load(Ordering::SeqCst)),
         );
         let response = router.oneshot(request).await.expect("response");

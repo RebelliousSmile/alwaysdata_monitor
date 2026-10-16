@@ -18,7 +18,7 @@ use crate::checks::{self, CheckError, CheckKind, Ctx, heartbeat};
 use crate::config::{Config, Site};
 use crate::finding::Finding;
 use crate::http::{Http, REQUEST_TIMEOUT, Trust};
-use crate::store::{AGENT_PREFIX, Store};
+use crate::store::{AGENT_PREFIX, RunRecord, Store};
 
 #[derive(Debug, Clone)]
 pub struct Options {
@@ -87,10 +87,14 @@ pub fn run_with(
             break;
         }
         for kind in due {
-            match kind.run(site, &ctx) {
-                Ok(findings) => {
+            let started = Instant::now();
+            match kind.observe(site, &ctx) {
+                Ok(checks::Outcome { findings, observed }) => {
                     summary.checks_run += 1;
-                    store.record_run(&site.id, kind.name(), now)?;
+                    let record = RunRecord::concluded(&findings)
+                        .with_duration(started.elapsed())
+                        .with_observed(observed.to_json());
+                    store.record_result(&site.id, kind.name(), now, &record)?;
                     store.reconcile(&site.id, kind.name(), &findings, now)?;
                     if kind == CheckKind::Content && checks::is_unreachable(&findings) {
                         // Les autres contrôles ne concluraient rien.
@@ -104,7 +108,8 @@ pub fn run_with(
                         // Rejoué au passage suivant.
                         break;
                     }
-                    store.record_run(&site.id, kind.name(), now)?;
+                    let record = RunRecord::failed(&message).with_duration(started.elapsed());
+                    store.record_result(&site.id, kind.name(), now, &record)?;
                 }
             }
         }
@@ -115,6 +120,12 @@ pub fn run_with(
     for site in &config.sites {
         if let Some(agent) = agents.iter().find(|a| a.site == site.id) {
             let findings = heartbeat::evaluate(site, agent, now);
+            store.record_result(
+                &site.id,
+                heartbeat::NAME,
+                now,
+                &RunRecord::concluded(&findings),
+            )?;
             store.reconcile(&site.id, heartbeat::NAME, &findings, now)?;
         }
     }

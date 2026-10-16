@@ -31,7 +31,20 @@ Sur le veilleur, toujours appeler le binaire par son chemin complet.
 | `~/vigie/bin/vigie test-alert` | Envoie un e-mail de test par le relais SMTP configuré |
 
 `/health` répond 200 si le dernier `tick` date de moins de 3 minutes, sinon 503.
-Appairage, jetons et codes de réponse de `/api/v1` : [`docs/api-console.md`](./docs/api-console.md).
+Routes de l'API de la console, toutes sauf `pair` derrière `Authorization: Bearer <jeton>` :
+
+| Route | Rôle |
+| ----- | ---- |
+| `POST /api/v1/pair` | Échange un code d'appairage contre le jeton de l'appareil |
+| `GET /api/v1/overview` | Sites triés par état (non conforme, aveugle, à vérifier, première lecture, OK), constat le plus grave, dernière lecture |
+| `GET /api/v1/sites/{id}` | Incidents ouverts, contrôles avec leur dernier résultat, relevé de l'agent |
+| `GET /api/v1/sites/{id}/incidents` | Incidents fermés depuis 30 jours |
+| `GET /api/v1/incidents/{id}` | Détail d'un incident, avec les dates d'envoi des e-mails |
+| `POST /api/v1/incidents/{id}/ack` | Comme `vigie ack` ; 409 si l'incident est fermé |
+| `GET /api/v1/settings` | Sites et fréquences, destinataire masqué, appareils |
+| `DELETE /api/v1/devices/self` | L'appareil appelant se révoque (204) |
+
+Schémas JSON, état d'un site et codes de réponse : [`docs/api-console.md`](./docs/api-console.md).
 
 ## Rapports des agents
 

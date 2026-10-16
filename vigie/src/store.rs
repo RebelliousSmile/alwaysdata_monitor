@@ -91,6 +91,14 @@ const MIGRATIONS: &[&str] = &[
         used_at INTEGER,
         device_id INTEGER REFERENCES devices(id)
     );",
+    // 6 : résultat du dernier passage de chaque contrôle, pour la console :
+    // `ok`, `finding` ou `error`, gravité et détail du constat le plus grave,
+    // durée, valeurs observées en JSON. NULL pour un passage antérieur.
+    "ALTER TABLE check_runs ADD COLUMN result TEXT;
+    ALTER TABLE check_runs ADD COLUMN severity TEXT;
+    ALTER TABLE check_runs ADD COLUMN detail TEXT;
+    ALTER TABLE check_runs ADD COLUMN duration_ms INTEGER;
+    ALTER TABLE check_runs ADD COLUMN observed TEXT;",
 ];
 
 /// Version de schéma à partir de laquelle les incidents existent.
@@ -101,6 +109,8 @@ pub const SCHEMA_AGENTS: usize = 3;
 pub const SCHEMA_BASELINE: usize = 4;
 /// Version de schéma à partir de laquelle les appareils de la console existent.
 pub const SCHEMA_DEVICES: usize = 5;
+/// Version de schéma à partir de laquelle le résultat des passages existe.
+pub const SCHEMA_CHECK_RESULTS: usize = 6;
 
 /// « Vu le » d'un appareil n'est réécrit qu'après ce délai, en secondes.
 pub const SEEN_PERIOD: i64 = 60;
@@ -125,6 +135,112 @@ pub struct Incident {
     pub opened_at: i64,
     pub closed_at: Option<i64>,
     pub acked_at: Option<i64>,
+    pub open_notified_at: Option<i64>,
+    pub close_notified_at: Option<i64>,
+    pub last_reminder_at: Option<i64>,
+}
+
+/// Issue du dernier passage d'un contrôle.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RunResult {
+    /// Concluant, sans constat.
+    Ok,
+    /// Concluant, avec au moins un constat.
+    Finding,
+    /// Non concluant.
+    Error,
+}
+
+impl RunResult {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Ok => "ok",
+            Self::Finding => "finding",
+            Self::Error => "error",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "ok" => Some(Self::Ok),
+            "finding" => Some(Self::Finding),
+            "error" => Some(Self::Error),
+            _ => None,
+        }
+    }
+}
+
+/// Résultat d'un passage, à enregistrer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RunRecord {
+    pub result: RunResult,
+    /// Gravité du constat le plus grave.
+    pub severity: Option<Severity>,
+    /// Détail du constat le plus grave, ou raison de l'échec.
+    pub detail: Option<String>,
+    pub duration_ms: Option<i64>,
+    /// Valeurs observées, en JSON.
+    pub observed: Option<String>,
+}
+
+impl RunRecord {
+    /// Passage concluant : le constat le plus grave le résume.
+    pub fn concluded(findings: &[Finding]) -> Self {
+        // `max_by_key` garde le dernier des ex æquo : on veut le premier.
+        let worst = findings
+            .iter()
+            .fold(None::<&Finding>, |kept, f| match kept {
+                Some(kept) if kept.severity >= f.severity => Some(kept),
+                _ => Some(f),
+            });
+        Self {
+            result: if worst.is_some() {
+                RunResult::Finding
+            } else {
+                RunResult::Ok
+            },
+            severity: worst.map(|f| f.severity),
+            detail: worst.map(|f| f.detail.clone()),
+            duration_ms: None,
+            observed: None,
+        }
+    }
+
+    /// Passage non concluant.
+    pub fn failed(message: &str) -> Self {
+        Self {
+            result: RunResult::Error,
+            severity: None,
+            detail: Some(message.to_owned()),
+            duration_ms: None,
+            observed: None,
+        }
+    }
+
+    pub fn with_duration(mut self, duration: Duration) -> Self {
+        self.duration_ms = Some(i64::try_from(duration.as_millis()).unwrap_or(i64::MAX));
+        self
+    }
+
+    pub fn with_observed(mut self, observed: Option<String>) -> Self {
+        self.observed = observed;
+        self
+    }
+}
+
+/// Dernier passage d'un contrôle, tel qu'enregistré.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CheckRun {
+    pub site: String,
+    pub check_name: String,
+    pub last_run: i64,
+    /// `None` pour un passage antérieur au schéma 6, ou marqué sans résultat.
+    pub result: Option<RunResult>,
+    pub severity: Option<Severity>,
+    pub detail: Option<String>,
+    pub duration_ms: Option<i64>,
+    /// Valeurs observées, en JSON.
+    pub observed: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -256,8 +372,8 @@ fn agent_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Agent> {
     })
 }
 
-const INCIDENT_COLUMNS: &str =
-    "id, key, site, check_name, severity, detail, opened_at, closed_at, acked_at";
+const INCIDENT_COLUMNS: &str = "id, key, site, check_name, severity, detail, opened_at, closed_at,
+     acked_at, open_notified_at, close_notified_at, last_reminder_at";
 
 fn incident_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Incident> {
     let severity: String = row.get(4)?;
@@ -273,7 +389,55 @@ fn incident_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Incident> {
         opened_at: row.get(6)?,
         closed_at: row.get(7)?,
         acked_at: row.get(8)?,
+        open_notified_at: row.get(9)?,
+        close_notified_at: row.get(10)?,
+        last_reminder_at: row.get(11)?,
     })
+}
+
+fn check_run_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CheckRun> {
+    let result: Option<String> = row.get(3)?;
+    let severity: Option<String> = row.get(4)?;
+    Ok(CheckRun {
+        site: row.get(0)?,
+        check_name: row.get(1)?,
+        last_run: row.get(2)?,
+        result: result.as_deref().and_then(RunResult::parse),
+        severity: severity.as_deref().and_then(Severity::parse),
+        detail: row.get(5)?,
+        duration_ms: row.get(6)?,
+        observed: row.get(7)?,
+    })
+}
+
+/// Enregistre le dernier passage d'un contrôle, à la place du précédent.
+fn record_result_in(
+    conn: &Connection,
+    site: &str,
+    check: &str,
+    now: i64,
+    record: &RunRecord,
+) -> Result<()> {
+    conn.execute(
+        "INSERT INTO check_runs
+           (site, check_name, last_run, result, severity, detail, duration_ms, observed)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+         ON CONFLICT (site, check_name) DO UPDATE SET last_run = excluded.last_run,
+           result = excluded.result, severity = excluded.severity,
+           detail = excluded.detail, duration_ms = excluded.duration_ms,
+           observed = excluded.observed",
+        params![
+            site,
+            check,
+            now,
+            record.result.as_str(),
+            record.severity.map(Severity::as_str),
+            record.detail,
+            record.duration_ms,
+            record.observed
+        ],
+    )?;
+    Ok(())
 }
 
 /// Historique des passages conservé, en secondes.
@@ -416,13 +580,37 @@ impl Store {
             .optional()?)
     }
 
+    /// Marque un passage sans résultat connu (préparation des tests, reprise).
     pub fn record_run(&mut self, site: &str, check: &str, now: i64) -> Result<()> {
         self.conn.execute(
             "INSERT INTO check_runs (site, check_name, last_run) VALUES (?1, ?2, ?3)
-             ON CONFLICT (site, check_name) DO UPDATE SET last_run = excluded.last_run",
+             ON CONFLICT (site, check_name) DO UPDATE SET last_run = excluded.last_run,
+               result = NULL, severity = NULL, detail = NULL, duration_ms = NULL,
+               observed = NULL",
             params![site, check, now],
         )?;
         Ok(())
+    }
+
+    /// Enregistre le dernier passage d'un contrôle et son résultat.
+    pub fn record_result(
+        &mut self,
+        site: &str,
+        check: &str,
+        now: i64,
+        record: &RunRecord,
+    ) -> Result<()> {
+        record_result_in(&self.conn, site, check, now, record)
+    }
+
+    /// Dernier passage de chaque contrôle, avec son résultat, par site.
+    pub fn check_results(&self) -> Result<Vec<CheckRun>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT site, check_name, last_run, result, severity, detail, duration_ms, observed
+             FROM check_runs ORDER BY site, check_name",
+        )?;
+        let rows = stmt.query_map([], check_run_from_row)?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
     /// Dernier passage de chaque contrôle, par site.
@@ -492,6 +680,16 @@ impl Store {
 
     pub fn open_incidents(&self) -> Result<Vec<Incident>> {
         self.incidents_where("closed_at IS NULL", &[])
+    }
+
+    /// Incidents d'un site clos depuis `since`, les plus récents d'abord.
+    pub fn closed_incidents(&self, site: &str, since: i64) -> Result<Vec<Incident>> {
+        let mut found = self.incidents_where(
+            "site = ?1 AND closed_at IS NOT NULL AND closed_at >= ?2",
+            &[&site, &since],
+        )?;
+        found.sort_by(|a, b| b.closed_at.cmp(&a.closed_at).then(b.id.cmp(&a.id)));
+        Ok(found)
     }
 
     /// E-mails d'ouverture à envoyer, y compris pour un incident déjà clos :
@@ -770,15 +968,32 @@ impl Store {
                 }
             }
         }
+        // Contrôles touchés : ceux du rapport, ceux qui ont un incident
+        // ouvert, et ceux déjà passés, pour qu'un contrôle redevenu sain
+        // garde un résultat « ok ». L'intégrité dès qu'une référence existe.
         let mut checks: Vec<String> = {
             let mut stmt = tx.prepare(
                 "SELECT DISTINCT check_name FROM incidents
-                 WHERE site = ?1 AND closed_at IS NULL AND check_name LIKE 'agent:%'",
+                 WHERE site = ?1 AND closed_at IS NULL AND check_name LIKE 'agent:%'
+                 UNION
+                 SELECT check_name FROM check_runs
+                 WHERE site = ?1 AND check_name LIKE 'agent:%'",
             )?;
             let rows = stmt.query_map([site], |row| row.get(0))?;
             rows.collect::<rusqlite::Result<_>>()?
         };
         checks.extend(findings.iter().map(|f| f.check.clone()));
+        let has_baseline: bool = tx
+            .query_row(
+                "SELECT 1 FROM baselines WHERE site = ?1",
+                [site],
+                |_| Ok(()),
+            )
+            .optional()?
+            .is_some();
+        if has_baseline {
+            checks.push(facts::check_name());
+        }
         checks.sort();
         checks.dedup();
         for check in &checks {
@@ -788,6 +1003,7 @@ impl Store {
                 .cloned()
                 .collect();
             reconcile_in(&tx, site, check, &of_check, now)?;
+            record_result_in(&tx, site, check, now, &RunRecord::concluded(&of_check))?;
         }
         reconcile_in(&tx, site, crate::checks::heartbeat::NAME, &[], now)?;
         tx.commit()?;
@@ -1073,7 +1289,7 @@ mod tests {
             .expect("données v4");
         }
         let store = Store::open(&path).expect("open");
-        assert_eq!(store.schema_version().expect("version"), SCHEMA_DEVICES);
+        assert_eq!(store.schema_version().expect("version"), MIGRATIONS.len());
         assert_eq!(store.last_tick().expect("tick"), Some(1000));
         let open = store.open_incidents().expect("incidents");
         assert_eq!(open.len(), 1);
@@ -1085,6 +1301,75 @@ mod tests {
             Some(960)
         );
         assert!(store.devices().expect("devices").is_empty());
+    }
+
+    #[test]
+    fn upgrades_a_filled_v5_database_without_loss() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("vigie.db");
+        {
+            let conn = Connection::open(&path).expect("raw");
+            for migration in &MIGRATIONS[..SCHEMA_DEVICES] {
+                conn.execute_batch(migration).expect("migration");
+            }
+            conn.pragma_update(None, "user_version", SCHEMA_DEVICES as i64)
+                .expect("v5");
+            conn.execute_batch(
+                "INSERT INTO check_runs (site, check_name, last_run) VALUES ('site-a', 'content', 900);
+                 INSERT INTO devices (name, token_hash, created_at) VALUES ('pc', zeroblob(32), 800);",
+            )
+            .expect("données v5");
+        }
+        let store = Store::open(&path).expect("open");
+        assert_eq!(
+            store.schema_version().expect("version"),
+            SCHEMA_CHECK_RESULTS
+        );
+        let runs = store.check_results().expect("runs");
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].last_run, 900);
+        // Passage antérieur : aucun résultat inventé.
+        assert_eq!(runs[0].result, None);
+        assert_eq!(runs[0].severity, None);
+        assert_eq!(runs[0].duration_ms, None);
+        assert_eq!(runs[0].observed, None);
+        assert_eq!(store.devices().expect("devices").len(), 1);
+    }
+
+    #[test]
+    fn records_the_result_of_a_run() {
+        let (_dir, mut store) = temp_store();
+        let findings = [
+            Finding::new("site-a", "exposed", Severity::Warning, "a", "premier"),
+            Finding::new("site-a", "exposed", Severity::Critical, "b", "grave"),
+            Finding::new("site-a", "exposed", Severity::Critical, "c", "grave aussi"),
+        ];
+        let record = RunRecord::concluded(&findings)
+            .with_duration(Duration::from_millis(42))
+            .with_observed(Some("{\"http_status\":200}".into()));
+        store
+            .record_result("site-a", "exposed", 100, &record)
+            .expect("record");
+        let run = &store.check_results().expect("runs")[0];
+        assert_eq!(run.result, Some(RunResult::Finding));
+        assert_eq!(run.severity, Some(Severity::Critical));
+        assert_eq!(run.detail.as_deref(), Some("grave"));
+        assert_eq!(run.duration_ms, Some(42));
+        assert_eq!(run.observed.as_deref(), Some("{\"http_status\":200}"));
+
+        store
+            .record_result("site-a", "exposed", 200, &RunRecord::failed("délai"))
+            .expect("failed");
+        let run = &store.check_results().expect("runs")[0];
+        assert_eq!(run.last_run, 200);
+        assert_eq!(run.result, Some(RunResult::Error));
+        assert_eq!(run.severity, None);
+        assert_eq!(run.detail.as_deref(), Some("délai"));
+        assert_eq!(run.observed, None);
+
+        store.record_run("site-a", "exposed", 300).expect("run");
+        let run = &store.check_results().expect("runs")[0];
+        assert_eq!((run.last_run, run.result), (300, None));
     }
 
     #[test]
