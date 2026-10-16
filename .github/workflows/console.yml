@@ -1,0 +1,68 @@
+name: console
+
+# Console seulement (vigie/app) : le veilleur a son propre workflow.
+on:
+  push:
+    paths:
+      - "vigie/app/**"
+      - ".github/workflows/console.yml"
+  pull_request:
+    paths:
+      - "vigie/app/**"
+      - ".github/workflows/console.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: vigie/app
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      # Bibliothèques du webview Linux, nécessaires pour compiler tauri.
+      - name: dépendances système (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+      # Version lue dans le champ packageManager de package.json.
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+        with:
+          package_json_file: vigie/app/package.json
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "20"
+          cache: pnpm
+          cache-dependency-path: vigie/app/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm test
+      # generate_context! embarque dist : il doit exister avant cargo.
+      - run: pnpm exec vite build
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master
+        with:
+          toolchain: "1.93.0" # même version que vigie/app/src-tauri/rust-toolchain.toml
+          components: clippy, rustfmt
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            vigie/app/src-tauri/target
+          key: console-${{ runner.os }}-${{ hashFiles('vigie/app/src-tauri/Cargo.lock') }}
+      - run: cargo fmt --check
+        working-directory: vigie/app/src-tauri
+      - run: cargo clippy --locked --all-targets -- -D warnings
+        working-directory: vigie/app/src-tauri
+      - run: cargo test --locked --all-targets
+        working-directory: vigie/app/src-tauri
