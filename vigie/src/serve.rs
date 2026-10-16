@@ -15,7 +15,7 @@
 //! les URL ou sonde le point d'entrée.
 
 use std::net::{IpAddr, SocketAddr};
-use std::path::PathBuf;
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -28,6 +28,7 @@ use axum::http::header::CONTENT_LENGTH;
 use axum::routing::{get, post};
 use serde::Serialize;
 
+use crate::config::Config;
 use crate::ingest::{self, HEADER_SIGNATURE, HEADER_SITE, Reason, Refusal};
 use crate::store::Store;
 
@@ -79,25 +80,33 @@ pub fn health(last_tick: Option<i64>, now: i64) -> (StatusCode, Health) {
 pub type Clock = Arc<dyn Fn() -> i64 + Send + Sync>;
 
 pub(crate) struct AppState {
-    pub(crate) database: PathBuf,
-    /// Identifiants des sites de la configuration.
-    pub(crate) sites: Vec<String>,
+    /// Configuration lue au démarrage : la console en publie une partie.
+    pub(crate) config: Config,
+    /// Identifiants des sites de la configuration, dans son ordre.
+    pub(crate) site_ids: Vec<String>,
     pub(crate) clock: Clock,
 }
 
-pub fn router(database: PathBuf, sites: Vec<String>) -> Router {
-    router_with_clock(database, sites, Arc::new(crate::now))
+impl AppState {
+    pub(crate) fn database(&self) -> &Path {
+        &self.config.database
+    }
 }
 
-pub fn router_with_clock(database: PathBuf, sites: Vec<String>, clock: Clock) -> Router {
+pub fn router(config: Config) -> Router {
+    router_with_clock(config, Arc::new(crate::now))
+}
+
+pub fn router_with_clock(config: Config, clock: Clock) -> Router {
+    let site_ids = config.sites.iter().map(|s| s.id.clone()).collect();
     Router::new()
         .route("/health", get(health_handler).fallback(not_found))
         .route("/r/v1/report", post(report_handler).fallback(not_found))
         .merge(crate::api::routes())
         .fallback(not_found)
         .with_state(Arc::new(AppState {
-            database,
-            sites,
+            config,
+            site_ids,
             clock,
         }))
 }
@@ -107,7 +116,7 @@ pub(crate) async fn not_found() -> StatusCode {
 }
 
 async fn health_handler(State(state): State<Arc<AppState>>) -> (StatusCode, Json<Health>) {
-    let database = state.database.clone();
+    let database = state.database().to_path_buf();
     let last = tokio::task::spawn_blocking(move || match Store::open_read(&database)? {
         Some(store) => store.last_tick(),
         None => Ok(None),
@@ -195,8 +204,8 @@ async fn report_handler(State(state): State<Arc<AppState>>, request: Request) ->
     let task_state = Arc::clone(&state);
     let outcome = tokio::task::spawn_blocking(move || {
         ingest::ingest(
-            &task_state.database,
-            &task_state.sites,
+            task_state.database(),
+            &task_state.site_ids,
             task_site.as_deref(),
             signature.as_deref(),
             &bytes,
@@ -221,15 +230,15 @@ async fn report_handler(State(state): State<Arc<AppState>>, request: Request) ->
     }
 }
 
-pub fn run(database: PathBuf, sites: Vec<String>, ip: IpAddr, port: u16) -> Result<()> {
+pub fn run(config: Config, ip: IpAddr, port: u16) -> Result<()> {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .context("démarrage du runtime tokio")?;
     // Une base existante est migrée dès le démarrage, sans attendre le
     // prochain `tick` : `/api/v1` en a besoin. `serve` ne crée pas la base.
-    if database.is_file()
-        && let Err(err) = Store::open(&database)
+    if config.database.is_file()
+        && let Err(err) = Store::open(&config.database)
     {
         log::error!("migration de la base au démarrage impossible : {err:#}");
     }
@@ -239,7 +248,7 @@ pub fn run(database: PathBuf, sites: Vec<String>, ip: IpAddr, port: u16) -> Resu
             .await
             .with_context(|| format!("écoute sur {addr} impossible"))?;
         log::info!("serve à l'écoute sur {addr}");
-        axum::serve(listener, router(database, sites))
+        axum::serve(listener, router(config))
             .with_graceful_shutdown(shutdown_signal())
             .await
             .context("serveur HTTP")
@@ -272,10 +281,38 @@ async fn shutdown_signal() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
+
     use axum::body::Body;
     use axum::http::Request;
     use http_body_util::BodyExt;
     use tower::ServiceExt;
+
+    use crate::config::{Alerts, Site, SiteKind};
+
+    fn config(database: PathBuf) -> Config {
+        Config {
+            alerts: Alerts {
+                to: "alertes@example.org".into(),
+                from: "vigie@example.org".into(),
+                smtp_host: "smtp.example.org".into(),
+                smtp_port: 587,
+                smtp_user: None,
+                password_file: database.with_file_name("smtp-password"),
+            },
+            database,
+            api: None,
+            sites: vec![Site {
+                id: "site-a".into(),
+                url: "https://site-a.example.org/".into(),
+                kind: SiteKind::Generic,
+                keyword_url: None,
+                keyword: None,
+                interval: 300,
+                agent_silence: 900,
+            }],
+        }
+    }
 
     #[test]
     fn health_thresholds() {
@@ -294,7 +331,7 @@ mod tests {
     }
 
     async fn send(database: PathBuf, request: Request<Body>) -> (StatusCode, Vec<u8>) {
-        let response = router(database, vec!["site-a".into()])
+        let response = router(config(database))
             .oneshot(request)
             .await
             .expect("response");

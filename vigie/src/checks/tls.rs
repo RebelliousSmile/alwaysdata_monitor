@@ -11,14 +11,14 @@ use rustls::pki_types::ServerName;
 use rustls::{ClientConfig, ClientConnection};
 use url::{Host, Url};
 
-use super::{CheckError, CheckKind, Ctx};
+use super::{CheckError, CheckKind, Ctx, Observed, Outcome};
 use crate::config::Site;
 use crate::finding::{Finding, Severity};
 
 const WARNING_DAYS: i64 = 14;
 const CRITICAL_DAYS: i64 = 3;
 
-pub fn run(site: &Site, ctx: &Ctx) -> Result<Vec<Finding>, CheckError> {
+pub fn run(site: &Site, ctx: &Ctx) -> Result<Outcome, CheckError> {
     let url =
         Url::parse(&site.url).map_err(|err| CheckError::new(format!("URL illisible : {err}")))?;
     let port = url.port_or_known_default().unwrap_or(443);
@@ -29,11 +29,14 @@ pub fn run(site: &Site, ctx: &Ctx) -> Result<Vec<Finding>, CheckError> {
     let leaf = match handshake(addr, server_name, ctx) {
         Ok(leaf) => leaf,
         Err(Handshake::Refused(err)) => {
-            return Ok(vec![finding(
-                Severity::Critical,
-                "invalid",
-                format!("certificat refusé : {err}"),
-            )]);
+            return Ok(Outcome {
+                findings: vec![finding(
+                    Severity::Critical,
+                    "invalid",
+                    format!("certificat refusé : {err}"),
+                )],
+                observed: Observed::default(),
+            });
         }
         Err(Handshake::Io(err)) => return Err(err),
     };
@@ -45,10 +48,18 @@ pub fn run(site: &Site, ctx: &Ctx) -> Result<Vec<Finding>, CheckError> {
         "certificat valable jusqu'au {} ({days} j)",
         crate::iso_utc(not_after)
     );
-    Ok(match days {
+    let findings = match days {
         ..CRITICAL_DAYS => vec![finding(Severity::Critical, "expiry", detail)],
         CRITICAL_DAYS..WARNING_DAYS => vec![finding(Severity::Warning, "expiry", detail)],
         _ => Vec::new(),
+    };
+    // L'expiration est remontée même quand elle est lointaine.
+    Ok(Outcome {
+        findings,
+        observed: Observed {
+            tls_not_after: Some(not_after),
+            ..Observed::default()
+        },
     })
 }
 

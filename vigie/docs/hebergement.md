@@ -22,6 +22,7 @@ est public.
 | sodium sur le site A | **Fait** le 2026-10-15 : PHP 8.3.35 en ligne de commande (`php -r 'echo PHP_VERSION;'`), `sodium` dans `php -m` ; le CLI affiche aussi `Warning: Module "intl" is already loaded` à chaque lancement |
 | Sortie IPv4 et IPv6 du site A | **Fait** le 2026-10-15 : `curl -4` et `curl -6` vers un site externe en 200 depuis le compte du site A |
 | `/health` en IPv4 et IPv6 depuis le poste | **Fait** le 2026-10-15 : `curl -4` et `curl -6` en 200 |
+| API de la console (schéma 6) | **En attente** : `[api] public_url` à ajouter dans `config.toml`, puis déploiement par `deploy.mjs` et vérifications de [API de la console](#api-de-la-console) |
 
 ## Installation
 
@@ -134,6 +135,55 @@ $ curl --url smtp://smtp-<compte>.alwaysdata.net:587 --ssl-reqd \
     --netrc-file ~/vigie/smtp-netrc \
     --mail-from <expéditeur> --mail-rcpt <destinataire> --upload-file test.eml
 ```
+
+## API de la console
+
+Caddy relaie déjà tous les chemins vers `serve` : l'API `/api/v1` n'y demande
+rien. Elle demande la section `[api]` dans `~vigie/vigie/config.toml`, avec
+l'adresse publique du veilleur, telle que la console l'appellera :
+
+```toml
+[api]
+public_url = "https://<sous-domaine>"
+```
+
+`public_url` entre dans le lien d'appairage ; sans elle, `device pair` est
+refusé, mais `serve` et `tick` tournent normalement. Au démarrage, `serve`
+applique les migrations 5 (appareils) et 6 (résultat des passages) ; les
+rapports d'agent et les alertes continuent sans interruption.
+
+Après le déploiement, depuis le poste :
+
+```console
+$ curl -s -o /dev/null -w '%{http_code}\n' https://<sous-domaine>/api/v1/overview
+401
+$ curl -s -o /dev/null -w '%{http_code}\n' https://<sous-domaine>/health
+200
+$ ssh vigie@<vps> ~/vigie/bin/vigie site list    # le rapport suivant de chaque agent est accepté
+```
+
+Appairer un appareil : toujours sous l'utilisateur du service, pour que la
+base reste à `vigie` en 0600 (en root, `device pair` créerait des fichiers
+WAL que `serve` ne pourrait plus écrire).
+
+```console
+$ ssh -t vigie@<vps> ~/vigie/bin/vigie device pair --name téléphone
+```
+
+Le code vaut 10 minutes et une seule fois. Le QR code est prévu pour un
+terminal à fond sombre ; sinon, coller le lien `vigie://pair?...` dans la
+console.
+
+Appareil perdu ou volé : le révoquer, son jeton est refusé dès la requête
+suivante, les autres appareils ne sont pas touchés.
+
+```console
+$ ssh vigie@<vps> ~/vigie/bin/vigie device list
+$ ssh vigie@<vps> ~/vigie/bin/vigie device revoke <id>
+```
+
+Contrat de l'API et correspondance avec les écrans :
+[`api-console.md`](./api-console.md).
 
 ## Cloisonnement
 

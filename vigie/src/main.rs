@@ -155,10 +155,7 @@ fn run(cli: Cli) -> anyhow::Result<()> {
     let path = config::resolve_path(cli.config)?;
     let config = config::load(&path)?;
     match cli.command {
-        Command::Serve { ip, port } => {
-            let sites = config.sites.iter().map(|s| s.id.clone()).collect();
-            serve::run(config.database, sites, ip, port)
-        }
+        Command::Serve { ip, port } => serve::run(config, ip, port),
         Command::Tick => tick::run(&config, now()),
         Command::Check { site, once: _ } => check(&config, &site),
         Command::Status => status(&config),
