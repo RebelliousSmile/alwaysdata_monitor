@@ -8,6 +8,8 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
+use crate::analysis::rules::{self, Rule};
+
 pub const ENV_CONFIG: &str = "VIGIE_CONFIG";
 
 #[derive(Debug, thiserror::Error)]
@@ -41,8 +43,40 @@ pub struct Config {
     /// commande n'est créée ni servie.
     pub commands: Option<Commands>,
     pub alerts: Alerts,
+    /// Règles de l'analyse de logs communes à tous les sites.
+    #[serde(default)]
+    pub logs: Logs,
     #[serde(default)]
     pub sites: Vec<Site>,
+}
+
+/// `[logs]` : règles par défaut à désactiver et règles ajoutées
+/// (`analysis/rules.rs`).
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Logs {
+    /// Identifiants de règles par défaut à ne pas appliquer.
+    #[serde(default)]
+    pub disable: Vec<String>,
+    #[serde(default)]
+    pub rules: Vec<Rule>,
+}
+
+/// `[sites.logs]` : analyse de logs propre au site. La source et le fuseau
+/// des logs (#1) y prendront place.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SiteLogs {
+    /// Le site est derrière un proxy (Cloudflare…) : `Entry.ip` est celle du
+    /// proxy, les règles de portée `ip` et le score par IP sont coupés.
+    #[serde(default)]
+    pub behind_proxy: bool,
+    /// Globs de chemins retirés de l'analyse (back-office).
+    #[serde(default)]
+    pub exclude: Vec<String>,
+    /// Règles ajoutées pour ce site seulement.
+    #[serde(default)]
+    pub rules: Vec<Rule>,
 }
 
 /// API de la console (`docs/api-console.md`).
@@ -162,6 +196,8 @@ pub struct Site {
     /// Sans effet tant que le site n'a pas de clé.
     #[serde(default = "default_agent_silence")]
     pub agent_silence: u64,
+    /// `[sites.logs]`, facultatif.
+    pub logs: Option<SiteLogs>,
 }
 
 fn default_interval() -> u64 {
@@ -409,6 +445,8 @@ impl Config {
                 api.public_url
             ));
         }
+        rules::compile_rules(&self.logs.disable, &self.logs.rules, &[])
+            .map_err(|err| format!("logs : {err}"))?;
         let mut seen = HashSet::new();
         for site in &self.sites {
             if !is_valid_id(&site.id) {
@@ -458,6 +496,10 @@ impl Config {
                     "agent_silence du site « {} » : {MIN_AGENT_SILENCE} s au moins (reçu : {})",
                     site.id, site.agent_silence
                 ));
+            }
+            if site.logs.is_some() {
+                rules::for_site(self, site)
+                    .map_err(|err| format!("logs du site « {} » : {err}", site.id))?;
             }
         }
         Ok(())

@@ -496,6 +496,7 @@ mod tests {
             database,
             api: None,
             commands: None,
+            logs: Default::default(),
             sites: vec![Site {
                 id: "site-a".into(),
                 url: "https://site-a.example.org/".into(),
@@ -505,6 +506,7 @@ mod tests {
                 keyword: None,
                 interval: 300,
                 agent_silence: 900,
+                logs: None,
             }],
         }
     }
