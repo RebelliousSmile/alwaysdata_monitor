@@ -37,10 +37,33 @@ struct Veilleur {
 struct Reply {
     status: StatusCode,
     cache_control: Option<String>,
+    request_id: Option<String>,
     body: Vec<u8>,
 }
 
 impl Reply {
+    /// Erreur au format commun : code attendu pour le statut, request_id
+    /// égal à l'en-tête `X-Request-Id`, aucune cause exposée.
+    fn assert_api_error(&self, context: &str) {
+        let code = match self.status.as_u16() {
+            401 => "unauthorized",
+            404 => "not_found",
+            409 => "conflict",
+            429 => "too_many_requests",
+            500 => "internal",
+            other => panic!("{context} : statut {other} sans code d'erreur"),
+        };
+        let json: serde_json::Value = serde_json::from_slice(&self.body).expect("json");
+        let error = json["error"].as_object().expect("error");
+        assert_eq!(error.len(), 3, "{context}");
+        assert_eq!(json["error"]["code"], code, "{context}");
+        assert_eq!(
+            json["error"]["request_id"].as_str(),
+            self.request_id.as_deref(),
+            "{context}"
+        );
+    }
+
     fn json(&self) -> Value {
         serde_json::from_slice(&self.body).expect("json")
     }
@@ -121,6 +144,11 @@ impl Veilleur {
             .get("cache-control")
             .and_then(|v| v.to_str().ok())
             .map(str::to_owned);
+        let request_id = response
+            .headers()
+            .get("x-request-id")
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_owned);
         let body = response
             .into_body()
             .collect()
@@ -131,6 +159,7 @@ impl Veilleur {
         Reply {
             status,
             cache_control,
+            request_id,
             body,
         }
     }
@@ -394,7 +423,7 @@ async fn a_site_with_an_agent_shows_its_report_and_agent_checks() {
 }
 
 #[tokio::test]
-async fn unknown_sites_and_incidents_get_an_empty_404() {
+async fn unknown_sites_and_incidents_get_a_404() {
     let v = Veilleur::new();
     let token = v.token("pc").await;
     for (method, path) in [
@@ -409,7 +438,7 @@ async fn unknown_sites_and_incidents_get_an_empty_404() {
     ] {
         let reply = v.call(method.clone(), path, &token).await;
         assert_eq!(reply.status, StatusCode::NOT_FOUND, "{method} {path}");
-        assert!(reply.body.is_empty(), "{method} {path}");
+        reply.assert_api_error(&format!("{method} {path}"));
     }
     // Sans jeton, toujours 401 : l'existence d'un site ne se devine pas.
     let reply = v
@@ -547,7 +576,7 @@ async fn acking_a_closed_incident_is_a_conflict_that_writes_nothing() {
         .call(Method::POST, &format!("/api/v1/incidents/{id}/ack"), &token)
         .await;
     assert_eq!(reply.status, StatusCode::CONFLICT);
-    assert!(reply.body.is_empty());
+    reply.assert_api_error("");
     assert_eq!(database_bytes(v.db()), before);
     assert_eq!(v.store().incident(id).unwrap().unwrap().acked_at, None);
 }
@@ -619,7 +648,7 @@ async fn a_device_revokes_itself_and_its_token_stops_working() {
 
     let reply = v.get("/api/v1/overview", &token).await;
     assert_eq!(reply.status, StatusCode::UNAUTHORIZED);
-    assert!(reply.body.is_empty());
+    reply.assert_api_error("");
     assert_eq!(
         v.call(Method::DELETE, "/api/v1/devices/self", &token)
             .await

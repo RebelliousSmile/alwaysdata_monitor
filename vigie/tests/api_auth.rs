@@ -28,10 +28,33 @@ struct Veilleur {
 struct Reply {
     status: StatusCode,
     cache_control: Option<String>,
+    request_id: Option<String>,
     body: Vec<u8>,
 }
 
 impl Reply {
+    /// Erreur au format commun : code attendu pour le statut, request_id
+    /// égal à l'en-tête `X-Request-Id`, aucune cause exposée.
+    fn assert_api_error(&self, context: &str) {
+        let code = match self.status.as_u16() {
+            401 => "unauthorized",
+            404 => "not_found",
+            409 => "conflict",
+            429 => "too_many_requests",
+            500 => "internal",
+            other => panic!("{context} : statut {other} sans code d'erreur"),
+        };
+        let json: serde_json::Value = serde_json::from_slice(&self.body).expect("json");
+        let error = json["error"].as_object().expect("error");
+        assert_eq!(error.len(), 3, "{context}");
+        assert_eq!(json["error"]["code"], code, "{context}");
+        assert_eq!(
+            json["error"]["request_id"].as_str(),
+            self.request_id.as_deref(),
+            "{context}"
+        );
+    }
+
     fn json(&self) -> serde_json::Value {
         serde_json::from_slice(&self.body).expect("json")
     }
@@ -92,6 +115,11 @@ impl Veilleur {
             .get("cache-control")
             .and_then(|v| v.to_str().ok())
             .map(str::to_owned);
+        let request_id = response
+            .headers()
+            .get("x-request-id")
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_owned);
         let body = response
             .into_body()
             .collect()
@@ -102,6 +130,7 @@ impl Veilleur {
         Reply {
             status,
             cache_control,
+            request_id,
             body,
         }
     }
@@ -181,7 +210,7 @@ async fn a_code_gives_a_token_once_and_the_token_opens_the_api() {
     // Rejoué : 401, aucun nouvel appareil, et le jeton remis reste valable.
     let replay = v.pair_code(&code).await;
     assert_eq!(replay.status, StatusCode::UNAUTHORIZED);
-    assert!(replay.body.is_empty());
+    replay.assert_api_error("");
     assert_eq!(v.device_count(), 1);
 
     let reply = v.overview(Some(&bearer(&token))).await;
@@ -209,7 +238,7 @@ async fn an_expired_code_gives_nothing() {
     v.advance(PAIRING_TTL);
     let reply = v.pair_code(&code).await;
     assert_eq!(reply.status, StatusCode::UNAUTHORIZED);
-    assert!(reply.body.is_empty());
+    reply.assert_api_error("");
     assert_eq!(v.device_count(), 0);
 }
 
@@ -222,7 +251,7 @@ async fn a_code_one_second_before_expiry_still_works() {
 }
 
 #[tokio::test]
-async fn bad_pairing_requests_get_the_same_empty_401() {
+async fn bad_pairing_requests_get_the_same_401() {
     let v = Veilleur::new();
     let code = v.pairing("pc");
     let oversized = format!(
@@ -243,7 +272,7 @@ async fn bad_pairing_requests_get_the_same_empty_401() {
     ] {
         let reply = v.pair(body.clone()).await;
         assert_eq!(reply.status, StatusCode::UNAUTHORIZED, "{body:.40}");
-        assert!(reply.body.is_empty(), "{body:.40}");
+        reply.assert_api_error(&format!("{body:.40}"));
     }
     assert_eq!(v.device_count(), 0);
     // Le code n'a pas été consommé par ces essais.
@@ -270,7 +299,7 @@ async fn overview_needs_an_active_token() {
     ] {
         let reply = v.overview(authorization.as_deref()).await;
         assert_eq!(reply.status, StatusCode::UNAUTHORIZED, "{authorization:?}");
-        assert!(reply.body.is_empty(), "{authorization:?}");
+        reply.assert_api_error(&format!("{authorization:?}"));
     }
     assert_eq!(
         v.overview(Some(&bearer(&token))).await.status,
@@ -288,7 +317,7 @@ async fn overview_needs_an_active_token() {
         .expect("revoke");
     let reply = v.overview(Some(&bearer(&token))).await;
     assert_eq!(reply.status, StatusCode::UNAUTHORIZED);
-    assert!(reply.body.is_empty());
+    reply.assert_api_error("");
 }
 
 #[tokio::test]
@@ -360,4 +389,52 @@ async fn health_and_report_routes_are_unchanged() {
         )
         .await;
     assert_eq!(get_pair.status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn every_response_carries_its_own_request_id() {
+    let v = Veilleur::new();
+    let code = v.pairing("pc");
+    let token = v.pair_code(&code).await.json()["token"]
+        .as_str()
+        .expect("token")
+        .to_owned();
+    let first = v.overview(Some(&bearer(&token))).await;
+    let second = v.overview(Some(&bearer(&token))).await;
+    assert_eq!(first.status, StatusCode::OK);
+    let (a, b) = (
+        first.request_id.expect("id"),
+        second.request_id.expect("id"),
+    );
+    assert_eq!(a.len(), 32);
+    assert_ne!(a, b);
+    // Le 404 muet du point d'entrée des agents porte l'en-tête, rien d'autre.
+    let report = v
+        .send(
+            Request::post("/r/v1/report")
+                .body(Body::from("{}"))
+                .expect("request"),
+        )
+        .await;
+    assert!(report.body.is_empty());
+    assert!(report.request_id.is_some());
+}
+
+#[tokio::test]
+async fn an_incoming_request_id_is_ignored() {
+    let v = Veilleur::new();
+    let reply = v
+        .send(
+            Request::get("/api/v1/overview")
+                .header("x-request-id", "0123456789abcdef0123456789abcdef")
+                .body(Body::empty())
+                .expect("request"),
+        )
+        .await;
+    assert_eq!(reply.status, StatusCode::UNAUTHORIZED);
+    reply.assert_api_error("jeton absent");
+    assert_ne!(
+        reply.request_id.as_deref(),
+        Some("0123456789abcdef0123456789abcdef")
+    );
 }
