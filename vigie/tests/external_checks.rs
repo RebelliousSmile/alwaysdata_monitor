@@ -87,7 +87,8 @@ impl Fixture {
         Self::with_certificate(mode, 90 * DAY, "127.0.0.1")
     }
 
-    /// Certificat valable `lifetime` secondes à partir de maintenant, au nom de `name`.
+    /// Certificat valable `lifetime` secondes après `T0`, l'heure des passages, au
+    /// nom de `name`. Il est déjà valable à l'heure réelle, que rustls vérifie.
     fn with_certificate(mode: Mode, lifetime: u64, name: &str) -> Self {
         let (ca, leaf, key) = certificates(lifetime, name);
         let provider = Arc::new(rustls::crypto::ring::default_provider());
@@ -206,7 +207,7 @@ fn certificates(
     let leaf_key = KeyPair::generate().expect("clé");
     let mut params = CertificateParams::new(vec![name.to_owned()]).expect("paramètres");
     params.not_before = (SystemTime::now() - Duration::from_secs(DAY)).into();
-    params.not_after = (SystemTime::now() + Duration::from_secs(lifetime)).into();
+    params.not_after = (SystemTime::UNIX_EPOCH + Duration::from_secs(T0 as u64 + lifetime)).into();
     params.extended_key_usages = vec![ExtendedKeyUsagePurpose::ServerAuth];
     let leaf = params.signed_by(&leaf_key, &*ca).expect("certificat");
     (
@@ -253,6 +254,7 @@ fn run_check(kind: CheckKind, fixture: &Fixture) -> Result<Vec<Finding>, CheckEr
         trust: &options.trust,
         request_timeout: options.request_timeout,
         deadline: Instant::now() + options.check_budget,
+        now: T0,
     };
     kind.run(&site(&fixture.base()), &ctx)
 }
@@ -486,13 +488,9 @@ fn every_external_check_records_its_result_and_tls_its_expiry() {
     let observed: serde_json::Value =
         serde_json::from_str(tls.observed.as_deref().expect("observé")).expect("json");
     let not_after = observed["tls_not_after"].as_i64().expect("expiration");
-    let in_80_days = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .expect("horloge")
-        .as_secs()
-        + 80 * DAY;
+    let in_80_days = T0 + 80 * DAY as i64;
     assert!(
-        (not_after - in_80_days as i64).abs() < 3600,
+        (not_after - in_80_days).abs() < 3600,
         "{not_after} / {in_80_days}"
     );
 
@@ -600,7 +598,7 @@ fn check_once_writes_nothing() {
     let fixture = Fixture::start(Mode::Healthy);
     let dir = tempfile::tempdir().expect("tempdir");
     let config = config(dir.path(), &fixture.base());
-    let report = tick::check_once(&config, "site-a", &fixture.options()).expect("rapport");
+    let report = tick::check_once(&config, "site-a", &fixture.options(), T0).expect("rapport");
     assert_eq!(report.len(), 5, "{report:?}");
     assert!(
         report

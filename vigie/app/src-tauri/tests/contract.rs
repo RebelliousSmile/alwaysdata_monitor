@@ -10,6 +10,7 @@ use std::sync::Arc;
 mod veilleur;
 
 use vigie::checks::CheckKind;
+use vigie::clock::FakeClock;
 use vigie::config::{Api, Config, Site, SiteKind};
 use vigie::device::{self, PAIRING_TTL};
 use vigie::finding::{Finding, Severity as VSeverity};
@@ -53,7 +54,7 @@ impl Veilleur {
             .await
             .expect("bind");
         let base = format!("http://{}", listener.local_addr().expect("addr"));
-        let router = serve::router_with_clock(config.clone(), Arc::new(|| T0));
+        let router = serve::router_with_clock(config.clone(), Arc::new(FakeClock::new(T0)));
         tokio::spawn(async move { axum::serve(listener, router).await.expect("serve") });
         let v = Self {
             _dir: dir,

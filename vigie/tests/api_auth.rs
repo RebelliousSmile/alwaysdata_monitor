@@ -3,7 +3,6 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicI64, Ordering};
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
@@ -13,6 +12,7 @@ use tower::ServiceExt;
 #[path = "support/veilleur.rs"]
 mod veilleur;
 
+use vigie::clock::{Clock, FakeClock};
 use vigie::device::{self, PAIRING_TTL};
 use vigie::serve;
 use vigie::store::Store;
@@ -22,7 +22,7 @@ const T0: i64 = 1_792_000_000;
 struct Veilleur {
     _dir: tempfile::TempDir,
     db: PathBuf,
-    clock: Arc<AtomicI64>,
+    clock: Arc<FakeClock>,
 }
 
 struct Reply {
@@ -79,16 +79,16 @@ impl Veilleur {
         Self {
             _dir: dir,
             db,
-            clock: Arc::new(AtomicI64::new(T0)),
+            clock: Arc::new(FakeClock::new(T0)),
         }
     }
 
     fn advance(&self, seconds: i64) {
-        self.clock.fetch_add(seconds, Ordering::SeqCst);
+        self.clock.advance(seconds);
     }
 
     fn now(&self) -> i64 {
-        self.clock.load(Ordering::SeqCst)
+        self.clock.unix()
     }
 
     /// Ce que fait `vigie device pair` : un code, son empreinte en base.
@@ -103,10 +103,9 @@ impl Veilleur {
     }
 
     async fn send(&self, request: Request<Body>) -> Reply {
-        let clock = Arc::clone(&self.clock);
         let router = serve::router_with_clock(
             veilleur::config(self.db.clone()),
-            Arc::new(move || clock.load(Ordering::SeqCst)),
+            Arc::clone(&self.clock) as Arc<dyn Clock>,
         );
         let response = router.oneshot(request).await.expect("response");
         let status = response.status();

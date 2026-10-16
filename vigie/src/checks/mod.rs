@@ -117,6 +117,9 @@ pub struct Ctx<'a> {
     pub request_timeout: Duration,
     /// Aucune requête ne commence après cette échéance.
     pub deadline: Instant,
+    /// Heure du passage, en secondes Unix : celle des décisions (jours
+    /// avant l'expiration d'un certificat).
+    pub now: i64,
 }
 
 /// Contrôle non concluant : aucun constat, ni dans un sens ni dans l'autre.
@@ -160,12 +163,10 @@ pub fn is_unreachable(findings: &[Finding]) -> bool {
 /// Chemin aléatoire, pour savoir à quoi ressemble la réponse du site à une
 /// URL qui n'existe pas (beaucoup d'hébergements répondent 200 partout).
 fn witness_path(prefix: &str) -> String {
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    let mixed = (nanos as u64) ^ (u64::from(std::process::id()) << 32);
-    format!("{prefix}vigie-temoin-{mixed:016x}")
+    let mut bytes = [0u8; 8];
+    // Sans aléa, un suffixe fixe : le témoin reste une URL improbable.
+    let _ = getrandom::fill(&mut bytes);
+    format!("{prefix}vigie-temoin-{:016x}", u64::from_le_bytes(bytes))
 }
 
 /// La sonde ressemble-t-elle à la réponse du témoin ? Un même corps (aux

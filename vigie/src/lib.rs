@@ -5,6 +5,7 @@
 pub mod alert;
 pub mod api;
 pub mod checks;
+pub mod clock;
 pub mod config;
 pub mod device;
 pub mod error;
@@ -20,11 +21,11 @@ pub mod tick;
 pub mod writer;
 
 /// Heure courante, en secondes Unix.
+/// Raccourci de [`clock::SystemClock`], pour les appelants qui ne décident
+/// rien de l'heure qu'ils lisent (voir la règle de `clock.rs`).
 pub fn now() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX))
-        .unwrap_or(0)
+    use clock::Clock;
+    clock::SystemClock.unix()
 }
 
 /// `2026-10-15T15:53:00Z` : heure UTC lisible dans un e-mail ou dans `status`.
