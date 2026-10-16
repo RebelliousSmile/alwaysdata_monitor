@@ -52,7 +52,7 @@ journey
 
 1. Schéma du retrait (`deny_unknown_fields`) : `v`=1, `type`=`pull`, `site`, `seq`, `sent_at`, `nonce` (16 à 64 caractères base64url), `agent`, `result` facultatif.
 2. Ordre des vérifications calqué sur `ingest.rs` ; refus → 404 commun, raison au journal avec request_id.
-3. Réponse : JSON `{v, site, nonce, server_time, command}` ; `command` = `{id, seq, name, runtime, params, issued_at, expires_at}` ; en-têtes `X-Vigie-Timestamp`, `X-Vigie-Signature`, `Cache-Control: no-store`.
+3. Réponse : JSON `{v, site, nonce, server_time, command}` ; `command` = l'enveloppe figée par #2 dans `protocole-commandes.md` (`v`, `site`, `id`, `seq`, `name`, `runtime`, `params`, `issued_at`, `expires_at`, schéma strict) ; en-têtes `X-Vigie-Timestamp`, `X-Vigie-Signature`, `Cache-Control: no-store`. `permit` est revérifié à chaque délivrance.
 4. Une commande servie et non acquittée est re-servie telle quelle (même `id`, même `seq`) au retrait suivant, jusqu'à expiration : un agent qui a planté avant d'exécuter la reçoit encore ; c'est à lui de ne pas la rejouer (#6, `seq` persisté).
 5. Débit : au plus un retrait accepté par site et par 30 s.
 

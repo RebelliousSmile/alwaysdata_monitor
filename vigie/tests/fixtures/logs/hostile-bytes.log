@@ -1,0 +1,4 @@
+site-a.example.org 192.0.2.10 - - [15/Oct/2026:14:40:00 +0200] "GET /aÿbþ HTTP/1.1" 404 10 "-" "ua"
+site-a.example.org 192.0.2.11 - - [15/Oct/2026:14:40:01 +0200] "GET / HTTP/1.1" 200 10 "-" "ua-Ã(-fin"
+site-a.example.org 192.0.2.12 - - [15/Oct/2026:14:40:02 +0200] "GET / HTTP/1.1" 200 10 "-" "a \"cit\" b"
+site-a.example.org pas-une-ip - - [15/Oct/2026:14:40:03 +0200] "GET / HTTP/1.1" 200 10 "-" "ua"
