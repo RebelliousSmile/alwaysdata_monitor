@@ -20,8 +20,9 @@ status: pending
 ## Tasks to do
 
 1. Tests de configuration aux limites (kind vide, casse, inconnu ; runtime contradictoire).
-2. Contention : quatre écrivains (rapport, retrait, lot de logs, tick) sur une même base, aucun `SQLITE_BUSY` remonté, aucune écriture perdue.
-3. Audit écrit, avec renvoi aux tests et aux jobs CI ; relevés réels masqués.
+2. Délais de l'agent : `agent_e2e` avec un serveur qui ne répond pas (`SEND_TIMEOUT`) et un verrou déjà pris.
+3. Contention : quatre écrivains (rapport, retrait, lot de logs, tick) sur une même base, aucun `SQLITE_BUSY` remonté, aucune écriture perdue.
+4. Audit écrit, avec renvoi aux tests et aux jobs CI ; relevé masqué sur le VPS (`--version`, `tick` à blanc, empreinte du binaire de la CI) ou « non vérifié ».
 
 ## Test acceptance criteria
 
