@@ -115,6 +115,7 @@ pub fn router_with_clock(config: Config, clock: Clock) -> Router {
             clock,
             writer,
         }))
+        .layer(axum::middleware::from_fn(crate::request_id::layer))
 }
 
 pub(crate) async fn not_found() -> StatusCode {
@@ -134,11 +135,17 @@ async fn health_handler(State(state): State<Arc<AppState>>) -> (StatusCode, Json
             (code, Json(body))
         }
         Ok(Err(err)) => {
-            log::error!("/health : lecture de la base impossible : {err:#}");
+            log::error!(
+                "[{}] /health : lecture de la base impossible : {err:#}",
+                crate::request_id::current()
+            );
             unavailable()
         }
         Err(err) => {
-            log::error!("/health : tâche interrompue : {err}");
+            log::error!(
+                "[{}] /health : tâche interrompue : {err}",
+                crate::request_id::current()
+            );
             unavailable()
         }
     }
@@ -157,10 +164,11 @@ fn unavailable() -> (StatusCode, Json<Health>) {
 
 /// Journalise un refus et répond le 404 commun à tous les refus.
 fn refuse(refusal: Refusal) -> StatusCode {
+    let rid = crate::request_id::current();
     if matches!(refusal.reason, Reason::Internal(_)) {
-        log::error!("{refusal}");
+        log::error!("[{rid}] {refusal}");
     } else {
-        log::warn!("{refusal}");
+        log::warn!("[{rid}] {refusal}");
     }
     StatusCode::NOT_FOUND
 }
@@ -231,7 +239,8 @@ async fn report_handler(State(state): State<Arc<AppState>>, request: Request) ->
     match outcome {
         Ok(Ok(accepted)) => {
             log::info!(
-                "rapport accepté (site {}, seq {})",
+                "[{}] rapport accepté (site {}, seq {})",
+                crate::request_id::current(),
                 accepted.site,
                 accepted.seq
             );
@@ -422,13 +431,17 @@ mod tests {
             "/r/v1/report",
             "/r/v1",
             "/api/v1",
-            "/api/v1/pair",
             "/api/v1/inconnu",
         ] {
             let (status, body) = get(db.clone(), uri).await;
             assert_eq!(status, StatusCode::NOT_FOUND, "{uri}");
             assert!(body.is_empty(), "{uri}");
         }
+        // Méthode refusée sur une route de l'API : erreur au format commun.
+        let (status, body) = get(db.clone(), "/api/v1/pair").await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        let json: serde_json::Value = serde_json::from_slice(&body).expect("json");
+        assert_eq!(json["error"]["code"], "not_found");
         let post_health = Request::post("/health")
             .body(Body::empty())
             .expect("request");

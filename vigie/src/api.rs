@@ -1,8 +1,9 @@
 //! `/api/v1` : API de la console (`docs/api-console.md`).
 //!
 //! `POST /api/v1/pair` échange un code d'appairage contre un jeton d'appareil ;
-//! toute autre route exige `Authorization: Bearer <jeton>`. Un échec reçoit un
-//! 401 sans corps, quelle qu'en soit la raison. Ni jeton ni code n'entrent
+//! toute autre route exige `Authorization: Bearer <jeton>`. Un échec reçoit le
+//! même 401, quelle qu'en soit la raison. Toute erreur porte le corps commun de
+//! [`crate::error`] et l'identifiant de requête, cité aussi par le journal. Ni jeton ni code n'entrent
 //! dans le journal : seulement l'id et le nom de l'appareil.
 //!
 //! L'état d'un site (`SiteState`) est calculé ici et nulle part ailleurs : la
@@ -26,8 +27,10 @@ use serde::{Deserialize, Serialize};
 use crate::checks::{CheckKind, heartbeat};
 use crate::config::{Site, SiteKind};
 use crate::device;
+use crate::error::{ApiError, not_found};
 use crate::finding::Severity;
-use crate::serve::{AppState, not_found};
+use crate::request_id;
+use crate::serve::AppState;
 use crate::store::{
     AGENT_PREFIX, AckOutcome, Agent, CheckRun, Device, Incident, RevokeOutcome, RunResult,
     SCHEMA_CHECK_RESULTS, Store,
@@ -114,26 +117,35 @@ struct PairResponse {
     name: String,
 }
 
-/// 200 et le jeton, remis une seule fois ; 401 sans corps sinon.
+/// 200 et le jeton, remis une seule fois ; 401 sinon.
 async fn pair_handler(State(state): State<Arc<AppState>>, request: Request) -> Response {
     let read = axum::body::to_bytes(request.into_body(), MAX_PAIR_BYTES);
     let Ok(Ok(bytes)) = tokio::time::timeout(PAIR_BODY_TIMEOUT, read).await else {
-        log::warn!("appairage refusé : corps trop gros, interrompu ou trop lent");
-        return StatusCode::UNAUTHORIZED.into_response();
+        log::warn!(
+            "[{}] appairage refusé : corps trop gros, interrompu ou trop lent",
+            request_id::current()
+        );
+        return ApiError::UNAUTHORIZED.into_response();
     };
     let Ok(PairRequest { code }) = serde_json::from_slice::<PairRequest>(&bytes) else {
-        log::warn!("appairage refusé : corps illisible");
-        return StatusCode::UNAUTHORIZED.into_response();
+        log::warn!(
+            "[{}] appairage refusé : corps illisible",
+            request_id::current()
+        );
+        return ApiError::UNAUTHORIZED.into_response();
     };
     if code.is_empty() || code.len() > device::MAX_SECRET_LEN {
-        log::warn!("appairage refusé : code de longueur invalide");
-        return StatusCode::UNAUTHORIZED.into_response();
+        log::warn!(
+            "[{}] appairage refusé : code de longueur invalide",
+            request_id::current()
+        );
+        return ApiError::UNAUTHORIZED.into_response();
     }
     let token = match device::new_token() {
         Ok(token) => token,
         Err(err) => {
-            log::error!("appairage : {err:#}");
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            log::error!("[{}] appairage : {err:#}", request_id::current());
+            return ApiError::INTERNAL.into_response();
         }
     };
     let code_hash = device::hash(&code);
@@ -149,7 +161,12 @@ async fn pair_handler(State(state): State<Arc<AppState>>, request: Request) -> R
     .await;
     match outcome {
         Ok(Ok(Some(device))) => {
-            log::info!("appareil {} « {} » appairé", device.id, device.name);
+            log::info!(
+                "[{}] appareil {} « {} » appairé",
+                request_id::current(),
+                device.id,
+                device.name
+            );
             no_store(
                 Json(PairResponse {
                     token,
@@ -160,16 +177,22 @@ async fn pair_handler(State(state): State<Arc<AppState>>, request: Request) -> R
             )
         }
         Ok(Ok(None)) => {
-            log::warn!("appairage refusé : code inconnu, déjà utilisé ou expiré");
-            StatusCode::UNAUTHORIZED.into_response()
+            log::warn!(
+                "[{}] appairage refusé : code inconnu, déjà utilisé ou expiré",
+                request_id::current()
+            );
+            ApiError::UNAUTHORIZED.into_response()
         }
         Ok(Err(err)) => {
-            log::error!("appairage : {err:#}");
-            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+            log::error!("[{}] appairage : {err:#}", request_id::current());
+            ApiError::INTERNAL.into_response()
         }
         Err(err) => {
-            log::error!("appairage : tâche interrompue : {err}");
-            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+            log::error!(
+                "[{}] appairage : tâche interrompue : {err}",
+                request_id::current()
+            );
+            ApiError::INTERNAL.into_response()
         }
     }
 }
@@ -178,7 +201,7 @@ async fn pair_handler(State(state): State<Arc<AppState>>, request: Request) -> R
 pub(crate) struct Authenticated(pub Device);
 
 impl FromRequestParts<Arc<AppState>> for Authenticated {
-    type Rejection = StatusCode;
+    type Rejection = ApiError;
 
     async fn from_request_parts(
         parts: &mut Parts,
@@ -190,10 +213,11 @@ impl FromRequestParts<Arc<AppState>> for Authenticated {
             .and_then(|v| v.to_str().ok())
             .and_then(|v| v.strip_prefix("Bearer "))
             .filter(|t| !t.is_empty() && t.len() <= device::MAX_SECRET_LEN)
-            .ok_or(StatusCode::UNAUTHORIZED)?;
+            .ok_or(ApiError::UNAUTHORIZED)?;
         let token_hash = device::hash(token);
         let now = (state.clock)();
         let task_state = Arc::clone(state);
+        let rid = request_id::current();
         let found = tokio::task::spawn_blocking(move || {
             let Some(store) = open_devices(&task_state)? else {
                 return Ok(None);
@@ -204,7 +228,11 @@ impl FromRequestParts<Arc<AppState>> for Authenticated {
                     write_devices(&task_state, |writer| writer.touch_seen(device.id, now))
             {
                 // « Vu le » n'est qu'une indication : la requête passe.
-                log::warn!("appareil {} : « vu le » non écrit : {err:#}", device.id);
+                log::warn!(
+                    "[{}] appareil {} : « vu le » non écrit : {err:#}",
+                    rid,
+                    device.id
+                );
             }
             anyhow::Ok(device)
         })
@@ -212,16 +240,22 @@ impl FromRequestParts<Arc<AppState>> for Authenticated {
         match found {
             Ok(Ok(Some(device))) => Ok(Self(device)),
             Ok(Ok(None)) => {
-                log::warn!("jeton refusé : inconnu ou révoqué");
-                Err(StatusCode::UNAUTHORIZED)
+                log::warn!(
+                    "[{}] jeton refusé : inconnu ou révoqué",
+                    request_id::current()
+                );
+                Err(ApiError::UNAUTHORIZED)
             }
             Ok(Err(err)) => {
-                log::error!("authentification : {err:#}");
-                Err(StatusCode::INTERNAL_SERVER_ERROR)
+                log::error!("[{}] authentification : {err:#}", request_id::current());
+                Err(ApiError::INTERNAL)
             }
             Err(err) => {
-                log::error!("authentification : tâche interrompue : {err}");
-                Err(StatusCode::INTERNAL_SERVER_ERROR)
+                log::error!(
+                    "[{}] authentification : tâche interrompue : {err}",
+                    request_id::current()
+                );
+                Err(ApiError::INTERNAL)
             }
         }
     }
@@ -235,7 +269,7 @@ fn json<T: Serialize>(body: &T) -> Response {
     no_store(Json(body).into_response())
 }
 
-/// Exécute `f` sur la base, hors du runtime. 500 sans corps sur erreur, et
+/// Exécute `f` sur la base, hors du runtime. 500 sur erreur, et
 /// aussi si la base a disparu entre l'authentification et la lecture.
 async fn with_store<F>(state: &Arc<AppState>, route: &'static str, f: F) -> Response
 where
@@ -261,7 +295,7 @@ where
     finish(route, outcome)
 }
 
-/// Réponse d'une tâche de base : 500 sans corps sur base absente, erreur ou
+/// Réponse d'une tâche de base : 500 sur base absente, erreur ou
 /// tâche interrompue.
 fn finish(
     route: &'static str,
@@ -270,16 +304,22 @@ fn finish(
     match outcome {
         Ok(Ok(Some(response))) => response,
         Ok(Ok(None)) => {
-            log::error!("{route} : base absente ou pas encore migrée");
-            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+            log::error!(
+                "[{}] {route} : base absente ou pas encore migrée",
+                request_id::current()
+            );
+            ApiError::INTERNAL.into_response()
         }
         Ok(Err(err)) => {
-            log::error!("{route} : {err:#}");
-            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+            log::error!("[{}] {route} : {err:#}", request_id::current());
+            ApiError::INTERNAL.into_response()
         }
         Err(err) => {
-            log::error!("{route} : tâche interrompue : {err}");
-            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+            log::error!(
+                "[{}] {route} : tâche interrompue : {err}",
+                request_id::current()
+            );
+            ApiError::INTERNAL.into_response()
         }
     }
 }
@@ -549,7 +589,7 @@ async fn site_handler(
     id: Result<Path<String>, PathRejection>,
 ) -> Response {
     let Some(index) = site_index(&state, id) else {
-        return StatusCode::NOT_FOUND.into_response();
+        return ApiError::NOT_FOUND.into_response();
     };
     with_store(&state, "/api/v1/sites", move |state, store| {
         let site = &state.config.sites[index];
@@ -624,7 +664,7 @@ async fn site_incidents_handler(
     id: Result<Path<String>, PathRejection>,
 ) -> Response {
     let Some(index) = site_index(&state, id) else {
-        return StatusCode::NOT_FOUND.into_response();
+        return ApiError::NOT_FOUND.into_response();
     };
     let since = (state.clock)() - CLOSED_WINDOW;
     with_store(&state, "/api/v1/sites/incidents", move |state, store| {
@@ -645,12 +685,12 @@ async fn incident_handler(
     id: Result<Path<String>, PathRejection>,
 ) -> Response {
     let Some(id) = incident_id(id) else {
-        return StatusCode::NOT_FOUND.into_response();
+        return ApiError::NOT_FOUND.into_response();
     };
     with_store(&state, "/api/v1/incidents", move |_, store| {
         Ok(match store.incident(id)? {
             Some(incident) => json(&IncidentJson::from(&incident)),
-            None => StatusCode::NOT_FOUND.into_response(),
+            None => ApiError::NOT_FOUND.into_response(),
         })
     })
     .await
@@ -663,20 +703,25 @@ async fn ack_handler(
     id: Result<Path<String>, PathRejection>,
 ) -> Response {
     let Some(id) = incident_id(id) else {
-        return StatusCode::NOT_FOUND.into_response();
+        return ApiError::NOT_FOUND.into_response();
     };
     let now = (state.clock)();
+    let rid = request_id::current();
     with_writer(&state, "/api/v1/incidents/ack", move |store| {
         Ok(match store.ack(id, now)? {
             AckOutcome::Acked | AckOutcome::AlreadyAcked => {
-                log::info!("incident {id} acquitté par l'appareil {}", device.id);
+                log::info!(
+                    "[{}] incident {id} acquitté par l'appareil {}",
+                    rid,
+                    device.id
+                );
                 match store.incident(id)? {
                     Some(incident) => json(&IncidentJson::from(&incident)),
-                    None => StatusCode::NOT_FOUND.into_response(),
+                    None => ApiError::NOT_FOUND.into_response(),
                 }
             }
-            AckOutcome::AlreadyClosed => StatusCode::CONFLICT.into_response(),
-            AckOutcome::NotFound => StatusCode::NOT_FOUND.into_response(),
+            AckOutcome::AlreadyClosed => ApiError::CONFLICT.into_response(),
+            AckOutcome::NotFound => ApiError::NOT_FOUND.into_response(),
         })
     })
     .await
@@ -791,17 +836,19 @@ async fn device_self_handler(
     Authenticated(device): Authenticated,
 ) -> Response {
     let now = (state.clock)();
+    let rid = request_id::current();
     with_writer(&state, "/api/v1/devices/self", move |store| {
         Ok(match store.revoke_device(device.id, now)? {
             RevokeOutcome::Revoked | RevokeOutcome::AlreadyRevoked => {
                 log::info!(
-                    "appareil {} « {} » révoqué par lui-même",
+                    "[{}] appareil {} « {} » révoqué par lui-même",
+                    rid,
                     device.id,
                     device.name
                 );
                 no_store(StatusCode::NO_CONTENT.into_response())
             }
-            RevokeOutcome::NotFound => StatusCode::UNAUTHORIZED.into_response(),
+            RevokeOutcome::NotFound => ApiError::UNAUTHORIZED.into_response(),
         })
     })
     .await
