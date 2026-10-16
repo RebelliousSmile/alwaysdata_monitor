@@ -18,8 +18,8 @@ status: pending
 
 ## Tasks to do
 
-1. Client : routes logs, `cursor`, erreur 429 typée.
-2. Vue Trafic ; site sans source → état « pas encore disponible ».
+1. Client : routes logs, `cursor`, `next_cursor` en `serde(default)`, erreurs typées (`CursorExpired`, 429 avec `Retry-After`, 400, 415).
+2. Vue Trafic (Visiteurs, Blocages, Ressources ; Journal non disponible) ; trois états (404, `null`, données) ; actions de maquette en propositions non exécutables ; `features.ts`.
 3. Pagination des incidents clos.
 4. Version 0.2.0, CHANGELOG de la console.
 
