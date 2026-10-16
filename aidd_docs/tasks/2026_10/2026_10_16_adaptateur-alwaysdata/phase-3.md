@@ -23,8 +23,8 @@ status: pending
 
 1. `AlwaysdataSource::fetch(from, max)` : `WHERE site = ? AND id > ? ORDER BY id LIMIT max + 1` (`more` si une de plus) ; curseur illisible → `CursorInvalid { restart: start }` ; `rejected` vide (les rejets restent comptés dans `log_batches`).
 2. Purge à chaque `tick` : entrées dont l'heure < now − 30 j ; lots et limites dont `received_at` < now − 30 j.
-4. `agent_e2e.rs` : un lot de logs de l'agent PHP réel jusqu'à `log_entries`, renvoi après réponse perdue compté une fois.
 3. Test de bout en bout sur les fixtures de #7 : mêmes comptes que `expected.json`.
+4. `agent_e2e.rs` : un lot de logs de l'agent PHP réel jusqu'à `log_entries`, renvoi après réponse perdue compté une fois.
 
 ## Test acceptance criteria
 
