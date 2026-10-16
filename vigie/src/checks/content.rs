@@ -3,12 +3,12 @@
 
 use url::Url;
 
-use super::{CheckError, CheckKind, Ctx, UNREACHABLE};
+use super::{CheckError, CheckKind, Ctx, Observed, Outcome, UNREACHABLE};
 use crate::config::Site;
 use crate::finding::{Finding, Severity};
 use crate::http::HttpError;
 
-pub fn run(site: &Site, ctx: &Ctx) -> Result<Vec<Finding>, CheckError> {
+pub fn run(site: &Site, ctx: &Ctx) -> Result<Outcome, CheckError> {
     let name = CheckKind::Content.name();
     let url = Url::parse(site.content_url())
         .map_err(|err| CheckError::new(format!("URL illisible : {err}")))?;
@@ -19,34 +19,43 @@ pub fn run(site: &Site, ctx: &Ctx) -> Result<Vec<Finding>, CheckError> {
             Ok(page) => page,
             Err(err) if err.cut_short => return Err(err.into()),
             Err(HttpError { message, .. }) => {
-                return Ok(vec![Finding::new(
-                    &site.id,
-                    name,
-                    Severity::Critical,
-                    UNREACHABLE,
-                    format!("injoignable : {message}"),
-                )]);
+                return Ok(Outcome {
+                    findings: vec![Finding::new(
+                        &site.id,
+                        name,
+                        Severity::Critical,
+                        UNREACHABLE,
+                        format!("injoignable : {message}"),
+                    )],
+                    observed: Observed::default(),
+                });
             }
         },
         Err(first) => return Err(first.into()),
     };
-    if page.status != 200 {
-        return Ok(vec![Finding::new(
+    let observed = Observed {
+        http_status: Some(page.status),
+        ..Observed::default()
+    };
+    let findings = if page.status != 200 {
+        vec![Finding::new(
             &site.id,
             name,
             Severity::Critical,
             "status",
             format!("{} répond {}, 200 attendu", page.url, page.status),
-        )]);
-    }
-    match &site.keyword {
-        Some(keyword) if !page.body.contains(keyword.as_str()) => Ok(vec![Finding::new(
-            &site.id,
-            name,
-            Severity::Critical,
-            "keyword",
-            format!("« {keyword} » absent de {}", page.url),
-        )]),
-        _ => Ok(Vec::new()),
-    }
+        )]
+    } else {
+        match &site.keyword {
+            Some(keyword) if !page.body.contains(keyword.as_str()) => vec![Finding::new(
+                &site.id,
+                name,
+                Severity::Critical,
+                "keyword",
+                format!("« {keyword} » absent de {}", page.url),
+            )],
+            _ => Vec::new(),
+        }
+    };
+    Ok(Outcome { findings, observed })
 }

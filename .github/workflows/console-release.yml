@@ -1,0 +1,263 @@
+name: console-release
+
+# Release de la console (vigie/app) : installeur NSIS Windows et APK Android
+# signé par la clé release, réunis dans une release GitHub en brouillon.
+#
+# Tag console-vX.Y.Z : brouillon rattaché à ce tag. Le préfixe tient à
+# l'écart les tags v* du module PrestaShop.
+# Lancement manuel : brouillon nommé console-vX.Y.Z-manuel.N, marqué
+# préversion. Un brouillon ne crée son tag qu'à la publication : on le
+# vérifie, puis on le supprime.
+#
+# Un seul job écrit la release, après les deux builds : pas de course entre
+# jobs, et aucun n'écrit sur une release existante.
+on:
+  push:
+    tags:
+      - "console-v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: console-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # Les trois fichiers à bumper doivent porter la même version, et, sur un
+  # tag, celle du tag : sinon arrêt avant tout build.
+  version:
+    name: version
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+      tag: ${{ steps.check.outputs.tag }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: versions concordantes
+        id: check
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          set -euo pipefail
+          cd vigie/app
+          PKG=$(jq -r .version package.json)
+          CARGO=$(sed -n 's/^version = "\(.*\)"$/\1/p' src-tauri/Cargo.toml | head -1)
+          LOCK=$(awk '/^name = "vigie-console"$/ { getline; gsub(/version = |"/, ""); print; exit }' src-tauri/Cargo.lock)
+          echo "package.json : $PKG"
+          echo "Cargo.toml   : $CARGO"
+          echo "Cargo.lock   : $LOCK"
+          if [ "$PKG" != "$CARGO" ] || [ "$PKG" != "$LOCK" ]; then
+            echo "::error::versions divergentes : package.json $PKG, Cargo.toml $CARGO, Cargo.lock $LOCK"
+            exit 1
+          fi
+          if [ "$REF_TYPE" = "tag" ]; then
+            if [ "$REF_NAME" != "console-v$PKG" ]; then
+              echo "::error::le tag $REF_NAME ne correspond pas à la version $PKG (attendu console-v$PKG)"
+              exit 1
+            fi
+            TAG="$REF_NAME"
+          else
+            TAG="console-v$PKG-manuel.$RUN_NUMBER"
+          fi
+          echo "version=$PKG" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "release : $TAG"
+
+  windows:
+    name: windows
+    needs: version
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+        working-directory: vigie/app
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+        with:
+          package_json_file: vigie/app/package.json
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "20"
+          cache: pnpm
+          cache-dependency-path: vigie/app/pnpm-lock.yaml
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master
+        with:
+          toolchain: "1.93.0" # même version que vigie/app/src-tauri/rust-toolchain.toml
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            vigie/app/src-tauri/target
+          key: console-release-windows-${{ hashFiles('vigie/app/src-tauri/Cargo.lock') }}
+      - run: pnpm install --frozen-lockfile
+      # beforeBuildCommand (pnpm build) vérifie les types et construit dist.
+      - run: pnpm exec tauri build --bundles nsis
+      - name: installeur
+        id: setup
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          FOUND=(src-tauri/target/release/bundle/nsis/*-setup.exe)
+          test "${#FOUND[@]}" -gt 0 || { echo "::error::aucun installeur NSIS produit"; exit 1; }
+          SETUP="${FOUND[0]}"
+          NAME="vigie-console_${VERSION}_x64-setup.exe"
+          mv "$SETUP" "$NAME"
+          ls -l "$NAME"
+          echo "path=vigie/app/$NAME" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: windows
+          path: ${{ steps.setup.outputs.path }}
+          retention-days: 7
+          if-no-files-found: error
+
+  # APK release non signé par Gradle, puis aligné et signé par apksigner :
+  # gen/android est régénéré à chaque build, il n'y a pas de build.gradle.kts
+  # versionné où poser un signingConfig. Les secrets passent par
+  # l'environnement, jamais par la ligne de commande ni les journaux.
+  android:
+    name: android
+    needs: version
+    runs-on: ubuntu-24.04
+    env:
+      NDK_VERSION: 27.0.12077973
+      BUILD_TOOLS_VERSION: 35.0.0
+    defaults:
+      run:
+        working-directory: vigie/app
+    steps:
+      # Sans la clé release, échec explicite : aucun APK non signé ou signé
+      # par une clé jetable ne doit atteindre une release.
+      - name: secrets de signature
+        working-directory: .
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          missing=""
+          [ -n "${ANDROID_KEYSTORE_BASE64:-}" ] || missing="$missing ANDROID_KEYSTORE_BASE64"
+          [ -n "${ANDROID_KEY_ALIAS:-}" ] || missing="$missing ANDROID_KEY_ALIAS"
+          [ -n "${ANDROID_KEY_PASSWORD:-}" ] || missing="$missing ANDROID_KEY_PASSWORD"
+          if [ -n "$missing" ]; then
+            echo "::error::secrets absents :$missing. Aucun APK ne sera produit."
+            exit 1
+          fi
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+        with:
+          package_json_file: vigie/app/package.json
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "20"
+          cache: pnpm
+          cache-dependency-path: vigie/app/pnpm-lock.yaml
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
+        with:
+          distribution: temurin
+          java-version: "17"
+      # Par défaut, la v3.2.2 demande aussi le paquet « tools », retiré du
+      # SDK : sdkmanager échoue. platform-tools suffit à Gradle.
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3.2.2
+        with:
+          packages: platform-tools
+          log-accepted-android-sdk-licenses: false
+      - run: sdkmanager "ndk;${{ env.NDK_VERSION }}" "build-tools;${{ env.BUILD_TOOLS_VERSION }}"
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master
+        with:
+          toolchain: "1.93.0" # même version que vigie/app/src-tauri/rust-toolchain.toml
+          targets: aarch64-linux-android
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            vigie/app/src-tauri/target
+          key: console-release-android-${{ hashFiles('vigie/app/src-tauri/Cargo.lock') }}
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec tauri android init
+        env:
+          NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/${{ env.NDK_VERSION }}
+      # Une seule ABI (arm64) ; le profil release de Cargo.toml (lto, strip)
+      # garde l'APK léger.
+      - run: pnpm exec tauri android build --apk --target aarch64
+        env:
+          NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/${{ env.NDK_VERSION }}
+      - name: signature
+        id: apk
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          UNSIGNED=$(find src-tauri/gen/android -path "*/release/*-unsigned.apk" -type f | head -1)
+          test -n "$UNSIGNED" || { echo "::error::aucun APK release produit"; find src-tauri/gen/android -name "*.apk"; exit 1; }
+          TOOLS="$ANDROID_HOME/build-tools/$BUILD_TOOLS_VERSION"
+          KEYSTORE="$RUNNER_TEMP/release.jks"
+          trap 'rm -f "$KEYSTORE"' EXIT
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$KEYSTORE"
+          NAME="vigie-console_${VERSION}_arm64.apk"
+          "$TOOLS/zipalign" -f -p 4 "$UNSIGNED" "$RUNNER_TEMP/aligned.apk"
+          "$TOOLS/apksigner" sign \
+            --ks "$KEYSTORE" --ks-key-alias "$ANDROID_KEY_ALIAS" \
+            --ks-pass env:ANDROID_KEY_PASSWORD --key-pass env:ANDROID_KEY_PASSWORD \
+            --out "$NAME" "$RUNNER_TEMP/aligned.apk"
+          # Empreinte du certificat : la même d'une release à l'autre, sinon le
+          # téléphone refuse la mise à jour.
+          "$TOOLS/apksigner" verify --print-certs "$NAME" | grep -E 'SHA-256'
+          ls -l "$NAME"
+          echo "path=vigie/app/$NAME" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: android
+          path: ${{ steps.apk.outputs.path }}
+          retention-days: 7
+          if-no-files-found: error
+
+  release:
+    name: release
+    needs: [version, windows, android]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          path: dist
+          merge-multiple: true
+      - name: brouillon de release
+        working-directory: dist
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.version.outputs.tag }}
+          VERSION: ${{ needs.version.outputs.version }}
+          REF_TYPE: ${{ github.ref_type }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          sha256sum -- *.exe *.apk > SHA256SUMS
+          cat SHA256SUMS
+          cat > notes.md <<EOF
+          Console Vigie $VERSION : installeur Windows (NSIS) et APK Android (arm64).
+
+          Installation et appairage : vigie/app/README.md. Changements : vigie/app/CHANGELOG.md.
+          Vérifier les fichiers avec SHA256SUMS avant de les installer.
+          EOF
+          FLAGS=(--draft --title "Console Vigie $VERSION" --notes-file notes.md)
+          if [ "$REF_TYPE" = "tag" ]; then
+            FLAGS+=(--verify-tag)
+          else
+            FLAGS+=(--target "$SHA" --prerelease)
+          fi
+          gh release create "$TAG" "${FLAGS[@]}" -- *.exe *.apk SHA256SUMS

@@ -43,6 +43,7 @@ fn site() -> Site {
 fn config(dir: &Path) -> Config {
     Config {
         database: dir.join("vigie.db"),
+        api: None,
         alerts: Alerts {
             to: "alertes@example.org".into(),
             from: "vigie@example.org".into(),
@@ -103,8 +104,7 @@ impl Harness {
     async fn post(&self, request: Request<Body>) -> (StatusCode, Vec<u8>) {
         let clock = Arc::clone(&self.clock);
         let router = serve::router_with_clock(
-            self.database(),
-            vec!["site-a".into()],
+            self.config.clone(),
             Arc::new(move || clock.load(Ordering::SeqCst)),
         );
         let response = router.oneshot(request).await.expect("réponse");

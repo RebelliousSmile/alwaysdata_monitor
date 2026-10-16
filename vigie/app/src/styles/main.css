@@ -1,0 +1,20 @@
+@import './tokens.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html,
+  body {
+    background: var(--vg-bg);
+    color: var(--vg-text);
+    font-family: var(--vg-font);
+    font-size: var(--vg-fs-md);
+    line-height: 1.45;
+  }
+
+  a {
+    text-decoration: none;
+  }
+}

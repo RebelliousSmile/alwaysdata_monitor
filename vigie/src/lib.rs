@@ -3,8 +3,10 @@
 //! autorité de certification de test.
 
 pub mod alert;
+pub mod api;
 pub mod checks;
 pub mod config;
+pub mod device;
 pub mod facts;
 pub mod finding;
 pub mod http;

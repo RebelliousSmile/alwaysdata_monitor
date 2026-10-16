@@ -1,0 +1,14 @@
+node_modules/
+dist/
+*.local
+src-tauri/target/
+src-tauri/gen/schemas/
+src-tauri/gen/android/
+
+# Signature Android : la clé release vit hors du dépôt, dans un coffre de
+# mots de passe ; la CI la reçoit par les secrets.
+*.jks
+*.keystore
+keystore.properties
+*.apk
+*.aab

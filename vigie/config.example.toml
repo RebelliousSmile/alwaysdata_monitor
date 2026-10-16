@@ -14,6 +14,13 @@
 # et SQLite y crée ses fichiers -wal et -shm.
 database = "/home/vigie/vigie/data/vigie.db"
 
+# API de la console (docs/api-console.md). Facultative : sans elle,
+# `vigie device pair` est refusé. public_url est l'adresse publique du
+# veilleur, telle que la console l'appelle ; elle entre dans le lien
+# d'appairage. En https : http n'est admis que sur 127.0.0.1, ::1 ou localhost.
+[api]
+public_url = "https://veilleur.example.org"
+
 # E-mails d'incident : un relais SMTP authentifié, port 587 en STARTTLS
 # obligatoire. Un seul destinataire, jamais un client.
 [alerts]
