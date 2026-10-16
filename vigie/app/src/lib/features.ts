@@ -13,6 +13,8 @@ export type FeatureKey =
   | 'theme'
   | 'sourdine'
   | 'file'
+  | 'wordpress'
+  | 'personnalises'
 
 export interface Feature {
   title: string
@@ -88,5 +90,15 @@ export const FEATURES: Record<FeatureKey, Feature> = {
     title: 'File d’écriture',
     shows: 'Les modifications du .htaccess et du robots.txt en attente, vérifiées puis appliquées avec sauvegarde.',
     missing: WRITE,
+  },
+  wordpress: {
+    title: 'WordPress détaillé',
+    shows: 'Le jeu de contrôles propre à WordPress : versions du cœur, des extensions et des thèmes, comptes administrateurs, fichiers modifiés.',
+    missing: 'Un jeu de contrôles WordPress dans le veilleur. Il ne reçoit aujourd’hui que les faits envoyés par l’agent, montrés dans les contrôles « Agent ».',
+  },
+  personnalises: {
+    title: 'Contrôles personnalisés',
+    shows: 'Des contrôles propres à un site, définis à la main : page attendue, texte à trouver, réponse à exclure.',
+    missing: 'Le veilleur n’a que ses contrôles intégrés ; il ne lit aucune définition de contrôle personnalisé.',
   },
 }
