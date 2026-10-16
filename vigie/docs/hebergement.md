@@ -15,14 +15,14 @@ est public.
 | Premier déploiement | **Fait** le 2026-10-15 : `monitor 0.1.0`, `/health` en 200 avec un tick postérieur à la bascule, route inconnue en 404 sans corps, HTTP redirigé en 308 vers HTTPS, `serve` sur `127.0.0.1:8080` seulement (8080 injoignable de l'extérieur), timer à la minute, base en 0600 dans `data/` |
 | Contrôles externes et alertes (phase 2) | **Fait** le 2026-10-15 : `monitor 0.2.0` déployé (commit 2b55edd), `/health` en 200 ; `status` en code 0, schéma v2, dernier tick à 26 s, site A contrôlé, aucun incident, trois en-têtes manquants (HSTS, `nosniff`, `frame-ancestors`) en information ; `test-alert` reçu par le destinataire (envoyé à 16:35:26 UTC) ; `config.toml`, `smtp-password` et la base en 0600 au propriétaire `monitor` |
 | Renommage en Vigie | **Fait** le 2026-10-15 : utilisateur `vigie` créé par `provision.sh`, `config.toml` (chemins réécrits), `smtp-password` et la base copiés vers `~vigie/vigie/` (base par `sqlite3 .backup`, `integrity_check` à `ok`, fichiers en 0600 au propriétaire `vigie`) ; `vigie 0.3.0` déployé (commit 208a73d), bascule à 20:23:38 UTC, base migrée en v4 au premier tick, `/health` en 200 avec un tick postérieur. Ancien `monitor` supprimé vers 20:47 UTC (unités, règle sudo, `10-monitor.conf` après `diff` identique à `10-vigie.conf`, utilisateur et dossier personnel) ; son dossier est archivé en 0600 dans `/root` |
-| Arrêt de `deploy.mjs` pendant la preuve HTTP | **Contourné, cause non établie** : au déploiement de la 0.3.0, le processus a pris fin moins d'une seconde après « Preuve HTTP », pendant le premier `fetch`, sans message ni sur stdout ni sur stderr, et le `finally` du verrou n'a pas tourné (`deploy.lock` rendu à la main). Le déploiement lui-même avait abouti. Non reproduit le 2026-10-16 : la même suite (`wsl` synchrones, puis `fetch` de `/health` sortie en pipe) se termine en code 0. Depuis, le verrou est rendu avant la preuve HTTP, qui n'écrit rien, et un arrêt avant la fin affiche l'étape et le code. Au prochain `--apply` : sans pipe, et relever le code de sortie. Le 2026-10-16, prévisualisation sans pipe en code 0 : le binaire en ligne est déjà celui du commit c874f74 (même sha256), et `--apply` s'arrêterait donc sur « Rien à envoyer » avant la preuve HTTP. La vérification attend le prochain changement du code Rust |
+| Arrêt de `deploy.mjs` pendant la preuve HTTP | **Contourné, cause non établie** : au déploiement de la 0.3.0, le processus a pris fin moins d'une seconde après « Preuve HTTP », pendant le premier `fetch`, sans message ni sur stdout ni sur stderr, et le `finally` du verrou n'a pas tourné (`deploy.lock` rendu à la main). Le déploiement lui-même avait abouti. Non reproduit le 2026-10-16 : la même suite (`wsl` synchrones, puis `fetch` de `/health` sortie en pipe) se termine en code 0. Depuis, le verrou est rendu avant la preuve HTTP, qui n'écrit rien, et un arrêt avant la fin affiche l'étape et le code. Au prochain `--apply` : sans pipe, et relever le code de sortie. Le 2026-10-16, prévisualisation sans pipe en code 0 : le binaire en ligne est déjà celui du commit c874f74 (même sha256), et `--apply` s'arrêterait donc sur « Rien à envoyer » avant la preuve HTTP. Le 2026-10-16 à 09:08 UTC, `--apply` du commit 0401e1c sans pipe : bascule, redémarrage de `serve`, preuve HTTP en 200 sur un tick postérieur, code 0. Non reproduit avec la nouvelle séquence |
 | Relance de `serve` après kill | **Fait** : `kill -9` du PID 3259, relancé en PID 3336 en moins de 8 s |
 | Relance après reboot | **Fait** le 2026-10-15 (extinction puis rallumage depuis la console Hetzner) : démarrage à 15:52:12 UTC, `serve` actif à 15:52:11 en PID 1048, `caddy`, `ufw`, `ssh.socket` et le timer actifs, premier tick à 15:53:00, `/health` en 200, `status` en code 0, 8080 toujours injoignable de l'extérieur |
 | Cloisonnement | **Fait côté `vigie`** le 2026-10-16 (voir [Cloisonnement](#cloisonnement)) : dossiers en 0700, secrets et base en 0600, une seule règle sudo, unités à 3.1 sur `systemd-analyze security`. **Fait** en root le 2026-10-16 : `sudo -u nobody cat config.toml` refusé (`Permission denied`, code 1) |
 | sodium sur le site A | **Fait** le 2026-10-15 : PHP 8.3.35 en ligne de commande (`php -r 'echo PHP_VERSION;'`), `sodium` dans `php -m` ; le CLI affiche aussi `Warning: Module "intl" is already loaded` à chaque lancement |
 | Sortie IPv4 et IPv6 du site A | **Fait** le 2026-10-15 : `curl -4` et `curl -6` vers un site externe en 200 depuis le compte du site A |
 | `/health` en IPv4 et IPv6 depuis le poste | **Fait** le 2026-10-15 : `curl -4` et `curl -6` en 200 |
-| API de la console (schéma 6) | **En attente** : `[api] public_url` à ajouter dans `config.toml`, puis déploiement par `deploy.mjs` et vérifications de [API de la console](#api-de-la-console) |
+| API de la console (schéma 6) | **Fait** le 2026-10-16 : déploiement du commit 0401e1c à 09:08 UTC (code 0), `/api/v1/overview` sans jeton en 401, `/health` en 200, rapport de l'agent du site A accepté à 09:10:08 par le nouveau binaire (`site list`). Incident : `[api]` posé avant le déploiement, le binaire c874f74 refuse toute section inconnue, aucun tick de 08:58 à 09:08 UTC et `/health` en 503 `late`, signalé par la sonde externe (voir l'ordre imposé dans [API de la console](#api-de-la-console)) |
 
 ## Installation
 
@@ -151,6 +151,13 @@ public_url = "https://<sous-domaine>"
 refusé, mais `serve` et `tick` tournent normalement. Au démarrage, `serve`
 applique les migrations 5 (appareils) et 6 (résultat des passages) ; les
 rapports d'agent et les alertes continuent sans interruption.
+
+Ordre imposé : déployer d'abord, poser `[api]` ensuite. Un binaire antérieur
+à l'API refuse toute section inconnue de `config.toml` : `tick` s'arrête au
+passage suivant (aucune alerte, `/health` en 503 `late`) et `serve` ne
+redémarrerait plus. `serve` lit la configuration au démarrage : après l'ajout
+de `[api]`, le redémarrer pour que `settings` publie `public_url`
+(`device pair` et `tick` la relisent à chaque lancement).
 
 Après le déploiement, depuis le poste :
 
