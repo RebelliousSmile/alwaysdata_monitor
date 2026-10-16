@@ -59,7 +59,9 @@ impl Veilleur {
             .expect("bind");
         let base = format!("http://{}", listener.local_addr().expect("addr"));
         let router = serve::router_with_clock(config.clone(), Arc::new(FakeClock::new(T0)));
-        tokio::spawn(async move { axum::serve(listener, router).await.expect("serve") });
+        // Comme `vigie serve` : l'adresse du pair sert à la limite de débit.
+        let service = router.into_make_service_with_connect_info::<std::net::SocketAddr>();
+        tokio::spawn(async move { axum::serve(listener, service).await.expect("serve") });
         let v = Self {
             _dir: dir,
             config,

@@ -7,8 +7,8 @@ créé sur le VPS. Le veilleur ne garde que l'empreinte SHA-256 des jetons et
 des codes : ni l'un ni l'autre n'est écrit en clair, en base comme au journal.
 
 Ce document est le contrat. `vigie/src/device.rs`, `vigie/src/api.rs`,
-`vigie/tests/api_auth.rs`, `vigie/tests/api_read.rs` et `vigie/tests/cli.rs`
-en reprennent chaque règle.
+`vigie/tests/api_auth.rs`, `vigie/tests/api_read.rs`,
+`vigie/tests/api_guards.rs` et `vigie/tests/cli.rs` en reprennent chaque règle.
 
 ## Configuration
 
@@ -83,8 +83,15 @@ Authorization: Bearer <jeton>
 
 Le veilleur hache le jeton présenté et cherche un appareil **actif** de même
 empreinte (comparaison en temps constant). Un jeton de plus de 128 caractères
-est refusé sans être haché. La date « vu le » de l'appareil est mise à jour au
-plus une fois par minute ; son échec n'est que journalisé, la requête passe.
+est refusé sans être haché. L'appareil trouvé passe ensuite la limite de débit
+(voir [Limite de débit](#limite-de-débit)) ; sous la limite, sa date « vu le »
+est mise à jour au plus une fois par minute ; son échec n'est que journalisé,
+la requête passe.
+
+Pas de certificat client (mTLS) : `serve` écoute sur `127.0.0.1:8080`, Caddy
+l'expose en TLS, et le jeton d'appareil (32 octets aléatoires, gardé en
+SHA-256, révocable un par un) authentifie chaque appel (`decisions.md`,
+section #5).
 
 ## Révocation
 
@@ -255,7 +262,9 @@ L'incident, ouvert ou fermé. Identifiant inconnu ou non entier : 404.
 ### `POST /api/v1/incidents/{id}/ack`
 
 Même effet que `vigie ack <id>` : les rappels s'arrêtent, la clôture
-automatique et son e-mail restent. Corps de la requête ignoré.
+automatique et son e-mail restent. La console envoie la requête sans corps ni
+`Content-Type` ; un corps JSON est ignoré, un corps annoncé d'un autre type
+reçoit 415 (voir [En-têtes](#en-têtes)).
 
 - 200 et l'incident, `state` à `acked`. Sur un incident déjà acquitté, la même
   réponse, `acked_at` inchangé.
@@ -302,6 +311,19 @@ corps, puis 401 pour toute requête avec ce jeton. C'est la seule écriture sur
 les appareils accessible par l'API ; `vigie device list` montre ensuite
 l'appareil révoqué.
 
+## Texte issu des logs
+
+Tout champ dont le texte vient des logs d'un site est assaini avant d'être
+servi (`LogText`, `vigie/src/api/log_text.rs`) : caractères de contrôle C0,
+DEL et C1, U+2028, U+2029 et contrôles bidirectionnels (U+061C, U+200E,
+U+200F, U+202A à U+202E, U+2066 à U+2069) deviennent U+FFFD. Aujourd'hui :
+`key` et `detail` des incidents du contrôle `logs`, `detail` de son passage
+(analyse de #8, déjà assainie à l'écriture ; la lecture ne s'y fie pas). Les
+champs à venir de l'analyse suivent la même règle : user-agent et chemin
+coupés à 512 caractères, chemin servi sans query string, referer réduit à son
+origine. La console n'injecte jamais de HTML brut (`vue/no-v-html` en erreur
+dans `vigie/app/eslint.config.js`).
+
 ## État d'un site
 
 Calculé par le veilleur seul (`SiteState` dans `vigie/src/api.rs`) ; la
@@ -332,6 +354,56 @@ des maquettes (non conforme, aveugle, à vérifier, OK) : il est placé avant
 | Reglages | `settings` : `alerts.to`, `devices`, `public_url` ; retrait par `devices/self`. |
 | Etats | `state` à `blind` ou `first_read`, `server_time` et `last_read` pour la fraîcheur, échec réseau pour « hors ligne ». |
 
+## Limite de débit
+
+En mémoire de `serve`, perdue à son redémarrage ; deux tables de seaux à
+jetons, sur une horloge monotone :
+
+| Table | Règle | Appliquée à |
+| ----- | ----- | ----------- |
+| Par appareil | 120 appels par minute, rafale de 30 | Toute requête au jeton valide, après l'authentification et avant « vu le ». Bornée par le nombre d'appareils, jamais évincée. |
+| Par IP cliente | 10 par minute | `POST /api/v1/pair`, avant tout traitement ; ailleurs, seulement un échec d'authentification (jeton absent, inconnu ou révoqué), qui reçoit alors 429 au lieu de 401. |
+
+- Un seau d'IP vide ne bloque **jamais** une requête au jeton valide : un
+  appareil derrière le même NAT qu'un attaquant reste servi.
+- IP cliente : une IPv4 entière, une IPv6 sur son /64. Derrière Caddy, le pair
+  est la boucle locale (`127.0.0.1` ou `::1`) et l'IP est la dernière valeur
+  de `X-Forwarded-For`, que Caddy écrit lui-même ; venant d'un autre pair,
+  l'en-tête est ignoré.
+- La table des IP garde 4 096 clés au plus. Seul un seau plein, équivalent à
+  une clé absente, en est évincé ; quand elle est pleine de seaux entamés, une
+  IP nouvelle reçoit 429 (fermé) : arroser d'adresses ne libère personne.
+- 429 au format commun, avec `Retry-After` en secondes.
+
+## En-têtes
+
+Toute réponse de `/api/v1`, corps d'erreur compris, porte
+`X-Content-Type-Options: nosniff` et `Cache-Control: no-store`, et
+`Content-Type: application/json` quand elle a un corps. Aucun en-tête CORS :
+la console appelle depuis Rust, aucun navigateur n'est à autoriser. `OPTIONS`
+reçoit le 404 commun.
+
+Un `POST` qui annonce un corps (`Content-Length` non nul ou
+`Transfer-Encoding`) d'un autre type que `application/json` (paramètres
+admis : `application/json; charset=utf-8`) reçoit 415, d'après les seuls
+en-têtes. Un `POST` sans corps ni `Content-Type` est accepté. Un JSON
+illisible sur `pair` garde son 401.
+
+## Journal des appels
+
+Une ligne par appel de `/api/v1` sur la sortie de `serve` (journald) :
+
+```text
+[3f…] appel /api/v1 : appareil 1 GET /api/v1/sites/{id} 200 4 ms
+```
+
+Identifiant de requête, appareil (`-` sans authentification), méthode,
+gabarit de route (jamais le chemin brut ni la query string ; `-` hors des
+routes connues), statut, durée. Jamais de jeton, de code d'appairage ni
+d'en-tête. Les 429 d'une même IP sont regroupés : la première ligne d'une
+minute cite l'IP, les suivants sont comptés et le compte est écrit à la
+minute suivante (`N autre(s) 429 regroupé(s) pour <ip> sur une minute`).
+
 ## Codes de réponse
 
 Toute réponse du veilleur porte un en-tête `X-Request-Id` : 32 caractères hex
@@ -339,7 +411,8 @@ minuscules, tirés au hasard pour chaque requête. Le journal du veilleur cite l
 même identifiant entre crochets ; un `X-Request-Id` envoyé par le client est
 ignoré.
 
-Toute erreur de `/api/v1` porte le même corps, avec `Cache-Control: no-store` :
+Toute erreur de `/api/v1` porte le même corps, avec les en-têtes stricts
+(voir [En-têtes](#en-têtes)) :
 
 ```json
 {"error": {"code": "unauthorized", "message": "authentification requise", "request_id": "3f…"}}
@@ -356,10 +429,16 @@ qu'indicatif et ne dit jamais la cause d'un refus ou d'une erreur interne.
 | 401 | `unauthorized` | Code inconnu, expiré, déjà utilisé, corps illisible, trop gros ou trop lent ; jeton absent, mal formé, inconnu ou révoqué ; base absente ou antérieure au schéma 6. **Le même corps**, quelle qu'en soit la raison : le journal du veilleur seul dit laquelle. Toujours vérifié avant le 404 d'un site ou d'un incident : leur existence ne se devine pas sans jeton. |
 | 404 | `not_found` | Site absent de la configuration, incident inconnu, méthode refusée sur une route de l'API. |
 | 409 | `conflict` | Acquittement d'un incident fermé. |
+| 415 | `unsupported_media_type` | `POST` dont le corps annoncé n'est pas `application/json`. |
+| 429 | `too_many_requests` | Limite de débit dépassée (voir [Limite de débit](#limite-de-débit)), avec `Retry-After`. |
 | 500 | `internal` | Erreur interne (base illisible, tirage aléatoire impossible). |
 
 Hors de ces routes, une route inconnue, y compris sous `/api/v1`, reçoit le 404
-sans corps du reste du veilleur, comme tout refus de `POST /r/v1/report`.
+sans corps du reste du veilleur, comme tout refus de `POST /r/v1/report` (sous
+`/api/v1`, avec les en-têtes stricts et sa ligne de journal).
+
+La console 0.1.1 ne connaît pas 415 ni 429 : elle les affiche comme « le
+veilleur a répondu N ». Aucune de ses requêtes ne les reçoit sous la limite.
 
 ## Base de données
 

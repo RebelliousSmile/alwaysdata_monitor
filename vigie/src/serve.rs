@@ -97,6 +97,8 @@ pub(crate) struct AppState {
     /// ne lit sinon la configuration qu'à son démarrage. `None` dans les tests
     /// qui n'en ont pas : la configuration chargée sert alors.
     pub(crate) config_path: Option<PathBuf>,
+    /// Limite de débit et regroupement des 429 de `/api/v1`.
+    pub(crate) api: crate::api::Guards,
 }
 
 impl AppState {
@@ -114,9 +116,21 @@ pub fn router_with_clock(config: Config, clock: Arc<dyn Clock>) -> Router {
 }
 
 /// Routeur complet ; `config_path` est relu à chaque retrait de commande.
+///
+/// L'IP cliente vient de `ConnectInfo<SocketAddr>` : `run` sert le routeur
+/// par `into_make_service_with_connect_info`, un test par `MockConnectInfo`.
+/// Sans elle, toutes les requêtes partagent un même seau d'IP.
 pub fn router_with(config: Config, clock: Arc<dyn Clock>, config_path: Option<PathBuf>) -> Router {
     let site_ids = config.sites.iter().map(|s| s.id.clone()).collect();
     let writer = Writer::new(&config.database);
+    let state = Arc::new(AppState {
+        config,
+        site_ids,
+        clock,
+        writer,
+        config_path,
+        api: crate::api::Guards::default(),
+    });
     Router::new()
         .route("/health", get(health_handler).fallback(not_found))
         .route("/r/v1/report", post(report_handler).fallback(not_found))
@@ -130,14 +144,13 @@ pub fn router_with(config: Config, clock: Arc<dyn Clock>, config_path: Option<Pa
         )
         .merge(crate::api::routes())
         .fallback(not_found)
-        .with_state(Arc::new(AppState {
-            config,
-            site_ids,
-            clock,
-            writer,
-            config_path,
-        }))
+        .with_state(Arc::clone(&state))
         .layer(axum::middleware::from_fn(crate::request_id::layer))
+        // Extérieure à `request_id` : voit les corps d'erreur déjà écrits.
+        .layer(axum::middleware::from_fn_with_state(
+            state,
+            crate::api::guard,
+        ))
 }
 
 pub(crate) async fn not_found() -> StatusCode {
@@ -535,7 +548,8 @@ pub fn run(config: Config, config_path: PathBuf, ip: IpAddr, port: u16) -> Resul
         log::info!("serve à l'écoute sur {addr}");
         axum::serve(
             listener,
-            router_with(config, Arc::new(SystemClock), Some(config_path)),
+            router_with(config, Arc::new(SystemClock), Some(config_path))
+                .into_make_service_with_connect_info::<SocketAddr>(),
         )
         .with_graceful_shutdown(shutdown_signal())
         .await
