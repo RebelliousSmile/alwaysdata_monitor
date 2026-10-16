@@ -9,6 +9,7 @@
 //! RGPD (`decisions.md`) : les valeurs de la query string ne sortent jamais
 //! d'ici, seulement ses clés ; le referer est réduit à son hôte.
 
+pub mod alwaysdata;
 pub mod combined;
 pub mod receive;
 pub mod source;

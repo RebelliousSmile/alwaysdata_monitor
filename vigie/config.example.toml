@@ -58,3 +58,10 @@ interval = 300
 # l'incident `heartbeat` (180 au moins, 900 par défaut). Voir
 # docs/protocole-agent.md.
 # agent_silence = 900
+# Logs HTTP poussés par l'agent (docs/logs.md, docs/agent-php.md). Sans
+# source, /r/v1/logs refuse le site. hosts : hôtes du site en minuscules, sans
+# port (obligatoire avec source) ; tz : fuseau IANA des lignes sans décalage.
+# [sites.logs]
+# source = "alwaysdata"
+# hosts = ["www.example.org", "example.org"]
+# tz = "Europe/Paris"

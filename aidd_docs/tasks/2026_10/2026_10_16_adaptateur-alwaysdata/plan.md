@@ -1,6 +1,6 @@
 ---
 objective: "L'agent PHP d'un site Alwaysdata pousse au veilleur, par lots signés et idempotents, les lignes nouvelles du log HTTP de ses hôtes, depuis une position d'octet persistée qui survit aux rotations gz ; le veilleur les normalise à la réception, n'en garde que des Entry sans valeur de query string, 30 jours, et les sert à l'analyse par un LogSource."
-status: pending
+status: done
 issue_number: 1
 ---
 

@@ -1,6 +1,7 @@
 //! `vigie tick` : passage lancé chaque minute par `vigie-tick.timer`.
 //!
-//! 1. enregistre le passage, que `/health` surveille ;
+//! 1. enregistre le passage, que `/health` surveille, et purge les logs
+//!    reçus de plus de 30 jours (`docs/logs.md`) ;
 //! 2. lance les contrôles dus, les sites les plus en retard d'abord, sans
 //!    commencer de requête après 40 s ;
 //! 3. ouvre ou clôt le silence de chaque agent déclaré ;
@@ -157,6 +158,14 @@ pub fn run_with(
     let mut store = Store::open(&config.database)?;
     store.record_tick(now)?;
     record_typology(&mut store, config, now)?;
+    // RGPD : conservation de 30 jours. Un échec n'arrête pas le passage.
+    match store.purge_logs(now) {
+        Ok((0, 0)) => {}
+        Ok((entries, batches)) => {
+            log::info!("logs : {entries} entrée(s) et {batches} lot(s) de plus de 30 jours purgés")
+        }
+        Err(err) => log::error!("purge des logs : {err:#}"),
+    }
     let http = Http::new(&options.trust, options.request_timeout);
     let ctx = Ctx {
         http: &http,
