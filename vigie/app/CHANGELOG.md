@@ -3,6 +3,12 @@
 Versions de la console (`vigie/app`), publiées par les tags `console-vX.Y.Z`.
 Le veilleur a son propre historique.
 
+## 0.1.1
+
+- Android : l'en-tête ne passe plus sous la barre d'état, ni la barre du bas
+  sous la barre de navigation. L'app s'affiche bord à bord et réserve les
+  marges de sécurité du système.
+
 ## 0.1.0
 
 Première version, Windows et Android.

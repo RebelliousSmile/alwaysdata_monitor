@@ -12,7 +12,7 @@ const { to } = useSiteLinks()
 <template>
   <nav
     aria-label="Navigation du site"
-    class="sticky bottom-0 z-20 grid grid-cols-4 border-t border-line bg-header px-1 pb-4 pt-1 wide:hidden"
+    class="sticky bottom-0 z-20 grid grid-cols-4 border-t border-line bg-header px-1 pb-[max(1rem,env(safe-area-inset-bottom))] pt-1 wide:hidden"
   >
     <RouterLink
       v-for="item in SITE_NAV"

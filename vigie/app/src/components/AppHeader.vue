@@ -4,7 +4,8 @@ import AppIcon from '@/components/AppIcon.vue'
 import type { IconName } from '@/lib/icons'
 
 // En-tête collant. « Relire » reste toujours à la même place, juste avant
-// l'accès aux réglages ou aux paramètres.
+// l'accès aux réglages ou aux paramètres. Sous Android, l'app s'affiche bord
+// à bord : l'en-tête s'étend sous la barre d'état et décale son contenu.
 defineProps<{
   title: string
   subtitle?: string
@@ -25,7 +26,7 @@ defineEmits<{ reload: [] }>()
 </script>
 
 <template>
-  <header class="sticky top-0 z-20 flex items-center gap-1 border-b border-line bg-header p-2">
+  <header class="sticky top-0 z-20 flex items-center gap-1 border-b border-line bg-header p-2 pt-[calc(0.5rem_+_env(safe-area-inset-top))]">
     <RouterLink
       v-if="back"
       :to="back"

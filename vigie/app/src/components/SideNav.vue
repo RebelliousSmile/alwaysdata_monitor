@@ -20,7 +20,7 @@ const current = 'bg-surface-3 font-semibold text-text'
 <template>
   <nav
     aria-label="Navigation principale"
-    class="sticky top-0 hidden h-screen w-56 flex-none flex-col gap-1 border-r border-line bg-header p-3 wide:flex"
+    class="sticky top-0 hidden h-screen w-56 flex-none flex-col gap-1 border-r border-line bg-header p-3 pt-[calc(0.75rem_+_env(safe-area-inset-top))] wide:flex"
   >
     <div class="mb-3 flex min-h-tap items-center gap-2 px-2">
       <span class="text-primary"><AppIcon name="shield" /></span>
