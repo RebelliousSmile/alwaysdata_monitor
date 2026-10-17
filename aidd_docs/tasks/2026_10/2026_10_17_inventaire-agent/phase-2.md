@@ -9,16 +9,16 @@ status: pending
 ```txt
 .
 └── vigie/agent/php/
-    ├── vigie-agent.php                 ✏️ section « Inventaire » : configuration, relevés WordPress / PrestaShop / Composer / npm, purl, CycloneDX, bornes ; kind prestashop
+    ├── vigie-agent.php                 ✏️ section « Inventaire » : configuration, relevés WordPress / PrestaShop / Composer / npm, purl selon la grammaire commune, CycloneDX, bornes, kind prestashop
     ├── config.example.json             ✏️ section inventory d'exemple ({"enabled": true})
     └── tests/
-        ├── AgentTest.php               ✏️ tests du relevé : chaque purl attendu, bornes, fichiers hostiles, lecture seule
+        ├── AgentTest.php               ✏️ tests du relevé : chaque purl attendu, vecteurs purl.json de F1, bornes, fichiers hostiles, lecture seule
         └── fixtures/
-            ├── wp-inventory/           ✅ site A fictif : wp-includes/version.php, plugins (dossier, fichier unique, sans en-tête), mu-plugins, thèmes parent et enfant, composer.lock (packages + packages-dev, wpackagist-plugin présent aussi sur disque, wpackagist-theme seul), package-lock.json v3 (paquet à scope et à majuscules)
-            ├── ps16-inventory/         ✅ site B fictif PrestaShop 1.6 : config/settings.inc.php, modules avec config.xml et un sans
-            ├── ps8-inventory/          ✅ site B fictif PrestaShop 8 : app/AppKernel.php, modules, composer.lock dont un prestashop-module à version d'installation périmée
-            ├── ps-hostile/             ✅ config.xml à DOCTYPE et entités (texte inerte), config.xml mal formé
-            └── inventory-expected.json ✅ purl, version, scope, vigie:scope, vigie:path attendus par fixture
+            ├── wp-inventory/           ✅ site A fictif : wp-includes/version.php, plugins (dossier, fichier unique, sans en-tête, en-tête précédé de <?php et en \r\n), mu-plugins (avec et sans Plugin Name), thèmes parent et enfant, composer.lock (packages + packages-dev, wpackagist-plugin aussi sur disque, wpackagist-theme seul, même paquet dans un second lockfile à une autre version), package-lock.json v3 (scope, majuscules, workspace, extraneous, devOptional)
+            ├── ps16-inventory/         ✅ site B fictif PrestaShop 1.6 : config/settings.inc.php, modules avec littéral seul, config.xml seul, les deux en accord
+            ├── ps8-inventory/          ✅ site B fictif PrestaShop 8 : app/AppKernel.php, modules dont un à config.xml périmé, composer.lock avec prestashop-module à version d'installation périmée et un absent de modules/
+            ├── ps-hostile/             ✅ config.xml à DOCTYPE et entités, avec NUL, en UTF-8 invalide, mal formé (texte inerte)
+            └── inventory-expected.json ✅ purl, version, scope, vigie:scope, vigie:path, vigie:config-version attendus par fixture
 ```
 
 ## Test Scope
@@ -26,48 +26,56 @@ status: pending
 ```mermaid
 journey
   section Happy path
-    wp-inventory => cœur, extensions, extension à fichier unique, mu-plugin, thèmes parent et enfant, Composer, npm : liste égale à inventory-expected.json: 5: agent
-    ps16-inventory et ps8-inventory => noyau et modules, purl pkg:prestashop: 5: agent
-    ps8 : prestashop-module du composer.lock => émis une fois en pkg:prestashop/module à la version de config.xml, jamais en pkg:composer: 5: agent
-    wp : wpackagist-plugin/wpackagist-theme => pkg:wordpress, un seul composant par purl, version du disque si présent: 5: agent
-    Document produit => champs du sous-ensemble CycloneDX 1.7 seulement, specVersion 1.7, serialNumber UUID v4: 5: agent
+    wp-inventory => cœur pkg:wordpress/core/core, extensions, fichier unique, mu-plugin, thèmes parent et enfant, Composer, npm : liste égale à inventory-expected.json: 5: agent
+    ps16-inventory et ps8-inventory => noyau et modules en pkg:prestashop, version du littéral $this->version: 5: agent
+    ps8 : config.xml différent du littéral => version du littéral, vigie:config-version porte celle de config.xml: 5: agent
+    ps8 : prestashop-module du composer.lock => émis une fois en pkg:prestashop/module, jamais en pkg:composer ; absent de modules/ => non émis: 5: agent
+    wp : wpackagist-plugin et wpackagist-theme => pkg:wordpress, un composant par purl sans version, version du disque si présent: 5: agent
+    Même paquet Composer dans deux lockfiles à deux versions => deux composants (purl complet, vigie:path): 5: agent
+    Document produit => uniquement les champs de la liste blanche, specVersion 1.7, serialNumber UUID v4: 5: agent
+    purl.json de F1 rejoué par purl() => tous les vecteurs égaux: 5: agent
   section Edge case
-    Dossier d'extension sans Plugin Name => ignoré: 1: agent
+    Dossier d'extension sans Plugin Name, mu-plugin sans Plugin Name => ignorés: 1: agent
     En-tête Version au-delà de 8 Kio => version vide: 1: agent
     Fichier d'en-tête de 50 Mio (créé par le test) => 8 Kio lus, temps borné: 1: agent
     Version piégée 1.0'; system(…) (créée par le test) => version vide, rien d'exécuté: 1: agent
-    config.xml à entités externes ou DOCTYPE => non analysé, repli sur $this->version: 1: agent
-    Lien symbolique sortant de root (plugin, thème, composer.lock, créé par le test) => non suivi, composant absent, skipped compté: 1: agent
-    Nom de dossier hors [A-Za-z0-9._-] => écarté, skipped compté: 1: agent
-    composer.lock de 4 Mio + 1 ou JSON invalide => aucun paquet, complete false: 1: agent
-    package-lock.json v1 => aucun paquet, sans erreur: 1: agent
+    Version à ~ (1.0~beta) => version vide: 1: agent
+    config.xml à DOCTYPE, entité, NUL ou UTF-8 invalide => ignoré, version du littéral ou vide, aucune expansion: 1: agent
+    Dossier d'extension, de thème ou de module en lien symbolique (même vers l'intérieur, créé par le test) => refusé, skipped compté, complete false: 1: agent
+    composer.lock en lien symbolique sortant (créé par le test) => non lu, complete false: 1: agent
+    Module PrestaShop au nom contenant un point, slug hors grammaire => écarté, skipped compté, complete false: 1: agent
+    Nom Composer de 215 octets ou motif pathologique (créé par le test) => rejeté sans regex lente, compté: 1: agent
+    composer.lock de 4 Mio + 1 ou JSON invalide ; package-lock.json v1 => aucun paquet, complete false: 1: agent
+    Dossier plugins de 501 entrées (créé par le test) => arrêt à 500, complete false: 1: agent
     2 001 composants (créés par le test) => 2 000 gardés, complete false: 1: agent
     Corps au-delà de 512 Kio => composants retirés depuis la fin, complete false, corps ≤ 524 288 octets: 1: agent
     Délai de relevé dépassé (horloge injectée) => complete false: 1: agent
-    kind generic => ni cœur ni extension, Composer et npm seulement ; wpackagist et prestashop-module restent pkg:composer: 1: agent
-    prestashop-module du lockfile absent de modules/ => non émis: 1: agent
-    Nom npm à majuscules => casse gardée dans name et purl: 1: agent
+    npm : workspace et extraneous ignorés, devOptional => required, casse gardée: 1: agent
+    kind generic => Composer et npm seulement ; wpackagist et prestashop-module restent pkg:composer: 1: agent
     Fixtures => aucun fichier modifié, aucun mtime changé: 1: agent
 ```
 
 ## Tasks to do
 
-1. **Configuration** : `kind` admet `prestashop` (défaut d'`uploads` : `null` pour `prestashop`) ; `inventory_config()` sur le modèle de `logs_config()` : objet aux clés `enabled` (booléen, obligatoire), `composer`, `npm` (listes de 10 chemins relatifs au plus, sans double, par `relative_path`), toute autre clé refusée ; absente → désactivé. `Config` reçoit `inventory` (`?array{composer: list, npm: list}`) et `inventoryEndpoint` (dérivé de `endpoint` : suffixe `/r/v1/report` exigé, comme pour les logs).
-2. **Lecture bornée commune** : `read_head(rootReal, relative, bytes)` via `locate()` (aucun lien hors racine) et `file_get_contents(…, 0, bytes)` ; `header_value(text, name)` sur le modèle de `get_file_data` de WordPress (`/^[ \t\/*#@]*Name:(.{0,256})$/mi`, une seule ligne) ; `clean_version(raw)` : valeur coupée, `^[0-9A-Za-z.+_~-]{1,64}$` sinon `''` ; `list_dir(rootReal, relative, max)` : entrées triées, 500 au plus, liens suivis seulement si leur cible reste dans la racine (`locate_dir`), segments validés.
-3. **WordPress** (`kind = wordpress`) : cœur par `wordpress_version()` existant (type `application`, `pkg:wordpress/core/core`) ; `wp-content/plugins/<slug>/` : `<slug>.php` d'abord puis les autres `.php` du premier niveau par ordre de nom, 20 au plus, premier fichier qui porte `Plugin Name:` → composant (slug tel quel dans le purl) ; `plugins/<fichier>.php` : extension à fichier unique, slug = nom sans `.php` ; `wp-content/mu-plugins/*.php` de premier niveau : `vigie:scope = mu`, version de l'en-tête si présente, sinon vide ; `wp-content/themes/<slug>/style.css` portant `Theme Name:` → `pkg:wordpress/theme/<slug>`, `Template:` valide → `vigie:parent`.
-4. **PrestaShop** (`kind = prestashop`) : noyau par `app/AppKernel.php` (`/const\s+VERSION\s*=\s*['"]([^'"]{1,64})['"]\s*;/`) puis `config/settings.inc.php` (`/define\(\s*['"]_PS_VERSION_['"]\s*,\s*['"]([^'"]{1,64})['"]\s*\)/`), sur 64 Kio, version passée par `clean_version` ; **à l'implémentation, vérifier sur une archive publique de PrestaShop 9 où se trouve la version et compléter l'ordre si besoin** ; `modules/<nom>/` avec `<nom>.php` : `config.xml` (8 Kio, refus si `<!DOCTYPE`/`<!ENTITY`, `simplexml_load_string` avec `LIBXML_NONET | LIBXML_NOCDATA`, `libxml_use_internal_errors(true)`, `<version>` lu), sinon `$this->version = '…'` sur 32 Kio de `<nom>.php`.
-5. **Composer** : `composer.lock` de la racine puis des chemins `inventory.composer` ; 4 Mio au plus, `json_decode` profondeur 32 ; `packages[]` → `vigie:scope = required`, `packages-dev[]` → `dev` (CycloneDX `excluded`) ; `name` `vendor/nom` validé (`^[a-z0-9]([_.-]?[a-z0-9]+)*/[a-z0-9](([_.]|-{1,2})?[a-z0-9]+)*$` après mise en minuscules), `version` brute nettoyée ; `vigie:path` = chemin du lockfile. **Correspondances CMS** : site `prestashop`, `type` = `prestashop-module` → non émis en Composer ; le module `<x>` (`extra.installer-name`, sinon partie après `/`) vient du relevé de `modules/<x>/` (version de `config.xml`), et rien n'est émis s'il n'y est pas ; site `wordpress`, `wpackagist-plugin/<slug>` → `pkg:wordpress/plugin/<slug>`, `wpackagist-theme/<slug>` → `pkg:wordpress/theme/<slug>` (version du lockfile). Puis **un composant par purl sans version**, le relevé sur disque l'emportant (ordre de priorité fixe, testé).
-6. **npm** : `package-lock.json` de la racine puis des chemins `inventory.npm` ; `lockfileVersion` 2 ou 3 seulement ; `packages` : clé `""` ignorée, entrées `link: true` ignorées, nom = ce qui suit le dernier `node_modules/` (ou le champ `name` s'il est présent et valide), `dev: true` → `dev` ; nom npm validé sans changer la casse (`^(@[A-Za-z0-9-~][A-Za-z0-9-._~]*/)?[A-Za-z0-9-~][A-Za-z0-9-._~]*$`, 214 au plus).
-7. **purl côté agent** : `purl(ecosystem, name, version)` avec le même encodage que `inventory/purl.rs` (phase 1 : minuscules pour Composer seulement) ; vecteurs partagés en phase 3.
-8. **Document** : `collect_inventory(Config, deadline) -> array{components, complete, skipped}` dans l'ordre cœur, extensions, mu, thèmes, noyau PS, modules, Composer, npm ; 2 000 au plus ; `build_inventory_body(Config, inventory, seq, now, serial)` : enveloppe et BOM exacts, **uniquement les champs de la liste blanche** (jamais `authors`, `supplier`, `licenses`, ni le `Plugin Name`, l'auteur ou l'URL lus dans un en-tête) (`JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE`), `metadata.timestamp` = `gmdate('Y-m-d\TH:i:s\Z', now)`, `serialNumber` = UUID v4 de `random_bytes` (injectable pour les fixtures) ; retrait depuis la fin tant que le corps dépasse 524 288 octets, `complete = false`. `inventory_digest(components)` : SHA-256 de la liste triée `(purl, path)` en JSON compact, sans `serialNumber` ni `timestamp`.
-9. **Fixtures fictives** et `inventory-expected.json` ; les cas hostiles qui ressemblent à du code dangereux, les fichiers géants, les liens symboliques et les 2 001 composants sont fabriqués par le test dans `tmp_dir()`, jamais versionnés.
+1. **Configuration** : `kind` admet `prestashop` (`uploads` par défaut `null`) ; `inventory_config()` sur le modèle de `logs_config()` : clés `enabled` (booléen, obligatoire), `composer`, `npm` (10 chemins relatifs au plus, sans double, par `relative_path`) ; toute autre clé refusée ; absente → désactivé. `Config` reçoit `inventory` et `inventoryEndpoint` (dérivé de `endpoint`, suffixe `/r/v1/report` exigé).
+2. **Lecture bornée et motifs sûrs** : `read_head(rootReal, relative, bytes)` via `locate()` ; `list_dir(rootReal, relative)` via `locate_dir()` (qui refuse tout dossier lien symbolique) et `opendir`/`readdir` arrêté à 500 entrées, entrées triées ; chaque sous-dossier repassé par `locate_dir`. Toute valeur non fiable est coupée à sa longueur maximale **avant** la regex (214 pour un nom, 256 pour une ligne d'en-tête, 64 pour une version, 200 pour un slug) ; motifs ancrés, quantificateurs possessifs ou bornés ; un `preg_match` qui rend `false` est un rejet compté. `clean_version(raw)` : valeur coupée de ses espaces, `^[0-9A-Za-z.+_-]{1,64}+$`, sinon `''`. Une source refusée ou illisible (lien, hors racine, `opendir` ou lecture en échec, lockfile invalide) incrémente `skipped` et met `complete = false`.
+3. **En-têtes WordPress** comme `get_file_data` : 8 Kio, `\r` normalisés en `\n`, préfixe `<?php` accepté, ligne `^[ \t\/*#@]*+Name:(.{0,256})$` (multiligne), valeur coupée.
+4. **WordPress** (`kind = wordpress`) : cœur par `wordpress_version()` passé par `clean_version` (type `application`, `pkg:wordpress/core/core`) ; `wp-content/plugins/<slug>/` : `<slug>.php` d'abord puis les autres `.php` du premier niveau par nom, 20 au plus, premier qui porte `Plugin Name:` ; `plugins/<fichier>.php` à `Plugin Name:` : extension à fichier unique, slug = nom sans `.php` (limite `hello.php` ≠ `hello-dolly` documentée en phase 3) ; `wp-content/mu-plugins/*.php` de premier niveau **portant `Plugin Name:`** → `vigie:scope = mu` ; `wp-content/themes/<slug>/style.css` (un niveau) portant `Theme Name:` → thème, `Template:` dans la grammaire des slugs → `vigie:parent`. Slugs selon la grammaire commune (`[A-Za-z0-9._-]{1,200}`), tels quels.
+5. **PrestaShop** (`kind = prestashop`) : noyau par `app/AppKernel.php` (`const VERSION`) puis `config/settings.inc.php` (`_PS_VERSION_`), 64 Kio, motifs bornés, `clean_version` ; **à l'implémentation, vérifier sur une archive publique de PrestaShop 9 où se trouve la version et compléter l'ordre si besoin**. `modules/<x>/` avec `<x>` dans `[A-Za-z0-9_-]{1,64}` et `<x>.php` présent : version du littéral `/\$this->version\s{0,16}=\s{0,16}['"]([0-9A-Za-z.+_-]{1,64})['"]/` sur 64 Kio ; repli `config.xml` (8 Kio) seulement s'il est UTF-8 valide (`preg_match('//u')`), sans NUL, sans `<!` hors `<![CDATA[`, version par `/<version>\s{0,16}(?:<!\[CDATA\[)?\s{0,16}([0-9A-Za-z.+_-]{1,64})\s{0,16}(?:\]\]>)?\s{0,16}<\/version>/` ; les deux lus et différents → version du littéral et `vigie:config-version`. Aucun analyseur XML.
+6. **Composer** : `composer.lock` de la racine puis de `inventory.composer` ; 4 Mio, `json_decode` profondeur 32 ; `packages[]` → `required`, `packages-dev[]` → `dev` (`excluded`) ; nom coupé à 214, mis en minuscules, validé par `^[a-z0-9]++(?:[_.-][a-z0-9]++)*+/[a-z0-9]++(?:(?:[_.]|-{1,2})[a-z0-9]++)*+$`. Correspondances CMS : site `prestashop`, `type` = `prestashop-module` → non émis (le module vient de l'étape 5, nom = `extra.installer-name` sinon partie après `/`, et rien s'il n'est pas dans `modules/`) ; site `wordpress`, `wpackagist-plugin/<slug>` / `wpackagist-theme/<slug>` → `pkg:wordpress/plugin|theme/<slug>` ; site `generic` : aucune correspondance.
+7. **npm** : `package-lock.json` de la racine puis de `inventory.npm` ; `lockfileVersion` 2 ou 3 seulement ; `packages` : clé `""`, clés hors `node_modules/` (workspaces), `link: true` et `extraneous: true` ignorées ; nom = ce qui suit le dernier `node_modules/`, coupé à 214, casse gardée, validé par motif possessif selon la définition officielle ; `dev: true` → `dev`, `devOptional: true` → `required`.
+8. **Doublons et ordre** : `wordpress`/`prestashop` : un composant par purl sans version, le disque l'emportant ; `composer`/`npm` : un par `(purl complet, vigie:path)`. Ordre de relevé : cœur, extensions, mu, thèmes, noyau PS, modules, Composer, npm ; 2 000 au plus.
+9. **purl côté agent** : `purl(ecosystem, name, version)` selon la grammaire commune ; test qui rejoue **`purl.json` de F1** (chemin lu depuis le dépôt) et échoue sur tout écart.
+10. **Document** : `collect_inventory(Config, deadline) -> array{components, complete, skipped, stat}` (`stat` : chemins des dossiers listés et fichiers lus, pour la phase 3) ; `build_inventory_body(Config, inventory, seq, now, serial)` : enveloppe et BOM exacts, **seulement les champs de la liste blanche** (jamais `Plugin Name`, auteur, URL ou licence lus dans un en-tête), `metadata.timestamp` = `gmdate('Y-m-d\TH:i:s\Z', now)`, `serialNumber` UUID v4 (`random_bytes`, injectable) ; taille de chaque composant encodé mesurée une fois, retrait depuis la fin tant que l'enveloppe dépasse 524 288 octets, `complete = false`. `inventory_digest(components)` : SHA-256 de la liste triée `(purl, path)` en JSON compact.
+11. **Fixtures fictives** et `inventory-expected.json` ; cas hostiles qui ressemblent à du code, fichiers géants, liens symboliques, 501 entrées et 2 001 composants fabriqués par le test dans `tmp_dir()`.
 
 ## Test acceptance criteria
 
 | Task | Acceptance criteria |
 | ---- | ------------------- |
 | 1 | `inventory` mal formée (clé inconnue, `enabled` absent ou non booléen, chemin `../`, 11 chemins) → code 2 et message nommant `inventory` ; absente → aucun relevé |
-| 2-6 | Chaque purl, version, `scope` et `vigie:scope` de `inventory-expected.json` est vérifié ; un `grep` du code de l'agent ne trouve ni `include`/`require` de chemin du site, ni `eval`, ni `LIBXML_NOENT`, ni `LIBXML_DTDLOAD` |
-| 4 | Le `config.xml` à entités ne fait lire aucun fichier (sentinelle hors racine jamais ouverte, vérifiée par `fileatime` ou par un flux enregistreur) et ne déclenche aucune expansion |
-| 8 | Deux relevés successifs du même site donnent le même digest ; le document ne contient que les clés du sous-ensemble (comparaison récursive des noms de clés) ; il est validé une fois avec `cyclonedx-cli validate --input-version v1_7` (ou le schéma `bom-1.7.schema.json`) à l'implémentation, résultat consigné dans la PR |
-| 9 | `lecture seule : la fixture garde ses fichiers et ses mtime` étendu aux nouvelles fixtures ; `php run.php` passe sous PHP 8.1 (image épinglée du CI) |
+| 2-8 | Chaque purl, version, `scope`, `vigie:scope` et `vigie:config-version` de `inventory-expected.json` est vérifié ; `complete` est faux dans chaque cas hostile et vrai sur les fixtures saines ; un `grep` de l'agent ne trouve ni `include`/`require` d'un chemin du site, ni `eval`, ni `simplexml`, `DOMDocument`, `XMLReader`, `LIBXML_` |
+| 2 | Le nom pathologique est rejeté en moins de 50 ms ; aucun `preg_last_error()` différent de `PREG_NO_ERROR` n'est ignoré |
+| 9 | `purl.json` de F1 passe à l'identique côté PHP |
+| 10 | Deux relevés du même site donnent le même digest ; le document ne contient que les clés de la liste blanche (comparaison récursive) ; validé une fois avec `cyclonedx-cli validate --input-version v1_7` (ou `bom-1.7.schema.json`) à l'implémentation, résultat consigné dans la PR |
+| 11 | `lecture seule : la fixture garde ses fichiers et ses mtime` étendu aux nouvelles fixtures ; `php run.php` passe sous PHP 8.1 (image épinglée du CI) |
