@@ -336,7 +336,7 @@ et l'agent PHP) :
 | module PrestaShop | `[A-Za-z0-9_-]{1,64}` (règle `Validate::isModuleName` : pas de `.`) | tel quel |
 | nom Composer | `vendor/nom` de Composer, longueur ≤ 214 | minuscules |
 | nom npm, crate | définitions purl officielles | tel quel |
-| version | `[0-9A-Za-z.+_-]{1,64}` | telle quelle |
+| version | `[0-9A-Za-z.+_-]{1,128}` | telle quelle |
 
 Un composant hors grammaire est écarté et compté, côté agent comme côté
 veilleur ; les deux appliquent la même grammaire, si bien qu'aucun composant
