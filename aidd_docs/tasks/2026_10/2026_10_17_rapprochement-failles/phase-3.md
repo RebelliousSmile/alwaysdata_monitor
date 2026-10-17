@@ -47,6 +47,8 @@ journey
     Faille dont un CVE est dans KEV => refus « faille exploitée (KEV) : dérogation interdite »: 1: cli
     Composant absent du dernier inventaire de la source, version inconnue (« acquitter avec vigie ack »), faille qui ne touche pas le composant => refus: 1: cli
     --source ci sans source ci déclarée ; deux sources déclarées sans --source => refus: 1: cli
+    --source agent --source ci => aperçu de deux dérogations ; --apply => deux lignes, deux entrées d'audit, une transaction: 1: cli
+    Nouvel alias publié pour la faille dérogée (nouvelle génération) => dérogation caduque « groupe changé » au tick suivant: 1: cli
     purl ou identifiant mal formé, site inconnu ou non surveillé => refus: 1: cli
     Sans [commands] (pas de clé d'audit) => refus, message clair: 1: cli
   section Base absente ou antérieure
@@ -64,13 +66,13 @@ journey
    - `active(site, now)`, `all(site)` avec leur état.
 2. **`main.rs`** :
    - `vigie site components <site>`, `vigie site vulns <site> [--all]` : `Store::open_read`, schéma vérifié contre `SCHEMA_VULNS_MATCH` ; site inconnu ou non surveillé → `UsageError` (code 2) ;
-   - `vigie site vulns-ack <site> <purl> <faille> [--source agent|ci] --reason <motif> --until <AAAA-MM-JJ> [--apply]` et `vigie site vulns-ack <site> --revoke <id> --reason <motif> [--apply]` : `--until` et `--reason` validés avant toute lecture ; `--source` obligatoire si deux sources sont déclarées ; aperçu (site, source, composant, version, groupe, `covered_ids`, échéance, « inscrit dans l'audit du site par empreinte du motif »), puis `--apply` ; `[commands]` exigé (clé d'audit, comme `enqueue`, `main.rs` l. 848) ; version inconnue → refus qui renvoie vers `vigie ack <incident>` ;
+   - `vigie site vulns-ack <site> <purl> <faille> [--source agent|ci]… --reason <motif> --until <AAAA-MM-JJ> [--apply]` (une dérogation par source : `--source` répétable, l'aperçu montre une dérogation par source citée, `--apply` les écrit toutes dans une transaction ou aucune) et `vigie site vulns-ack <site> --revoke <id> --reason <motif> [--apply]` : `--until` et `--reason` validés avant toute lecture ; `--source` obligatoire si deux sources sont déclarées ; aperçu (site, source, composant, version, groupe, `covered_ids`, échéance, « inscrit dans l'audit du site par empreinte du motif »), puis `--apply` ; `[commands]` exigé (clé d'audit, comme `enqueue`, `main.rs` l. 848) ; version inconnue → refus qui renvoie vers `vigie ack <incident>` ;
    - `vigie vulns report` : sites surveillés, critiques d'abord, puis avertissements, puis comptes d'information ; en tête « document interne » si un groupe est `Internal` ou `FactsOnly` ; en pied l'âge de chaque source (`sync_state`, F2) et les constats `vulns-sync` ouverts ;
-   - `vigie status` : ligne « failles » par site surveillé.
+   - `vigie status` : ligne « failles » par site surveillé, avec `error_count` et l'avertissement « rapprochement en échec depuis N passages » s'il n'est pas nul.
 3. **`report.rs`** : rendu commun, `LogText` partout, attributions entières relues depuis les identifiants de source, liens en texte, CVSS en décimal, EPSS en %.
 4. **`command/audit.rs`** : commentaire d'`Entry.event` complété (`vuln-waived`, `vuln-waiver-revoked`) ; rien d'autre.
 5. **Tests** : `vulns_cli.rs` (« Lecture », « Base absente », « Sortie ») sur une base rapprochée par `tick::run_with` ; `vulns_waivers.rs` (« Dérogation » et « Refus », `FakeClock`, clé d'audit de test, `audit::verify`, motif semé `motif-secret-xyz` cherché dans toute la chaîne et dans la base après `site remove`).
-6. **`README.md`** : les quatre commandes, l'aperçu puis `--apply`, 90 jours, KEV, audit par empreinte, version inconnue seulement acquittable.
+6. **`README.md`** : les quatre commandes, l'aperçu puis `--apply`, 90 jours, KEV, audit par empreinte, version inconnue seulement acquittable, **une dérogation par source** (`--source` répété), **caducité dès qu'un nouvel identifiant ou alias rejoint le groupe** (« groupe changé » : à ressaisir).
 
 ## Test acceptance criteria
 
