@@ -378,3 +378,84 @@ pub fn vulns_lines(
     }
     out
 }
+
+/// Dérogation d'un groupe vue par l'API : source, échéance, état ; jamais
+/// le motif ni l'opérateur.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WaiverView {
+    pub source: Source,
+    pub until: i64,
+    pub state: Applies,
+}
+
+/// Faille d'un composant pour l'API : le groupe, son composant, la version
+/// vue par chaque source, la gravité retenue et sa dérogation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VulnView {
+    pub base: String,
+    pub group: GroupResult,
+    pub versions: Vec<(Source, Option<String>)>,
+    pub severity: Severity,
+    pub waiver: Option<WaiverView>,
+}
+
+/// Failles des runs donnés, une par (purl sans version, groupe), triées par
+/// gravité, purl puis groupe.
+pub fn vuln_views(results: &[ComponentResult], rows: &[Row], now: i64) -> Vec<VulnView> {
+    let mut by: BTreeMap<(String, String), VulnView> = BTreeMap::new();
+    for r in results {
+        let base = key(&r.component.base);
+        for g in &r.groups {
+            let view = by
+                .entry((base.clone(), g.key.clone()))
+                .or_insert_with(|| VulnView {
+                    base: base.clone(),
+                    group: g.clone(),
+                    versions: Vec::new(),
+                    severity: g.severity,
+                    waiver: None,
+                });
+            let seen = (r.component.source, r.component.version.clone());
+            if !view.versions.contains(&seen) {
+                view.versions.push(seen);
+            }
+            if g.severity > view.severity {
+                view.severity = g.severity;
+                view.group = g.clone();
+            }
+            for w in rows
+                .iter()
+                .filter(|w| w.revoked_at.is_none())
+                .filter(|w| w.source == r.component.source && w.base == base)
+            {
+                let waiver = as_waiver(w);
+                if !waiver.targets(g) {
+                    continue;
+                }
+                let state = waiver.applies(g, r.component.version.as_deref(), now);
+                let better = view
+                    .waiver
+                    .as_ref()
+                    .is_none_or(|held| held.state != Applies::Ok && state == Applies::Ok);
+                if better {
+                    view.waiver = Some(WaiverView {
+                        source: w.source,
+                        until: w.until,
+                        state,
+                    });
+                }
+            }
+        }
+    }
+    let mut out: Vec<VulnView> = by.into_values().collect();
+    for v in &mut out {
+        v.versions.sort();
+    }
+    out.sort_by(|a, b| {
+        b.severity
+            .cmp(&a.severity)
+            .then(a.base.cmp(&b.base))
+            .then(a.group.key.cmp(&b.group.key))
+    });
+    out
+}
