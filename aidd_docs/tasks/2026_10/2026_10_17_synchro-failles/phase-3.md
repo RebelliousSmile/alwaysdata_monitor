@@ -14,13 +14,15 @@ status: pending
     ├── deploy/
     │   ├── provision.sh               ✏️ installe et active vigie-vulns-sync.service et .timer
     │   └── systemd/
-    │       ├── vigie-vulns-sync.service ✅ oneshot, durcissements de tick, Nice, IOSchedulingClass=idle, OOMScoreAdjust=500, MemoryMax, TimeoutStartSec=3h
+    │       ├── vigie-vulns-sync.service ✅ oneshot, durcissements de tick, Nice, IOSchedulingClass=best-effort + IOSchedulingPriority=7, OOMScoreAdjust=500, MemoryMax, TimeoutStartSec=3h
     │       └── vigie-vulns-sync.timer   ✅ OnCalendar=*-*-* 03:40:00, RandomizedDelaySec=45min, Persistent=true
     ├── src/
+    │   ├── api.rs                     — inchangé ; test : incident _veilleur lisible et acquittable par /api/v1/incidents/{id}
     │   ├── capability.rs              ✏️ Control::VulnsSync (« vulns-sync »), Needs::Watcher, WATCHER_SITE = "_veilleur" ; watched_by_watcher(config, check, key)
     │   ├── store.rs                   ✏️ close_unwatched(is_watched: impl Fn(&Incident) -> bool, now)
-    │   ├── tick.rs                    ✏️ évaluation de fraîcheur des sources déclarées, réconciliation vulns-sync ; prédicat de close_unwatched sur l'incident ; libellé du pseudo-site dans les e-mails
-    │   ├── main.rs                    ✏️ vigie status : une ligne par source de failles (âge de la dernière réussite, dernière issue)
+    │   ├── alert.rs                   ✏️ e-mails d'un incident _veilleur : sujet et corps propres, sans « site » ni URL
+    │   ├── tick.rs                    ✏️ close_unwatched (prédicat sur l'incident) puis fraîcheur des sources déclarées et réconciliation vulns-sync ; méta vulns.declared.<source> écrite ou supprimée
+    │   ├── main.rs                    ✏️ vigie status : une ligne par source de failles (âge de la dernière réussite, dernière issue, bail en cours et son âge)
     │   └── vulns/sync/
     │       └── freshness.rs           ✅ STALE_AFTER = 3 jours ; findings(declared, states, declared_since, now) -> Vec<Finding>, fonction pure
     ├── tests/
@@ -46,10 +48,12 @@ journey
     Échecs répétés après une réussite récente => aucun constat avant 3 jours: 1: tick
     Source jamais synchronisée => constat 3 jours après le premier tick qui la voit déclarée: 1: tick
     Source retirée de [vulns] sources => incident clos plus surveillé, jamais rétabli: 1: tick
-    Section [vulns] retirée => tous les incidents vulns-sync clos plus surveillé: 1: tick
+    Section [vulns] retirée => tous les incidents vulns-sync clos plus surveillé, méta vulns.declared supprimées: 1: tick
+    Lecture de vuln_sources en échec (table verrouillée injectée) => aucun reconcile, aucun incident clos ni ouvert, erreur journalisée: 1: tick
     Base sans tables de failles (schéma antérieur) => tick inchangé, aucune erreur: 1: tick
   section Affichage
-    E-mail du constat => « veilleur (bases de failles) », jamais « site retiré de la configuration »: 5: tick
+    E-mail du constat => sujet et corps propres au veilleur, jamais « site retiré de la configuration »: 5: tick
+    GET /api/v1/incidents/{id} puis ack sur l'incident _veilleur => lisible et acquittable ; absent de /overview et des vues par site: 5: api
     vigie status => une ligne par source, âge et dernière issue: 5: cli
   section Déploiement
     systemd-analyze verify des deux unités => sans erreur: 5: system
@@ -66,14 +70,19 @@ journey
    - `Needs::Watcher` : `Control::watched(site, ctx)` rend **toujours `false`** pour un site de la configuration ;
    - `pub const WATCHER_SITE: &str = "_veilleur"` (hors de la grammaire `[a-z0-9-]` des identifiants de site : un test le vérifie contre le validateur de `config.rs`) ;
    - `watched_by_watcher(config, check, key) -> bool` : `check == "vulns-sync"` et `key` dans `registry::declared(config)` ; tout autre contrôle du pseudo-site → `false` (fail-closed) ; commentaire d'en-tête du module complété (contrôles du veilleur).
-2. **`store.rs`** : `close_unwatched` prend `impl Fn(&Incident) -> bool` ; `Incident` expose la clé du constat (dernier segment de `key` après `site/contrôle/`) par une méthode `finding_key()` ; appels et tests existants adaptés sans changement de comportement.
+2. **`store.rs`** : `close_unwatched` prend `impl Fn(&Incident) -> bool` ; `Incident::finding_key()` = `key.strip_prefix(&format!("{site}/{check_name}/"))` (aucune découpe sur `/`, `None` si le préfixe manque, alors non surveillé) ; appels et tests existants adaptés sans changement de comportement.
 3. **`vulns/sync/freshness.rs`** : `STALE_AFTER = 259_200` ; `findings(declared: &[&str], states: &[(id, Option<last_success_at>, last_outcome, last_error)], declared_since: impl Fn(&str) -> i64, now) -> Vec<Finding>` : un `Finding::new(WATCHER_SITE, "vulns-sync", Warning, <source>, détail)` par source dont `now − (last_success_at ou declared_since) > STALE_AFTER` ; détail sans donnée de la source autre que l'issue et la date (« base osv-npm non synchronisée depuis 4 jours ; dernière issue : failed (délai dépassé) »), assaini et borné.
-4. **`tick.rs`** : après le silence des agents et avant `close_unwatched`, si `[vulns]` déclare des sources et que le schéma a `vuln_sources` (`SCHEMA_VULNS_SYNC`) : écrit `meta vulns.declared.<source>` au premier passage qui la voit (jamais réécrit), lit l'état des sources, `store.reconcile(WATCHER_SITE, "vulns-sync", &findings, now)` et `record_result` ; une erreur de lecture est journalisée et n'arrête pas le passage. `watched_by_tick` : incident du pseudo-site → `capability::watched_by_watcher(config, check, incident.finding_key())`, sinon règle actuelle. `site_url` : `WATCHER_SITE` → « veilleur (bases de failles) ».
-5. **`main.rs`** : `vigie status` imprime, si `[vulns]` est déclarée, `failles : <source> réussie il y a <âge> (dernière issue : …)` par source, ou « jamais synchronisée » ; lecture seule (`Store::open_read`), schéma antérieur → « aucune base de failles ».
-6. **Unités systemd** : `vigie-vulns-sync.service` (`Type=oneshot`, `User=vigie`, `ExecStart=/home/vigie/vigie/bin/vigie vulns sync`, `TimeoutStartSec=3h`, `Nice=10`, `IOSchedulingClass=idle`, `OOMScoreAdjust=500`, `MemoryMax=512M` provisoire, mêmes `Condition*` et durcissements que `vigie-tick.service`, `ReadWritePaths=/home/vigie/vigie/data`, `RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX`) ; `vigie-vulns-sync.timer` (`OnCalendar=*-*-* 03:40:00`, `RandomizedDelaySec=45min`, `Persistent=true`) ; `provision.sh` les installe et active le timer, idempotent ; `systemd-analyze verify` vert (à la main ou en CI si disponible).
-7. **Tests** : `vulns_freshness.rs` (section « Fraîcheur » : base remplie par `Load` et `mark_fresh`/`record_outcome` de la phase 2, `tick::run_with` avec `FakeClock` et `MemoryNotifier`, e-mail vérifié) ; `capability.rs` (section « Registre ») ; test existant de `close_unwatched` adapté.
+4. **`tick.rs`**, dans cet ordre, après le silence des agents :
+   1. `close_unwatched` avec `watched_by_tick` étendu : incident du pseudo-site → `capability::watched_by_watcher(config, check, incident.finding_key())`, sinon règle actuelle (l'appel existant est **avancé** avant la fraîcheur ; la référence d'empreintes relue après l'analyse de logs reste couverte par le second appel de fin de passage, conservé) ; une source retirée est ainsi close « plus surveillé » avant tout `reconcile` ;
+   2. si le schéma a `vuln_sources` (`SCHEMA_VULNS_SYNC`) : `meta vulns.declared.<source>` écrite au premier passage qui voit la source déclarée (jamais réécrite), **supprimée** pour toute source qui ne l'est plus ;
+   3. lecture de l'état des sources ; **en cas d'erreur : journalisée, aucun `reconcile`**, le passage continue ;
+   4. sinon `findings` puis `store.reconcile(WATCHER_SITE, "vulns-sync", &findings, now)` et `record_result`.
+   `notify` : un incident `WATCHER_SITE` passe par les gabarits propres d'`alert.rs`.
+5. **`alert.rs`** : `open_email`, `close_email`, `reminder_email` d'un incident `WATCHER_SITE` : sujet « [vigie] veilleur : base de failles <source> non synchronisée » (et « … de nouveau synchronisée », « … plus surveillée »), corps sans ligne « site » ni URL, avec la commande à lancer (`vigie vulns sync --source <source>`, `journalctl -u vigie-vulns-sync`). **`main.rs`** : `vigie status` imprime, si `[vulns]` est déclarée, `failles : <source> réussie il y a <âge> (dernière issue : … ; bail en cours depuis …)` par source, ou « jamais synchronisée » ; lecture seule (`Store::open_read`), schéma antérieur → « aucune base de failles ».
+6. **Unités systemd** : `vigie-vulns-sync.service` (`Type=oneshot`, `User=vigie`, `ExecStart=/home/vigie/vigie/bin/vigie vulns sync`, `TimeoutStartSec=3h`, `Nice=10`, `IOSchedulingClass=best-effort`, `IOSchedulingPriority=7`, `OOMScoreAdjust=500`, `MemoryMax=512M` provisoire, mêmes `Condition*` et durcissements que `vigie-tick.service`, `ReadWritePaths=/home/vigie/vigie/data`, `RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX`) ; `vigie-vulns-sync.timer` (`OnCalendar=*-*-* 03:40:00`, `RandomizedDelaySec=45min`, `Persistent=true`) ; `provision.sh` les installe et active le timer, idempotent ; `systemd-analyze verify` vert (à la main ou en CI si disponible).
+7. **Tests** : `vulns_freshness.rs` (section « Fraîcheur », dont un test par cas d'ordre : source retirée → « plus surveillé » jamais « rétabli » ; lecture en échec → rien de clos ni d'ouvert ; base remplie par `Load` et `mark_fresh`/`record_outcome` de la phase 2, `tick::run_with` avec `FakeClock` et `MemoryNotifier`, e-mail vérifié) ; `capability.rs` (section « Registre ») ; `api_read.rs` (incident `_veilleur` par `/incidents/{id}` et `/ack`, absent des vues par site) ; `finding_key` sur une clé de source contenant `/` ; test existant de `close_unwatched` adapté.
 8. **Documentation** :
-   - `failles.md` : section « Synchronisation (F2) » : commande, timer, sources et identifiants, ordre, plafonds par source et leur mesure, lecteur zip (sous-ensemble admis, refus), rien d'extrait sur disque, requête conditionnelle et empreinte, garde de rétrécissement, bail, constat `vulns-sync` et pseudo-site, `modified_id.csv` évalué et écarté (raisons et chiffres du 2026-10-17), licences et attributions par préfixe (renvoi F1), volumes ; « Hôtes à joindre » inchangé ; « À vérifier depuis le VPS » : joignabilité de `osv-vulnerabilities.storage.googleapis.com` cochée au relevé ;
+   - `failles.md` : section « Synchronisation (F2) » : commande, timer, sources et identifiants, ordre, plafonds par source et leur mesure, lecteur zip (sous-ensemble admis, refus), rien d'extrait sur disque, requête conditionnelle et empreinte, garde de rétrécissement, bail, constat `vulns-sync` et pseudo-site (lisible par `/api/v1/incidents/{id}`, absent des vues par site jusqu'à F7), `modified_id.csv` évalué et écarté (raisons et chiffres du 2026-10-17), licences et attributions par préfixe (renvoi F1), volumes ; « Hôtes à joindre » inchangé ; « À vérifier depuis le VPS » : joignabilité de `osv-vulnerabilities.storage.googleapis.com` cochée au relevé ;
    - `hebergement.md` : section « Synchronisation des failles (issue #16) » : installation du timer, `systemctl list-timers`, lancement à la main, lecture du journal (`journalctl -u vigie-vulns-sync`), espace disque (dump transitoire ≤ plafond compressé, deux générations pendant un chargement, réserve de 1 Gio), mémoire ; ligne du Statut ;
    - `decisions.md` : sous-section « Synchronisation des failles (issue #16) » de « Failles connues », une ligne par décision du plan et sa raison, écarts à l'issue (ureq au lieu de reqwest, `fetch` en flux, FriendsOfPHP retiré) ;
    - `README.md`, `CHANGELOG.md`.
