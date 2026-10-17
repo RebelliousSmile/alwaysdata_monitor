@@ -44,7 +44,8 @@ use serde::{Deserialize, Serialize};
 use crate::analysis::catalog::BotClass;
 use crate::analysis::findings::{self as log_findings, Analysis, VERDICT_RETENTION_SECS};
 use crate::analysis::score::Level;
-use crate::checks::{CheckKind, heartbeat};
+use crate::capability::{self, Control};
+use crate::checks::heartbeat;
 use crate::config::{Runtime, Site};
 use crate::device;
 use crate::error::{self, ApiError, not_found};
@@ -52,8 +53,8 @@ use crate::finding::Severity;
 use crate::request_id;
 use crate::serve::AppState;
 use crate::store::{
-    AGENT_PREFIX, AckOutcome, Agent, CheckRun, Device, Incident, RevokeOutcome, RunResult,
-    SCHEMA_CHECK_RESULTS, SCHEMA_FINDINGS, Store,
+    AckOutcome, Agent, CheckRun, Device, Incident, RevokeOutcome, RunResult, SCHEMA_CHECK_RESULTS,
+    SCHEMA_FINDINGS, Store,
 };
 
 use limit::{IpKey, Limiter};
@@ -661,6 +662,8 @@ pub enum SiteState {
 /// Ce que le veilleur sait d'un site, lu une fois pour toutes les routes.
 struct SiteView {
     agent: Option<Agent>,
+    /// Contexte du registre des capacités : clé d'agent, référence.
+    ctx: capability::Ctx,
     /// Incidents ouverts, de gravité décroissante puis du plus ancien.
     open: Vec<Incident>,
     /// Derniers passages des contrôles encore surveillés.
@@ -668,8 +671,18 @@ struct SiteView {
 }
 
 impl SiteView {
-    fn read(site: &Site, agents: &[Agent], open: &[Incident], runs: &[CheckRun]) -> Self {
+    fn read(
+        site: &Site,
+        agents: &[Agent],
+        baselines: &[String],
+        open: &[Incident],
+        runs: &[CheckRun],
+    ) -> Self {
         let agent = agents.iter().find(|a| a.site == site.id).cloned();
+        let ctx = capability::Ctx {
+            agent: agent.is_some(),
+            baseline: baselines.contains(&site.id),
+        };
         let mut open: Vec<Incident> = open.iter().filter(|i| i.site == site.id).cloned().collect();
         open.sort_by(|a, b| {
             b.severity
@@ -677,21 +690,18 @@ impl SiteView {
                 .then(a.opened_at.cmp(&b.opened_at))
                 .then(a.id.cmp(&b.id))
         });
-        let watched = |check: &str| {
-            if check == heartbeat::NAME || check.starts_with(AGENT_PREFIX) {
-                agent.is_some()
-            } else {
-                CheckKind::ALL
-                    .into_iter()
-                    .any(|kind| kind.applies(site) && kind.name() == check)
-            }
-        };
+        // Même verdict que `tick` et l'ingestion : celui du registre.
         let runs = runs
             .iter()
-            .filter(|r| r.site == site.id && watched(&r.check_name))
+            .filter(|r| r.site == site.id && capability::watched(site, &r.check_name, &ctx))
             .cloned()
             .collect();
-        Self { agent, open, runs }
+        Self {
+            agent,
+            ctx,
+            open,
+            runs,
+        }
     }
 
     /// Incidents qui comptent : avertissements et critiques.
@@ -815,6 +825,7 @@ async fn overview_handler(
     let now = state.clock.unix();
     with_store(&state, "/api/v1/overview", move |state, store| {
         let agents = store.agents()?;
+        let baselines = store.baseline_sites()?;
         let open = store.open_incidents()?;
         let runs = store.check_results()?;
         let mut sites: Vec<(usize, OverviewSite)> = state
@@ -823,7 +834,7 @@ async fn overview_handler(
             .iter()
             .enumerate()
             .map(|(rank, site)| {
-                let view = SiteView::read(site, &agents, &open, &runs);
+                let view = SiteView::read(site, &agents, &baselines, &open, &runs);
                 let line = OverviewSite {
                     id: site.id.clone(),
                     url: site.url.clone(),
@@ -920,27 +931,34 @@ async fn site_handler(
         let view = SiteView::read(
             site,
             &store.agents()?,
+            &store.baseline_sites()?,
             &store.open_incidents()?,
             &store.check_results()?,
         );
         let run_of = |name: &str| view.runs.iter().find(|r| r.check_name == name);
-        let mut checks: Vec<CheckJson> = CheckKind::ALL
-            .into_iter()
-            .filter(|kind| kind.applies(site))
-            .map(|kind| CheckJson::new(kind.name(), Some(kind.interval(site)), run_of(kind.name())))
-            .collect();
-        if view.agent.is_some() {
-            checks.push(CheckJson::new(
-                heartbeat::NAME,
-                Some(site.agent_silence),
-                run_of(heartbeat::NAME),
-            ));
-            checks.extend(
-                view.runs
-                    .iter()
-                    .filter(|r| r.check_name.starts_with(AGENT_PREFIX))
-                    .map(|r| CheckJson::new(&r.check_name, None, Some(r))),
-            );
+        // Contrôles du registre surveillés pour ce site : les contrôles
+        // externes et le silence de l'agent toujours, les autres dès leur
+        // premier passage.
+        let mut checks: Vec<CheckJson> = Vec::new();
+        for control in capability::allowed_controls(site, &view.ctx) {
+            let name = control.name();
+            match control {
+                Control::Check(kind) => {
+                    checks.push(CheckJson::new(
+                        name,
+                        Some(kind.interval(site)),
+                        run_of(name),
+                    ));
+                }
+                Control::Heartbeat => {
+                    checks.push(CheckJson::new(name, Some(site.agent_silence), run_of(name)));
+                }
+                Control::Integrity | Control::Agent(_) | Control::Logs | Control::Typology => {
+                    if let Some(run) = run_of(name) {
+                        checks.push(CheckJson::new(name, None, Some(run)));
+                    }
+                }
+            }
         }
         let agent = match &view.agent {
             Some(agent) => Some(AgentJson {
@@ -1426,10 +1444,16 @@ async fn settings_handler(
                 interval: site.interval,
                 agent_silence: site.agent_silence,
                 agent: agents.iter().any(|a| a.site == site.id),
-                checks: CheckKind::ALL
+                checks: capability::allowed_controls(site, &capability::Ctx::default())
                     .into_iter()
-                    .filter(|kind| kind.applies(site))
-                    .map(|kind| (kind.name(), kind.interval(site)))
+                    .filter_map(|control| match control {
+                        Control::Check(kind) => Some((kind.name(), kind.interval(site))),
+                        Control::Heartbeat
+                        | Control::Integrity
+                        | Control::Agent(_)
+                        | Control::Logs
+                        | Control::Typology => None,
+                    })
                     .collect(),
             })
             .collect();

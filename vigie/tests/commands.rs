@@ -668,10 +668,11 @@ impl Veilleur {
             facts: "{}",
             files: &files,
             findings: &[],
+            dropped: 0,
         };
         let outcome = self
             .store()
-            .accept_report(&report, self.clock.unix())
+            .accept_report(&report, self.clock.unix(), &|_, _| true)
             .unwrap();
         assert_eq!(outcome, vigie::store::ReportOutcome::Accepted);
     }

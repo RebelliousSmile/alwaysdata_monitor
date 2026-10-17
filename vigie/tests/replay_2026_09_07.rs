@@ -190,7 +190,7 @@ fn replay(site: &IncidentSite, agent_phase: i64, external_phase: i64) -> Delays 
         let signature = STANDARD.encode(key.sign(&body).to_bytes());
         ingest::ingest(
             &mut store,
-            &["site-a".into()],
+            &config.sites,
             Some("site-a"),
             Some(&signature),
             &body,
