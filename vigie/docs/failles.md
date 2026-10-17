@@ -407,7 +407,7 @@ n'aident pas au rapprochement et peuvent porter des données du client.
 - `versions[]` sert de contrôle croisé des `ranges`, toujours évaluées.
 - Une version non analysable donne le constat « version inconnue », une plage
   libre de Friends-Of-Presta non reconnue le constat « plage inconnue », signalé
-  pour toute version du module. Les deux sont de gravité information.
+  pour toute version du module. Les deux sont de gravité information, sauf sur une faille critique (avertissement).
 
 ## Gravité
 
@@ -431,7 +431,7 @@ Les règles se lisent de haut en bas ; la première qui s'applique fixe la
 gravité. Une faille qui relève d'une règle critique ou d'avertissement garde
 ce niveau même si Wordfence la marque `informational: true` : ce drapeau ne
 classe en information qu'une faille qu'aucune autre règle ne retient.
-« Version inconnue » et « plage inconnue » sont de gravité information.
+« Version inconnue » et « plage inconnue » sont de gravité information, sauf sur une faille critique : avertissement.
 
 « Aucun correctif » est toujours affiché et ne fait jamais baisser la gravité.
 
