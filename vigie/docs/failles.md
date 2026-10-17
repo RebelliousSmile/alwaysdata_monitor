@@ -345,7 +345,7 @@ avec celui d'une autre extension de wordpress.org.
 | Wordfence, `software[].type` = `core` | — | `pkg:wordpress/core/core` |
 | Friends-Of-Presta, catégorie `modules` | `**Product**` | `pkg:prestashop/module/<product>` |
 | Friends-Of-Presta, catégorie `core` | — | `pkg:prestashop/core/prestashop` |
-| Friends-Of-Presta, catégorie `dependancies` | `**Product**` | pas de règle fixée : point ouvert |
+| Friends-Of-Presta, catégorie `dependancies` | `**Product**` | écartée à l'import et comptée (`out_of_scope`) : ces avis visent des bibliothèques tierces embarquées dans des modules, détectées par OSV sur les composants composer/npm de l'inventaire. Limite : une bibliothèque copiée dans un module sans `composer.lock` n'est pas vue |
 | CISA KEV | `cveID` | aucun : enrichit les failles par CVE |
 | FIRST EPSS | `cve` | aucun : enrichit les failles par CVE |
 
@@ -360,8 +360,9 @@ avec celui d'une autre extension de wordpress.org.
 
 Le veilleur accepte un sous-ensemble strict de CycloneDX 1.6 et 1.7, par
 liste blanche. Un inventaire qui porte `authors`, `supplier`, `licenses` ou
-une propriété hors de l'espace `vigie:*` est refusé : ces champs n'aident pas
-au rapprochement et peuvent porter des données du client.
+une propriété hors de l'espace `vigie:*` est refusé en entier (404 muet, compté au journal),
+pas seulement le champ : ces champs n'aident pas au rapprochement et peuvent
+porter des données du client.
 
 ## Modèle interne et versions
 
@@ -398,6 +399,8 @@ Aucun score n'est jamais calculé depuis un vecteur CVSS v4.
 | critique | un CVE de la faille est dans KEV, ou entrée `MAL-` (paquet malveillant), ou CVSS ≥ 9,0 |
 | avertissement | CVSS ≥ 7,0, ou EPSS ≥ 0,1, ou gravité inconnue |
 | information | tout le reste, les entrées Wordfence `informational: true`, « version inconnue » et « plage inconnue » |
+
+Les règles se lisent de haut en bas : une faille qui relève d'une règle critique ou d'avertissement garde ce niveau même si Wordfence la marque `informational: true` ; ce drapeau ne classe en information qu'une faille qu'aucune autre règle ne retient.
 
 « Aucun correctif » est toujours affiché et ne fait jamais baisser la gravité.
 
