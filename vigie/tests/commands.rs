@@ -627,3 +627,248 @@ fn tick_expires_commands_and_sends_each_audit_head_once() {
     tick::run_with(&v.config(), T0 + 3 * COMMAND_TTL, &options, &mail).expect("tick sans clé");
     assert_eq!(v.state(&id), State::Pending);
 }
+
+// --- htaccess-* (#13) -------------------------------------------------------
+
+const PREV: &str = "33bf0cf98fa40b5f4c44e053816b75487245c5fc01e66dd65470e2e70cbee0d8";
+const NEW: &str = "8978bc0aa6aece0fc74de901712dd160c804917cda1ade8afb59f29f526ff94a";
+const OTHER: &str = "1111111111111111111111111111111111111111111111111111111111111111";
+
+impl Veilleur {
+    fn enqueue_params(&self, kind: CommandKind, params: &Value) -> String {
+        let id = uuid_v7(self.clock.unix_ms()).unwrap();
+        let typology = config::typology_fingerprint(&self.config());
+        self.store()
+            .enqueue_command(
+                "site-a",
+                kind,
+                Runtime::Php,
+                &params.to_string(),
+                &typology,
+                &id,
+                self.clock.unix(),
+                false,
+                &self.audit_key(),
+            )
+            .unwrap()
+            .expect("en file");
+        id
+    }
+
+    /// Rapport de l'agent du site A portant cette empreinte du .htaccess.
+    fn report(&self, htaccess: &str) {
+        self.advance(60);
+        let files = json!({".htaccess": htaccess}).to_string();
+        let pubkey = agent().verifying_key().to_bytes();
+        let report = vigie::store::AcceptedReport {
+            site: "site-a",
+            pubkey: &pubkey,
+            seq: self.clock.unix(),
+            agent: "vigie-agent-php/0.4.0",
+            facts: "{}",
+            files: &files,
+            findings: &[],
+        };
+        let outcome = self
+            .store()
+            .accept_report(&report, self.clock.unix())
+            .unwrap();
+        assert_eq!(outcome, vigie::store::ReportOutcome::Accepted);
+    }
+
+    fn integrity(&self) -> Vec<String> {
+        self.store()
+            .open_incidents()
+            .unwrap()
+            .into_iter()
+            .filter(|i| i.check_name == "agent:integrity")
+            .map(|i| i.key)
+            .collect()
+    }
+
+    fn baseline_htaccess(&self) -> Value {
+        let (files, _) = self.store().baseline("site-a").unwrap().unwrap();
+        serde_json::from_str::<Value>(&files).unwrap()[".htaccess"].clone()
+    }
+
+    async fn pull_from(&self, peer: &str, forwarded: Option<&str>) -> Reply {
+        let body = serde_json::to_vec(&self.body("site-a", None)).unwrap();
+        let signature = key::sign(&agent(), DOMAIN_PULL, &[&body]);
+        let router = serve::router_with(
+            self.config(),
+            Arc::clone(&self.clock) as Arc<dyn Clock>,
+            Some(self.config_path()),
+        );
+        let mut request = Request::post("/r/v1/commands")
+            .header("x-vigie-site", "site-a")
+            .header("x-vigie-signature", signature);
+        if let Some(forwarded) = forwarded {
+            request = request.header("x-forwarded-for", forwarded);
+        }
+        let mut request = request.body(Body::from(body)).unwrap();
+        request
+            .extensions_mut()
+            .insert(axum::extract::ConnectInfo::<std::net::SocketAddr>(
+                peer.parse().unwrap(),
+            ));
+        let response = router.oneshot(request).await.unwrap();
+        Reply {
+            status: response.status(),
+            timestamp: None,
+            signature: None,
+            body: response
+                .into_body()
+                .collect()
+                .await
+                .unwrap()
+                .to_bytes()
+                .to_vec(),
+        }
+    }
+}
+
+fn htaccess_result(id: &str, status: &str, current: &str) -> Value {
+    json!({"command_id": id, "status": status, "detail": "d", "data": {"current_sha256": current}})
+}
+
+#[tokio::test]
+async fn an_applied_htaccess_does_not_open_the_integrity_incident() {
+    let v = Veilleur::new();
+    v.report(PREV);
+    let id = v.enqueue_params(
+        CommandKind::HtaccessApply,
+        &json!({"block": "# BEGIN vigie\n", "previous_sha256": PREV, "new_sha256": NEW}),
+    );
+    let served = v.pull(None).await;
+    assert_eq!(served.json()["command"]["name"], "htaccess-apply");
+    assert_eq!(served.json()["command"]["params"]["new_sha256"], NEW);
+    // Le rapport part avant le retrait qui porte le résultat.
+    v.report(NEW);
+    assert!(v.integrity().is_empty(), "{:?}", v.integrity());
+    assert_eq!(
+        v.baseline_htaccess(),
+        PREV,
+        "la référence attend le résultat"
+    );
+    // Une empreinte hors des attendues l'ouvre.
+    v.report(OTHER);
+    assert_eq!(v.integrity(), ["site-a/agent:integrity/modified:.htaccess"]);
+    v.advance(30);
+    let reply = v.pull(Some(htaccess_result(&id, "ok", NEW))).await;
+    assert_eq!(reply.json()["accepted"], true);
+    assert_eq!(v.state(&id), State::Done);
+    assert_eq!(
+        v.baseline_htaccess(),
+        NEW,
+        "la référence suit current_sha256"
+    );
+    v.report(NEW);
+    assert!(v.integrity().is_empty());
+}
+
+#[tokio::test]
+async fn the_baseline_follows_only_an_expected_hash_and_unknown_still_admits() {
+    let v = Veilleur::new();
+    v.report(PREV);
+    let id = v.enqueue_params(
+        CommandKind::HtaccessApply,
+        &json!({"block": "# BEGIN vigie\n", "previous_sha256": PREV, "new_sha256": NEW}),
+    );
+    v.pull(None).await;
+    // Sans résultat en 24 h : unknown, les empreintes restent admises
+    // (reprise après interruption).
+    v.advance(COMMAND_TTL);
+    v.store()
+        .expire_commands(v.clock.unix(), &v.audit_key())
+        .unwrap();
+    assert_eq!(v.state(&id), State::Unknown);
+    v.report(NEW);
+    assert!(v.integrity().is_empty());
+    // Résultat tardif « modifié pendant l'application » : la référence ne
+    // suit pas une empreinte tierce.
+    v.advance(30);
+    v.pull(Some(htaccess_result(&id, "failed", OTHER))).await;
+    assert_eq!(v.state(&id), State::Failed);
+    assert_eq!(v.baseline_htaccess(), PREV);
+    v.report(NEW);
+    assert_eq!(v.integrity(), ["site-a/agent:integrity/modified:.htaccess"]);
+}
+
+#[tokio::test]
+async fn a_rollback_admits_the_previous_hash_and_a_compute_only_admits_nothing() {
+    let v = Veilleur::new();
+    v.report(NEW);
+    // Calcul seul : rien n'est écrit, rien n'est admis.
+    let compute = v.enqueue_params(
+        CommandKind::HtaccessApply,
+        &json!({"block": "# BEGIN vigie\n", "previous_sha256": NEW, "new_sha256": null}),
+    );
+    v.pull(None).await;
+    v.report(OTHER);
+    assert_eq!(v.integrity().len(), 1);
+    v.report(NEW);
+    assert!(v.integrity().is_empty());
+    v.advance(30);
+    let done = json!({"command_id": compute, "status": "ok", "detail": "calcul seul",
+        "data": {"current_sha256": NEW, "new_sha256": OTHER}});
+    v.pull(Some(done)).await;
+    assert_eq!(v.state(&compute), State::Done);
+    assert_eq!(v.baseline_htaccess(), NEW);
+
+    let id = v.enqueue_params(
+        CommandKind::HtaccessRollback,
+        &json!({"expected_current_sha256": NEW, "prev_sha256": PREV}),
+    );
+    v.advance(30);
+    v.pull(None).await;
+    v.report(PREV);
+    assert!(v.integrity().is_empty());
+    v.advance(30);
+    v.pull(Some(htaccess_result(&id, "ok", PREV))).await;
+    assert_eq!(v.baseline_htaccess(), PREV);
+}
+
+#[tokio::test]
+async fn a_result_with_a_malformed_hash_is_refused_by_the_schema() {
+    let v = Veilleur::new();
+    let id = v.enqueue_params(
+        CommandKind::HtaccessRollback,
+        &json!({"expected_current_sha256": NEW, "prev_sha256": PREV}),
+    );
+    v.pull(None).await;
+    v.advance(30);
+    let reply = v
+        .pull(Some(htaccess_result(&id, "ok", &NEW.to_uppercase())))
+        .await;
+    assert_eq!(reply.status, StatusCode::NOT_FOUND);
+    assert_eq!(v.state(&id), State::Served);
+}
+
+#[tokio::test]
+async fn the_source_address_of_signed_pulls_is_recorded() {
+    let v = Veilleur::new();
+    // Pair distant : son adresse, jamais son X-Forwarded-For.
+    let reply = v.pull_from("192.0.2.50:4000", Some("198.51.100.1")).await;
+    assert_eq!(reply.status, StatusCode::OK);
+    v.advance(30);
+    // Proxy local (Caddy) : la dernière adresse de X-Forwarded-For.
+    let reply = v
+        .pull_from("127.0.0.1:5000", Some("198.51.100.9, 2001:db8::50"))
+        .await;
+    assert_eq!(reply.status, StatusCode::OK);
+    let sources: Vec<String> = v
+        .store()
+        .agent_sources("site-a", v.clock.unix())
+        .unwrap()
+        .iter()
+        .map(ToString::to_string)
+        .collect();
+    assert_eq!(sources, ["192.0.2.50", "2001:db8::50"]);
+    // Oubliée 30 jours après le dernier retrait.
+    assert!(
+        v.store()
+            .agent_sources("site-a", v.clock.unix() + 31 * 86_400)
+            .unwrap()
+            .is_empty()
+    );
+}

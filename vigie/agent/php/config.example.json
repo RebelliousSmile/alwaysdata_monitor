@@ -2,6 +2,8 @@
   "site": "site-a",
   "endpoint": "https://<sous-domaine-du-veilleur>/r/v1/report",
   "root": "/home/<compte-site-a>/www",
+  "url": "https://site-a.example.org/",
+  "tz": "Europe/Paris",
   "kind": "wordpress",
   "critical": [
     "wp-config.php",

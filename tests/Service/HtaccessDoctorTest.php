@@ -255,4 +255,34 @@ class HtaccessDoctorTest extends TestCase
         $this->assertStringNotContainsString('AhrefsBot', $removed);
         $this->assertStringContainsString(HtaccessDoctor::BLOCKS_BEGIN, $removed);
     }
+
+    /**
+     * Le bloc `# BEGIN vigie` de Vigie (#13), au-dessus ou au-dessous du bloc
+     * du module : retirer une règle d'UA du module le laisse intact, même
+     * pour un robot qu'il bloque aussi.
+     */
+    public function testRemoveUaRulesLeavesTheVigieBlockIntact(): void
+    {
+        $vigie = "# BEGIN vigie\n"
+            . "# Gere par Vigie (vigie site recommend) : ne pas modifier a la main.\n"
+            . "RewriteEngine On\n"
+            . "# ua jusqu'au 2026-07-15 12:00:00\n"
+            . "RewriteCond %{HTTP_USER_AGENT} \"Bytespider\" [NC,OR]\n"
+            . "RewriteCond %{HTTP_USER_AGENT} \"AhrefsBot\" [NC]\n"
+            . "RewriteCond %{TIME} <20260715120000\n"
+            . "RewriteRule ^ - [F,L]\n"
+            . "# ip jusqu'au 2026-06-16 12:00:00\n"
+            . "RewriteCond %{REMOTE_ADDR} \"^203\\.0\\.113\\.7$\"\n"
+            . "RewriteCond %{TIME} <20260616120000\n"
+            . "RewriteRule ^ - [F,L]\n"
+            . "# END vigie\n";
+        $module = $this->doctor()->addUaRules(self::PROTECTION . "\n" . self::PRESTASHOP, ['AhrefsBot', 'Bytespider']);
+        foreach ([$vigie . $module, $module . $vigie] as $content) {
+            $removed = $this->doctor()->removeUaRules($this->doctor()->removeUaRules($content, 'AhrefsBot'), 'Bytespider');
+
+            $this->assertStringContainsString($vigie, $removed);
+            $this->assertStringNotContainsString('block UA: AhrefsBot', $removed);
+            $this->assertStringNotContainsString('block UA: Bytespider', $removed);
+        }
+    }
 }
