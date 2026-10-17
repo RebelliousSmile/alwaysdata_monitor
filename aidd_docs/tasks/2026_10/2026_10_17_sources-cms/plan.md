@@ -1,6 +1,6 @@
 ---
 objective: "Le veilleur importe les deux sources propres aux CMS des sites surveillés, Wordfence Intelligence v3 (WordPress) et Friends-Of-Presta (modules PrestaShop), converties par Advisory::build vers le modèle de F1 et chargées par le cadre de synchronisation de F2. Wordfence reste désactivé, avec un refus explicite, tant que la relecture des conditions depuis le VPS n'est pas consignée et datée dans failles.md ; son jeton vit dans un fichier 0600 vérifié par le code, sa limite d'une requête par 30 minutes est tenue, et la mention copyrights de chaque enregistrement est conservée. Une version libre de Friends-Of-Presta non reconnue donne une plage inconnue, jamais un « non vulnérable », et l'exploitant peut la corriger par une correction de plage auditée."
-status: pending
+status: done
 issue_number: 17
 ---
 
