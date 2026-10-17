@@ -369,3 +369,285 @@ fn a_batch_of_logs_goes_end_to_end_and_a_resend_counts_once() {
     assert!(state["pending"].is_null());
     let _ = std::fs::remove_dir_all(&base);
 }
+
+fn copy_tree(from: &Path, to: &Path) {
+    std::fs::create_dir_all(to).unwrap();
+    for entry in std::fs::read_dir(from).unwrap() {
+        let entry = entry.unwrap();
+        let target = to.join(entry.file_name());
+        if entry.file_type().unwrap().is_dir() {
+            copy_tree(&entry.path(), &target);
+        } else {
+            std::fs::copy(entry.path(), target).unwrap();
+        }
+    }
+}
+
+/// Site servi par `php -S` et le routeur de test de l'agent
+/// (`agent/php/tests/site-router.php`), arrêté à la fin du test.
+struct Site(std::process::Child);
+
+impl Drop for Site {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+fn serve_site(php: &[String], root: &Path, state: &Path) -> (Site, u16) {
+    let port = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    std::fs::write(
+        state.join("site.json"),
+        r#"{"tz":"Europe/Paris","clock_offset":0}"#,
+    )
+    .unwrap();
+    let child = Command::new(&php[0])
+        .args(&php[1..])
+        .arg("-S")
+        .arg(format!("127.0.0.1:{port}"))
+        .arg("-t")
+        .arg(root)
+        .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("agent/php/tests/site-router.php"))
+        .env("VIGIE_SITE_DIR", state)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .expect("php -S");
+    let site = Site(child);
+    for _ in 0..100 {
+        if std::net::TcpStream::connect(("127.0.0.1", port)).is_ok() {
+            return (site, port);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    panic!("php -S n'a pas démarré");
+}
+
+#[test]
+#[ignore = "lancé avec VIGIE_E2E_PHP (voir l'en-tête)"]
+fn htaccess_compute_apply_then_rollback_go_end_to_end() {
+    use vigie::recommend::{self, Proposal, htaccess};
+
+    let php = php_command();
+    let base = std::env::temp_dir().join(format!("vigie-e2e-htaccess-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    let veilleur = base.join("veilleur");
+    let keys = veilleur.join("keys");
+    let agent_dir = base.join("agent");
+    let site_state = base.join("site");
+    for dir in [&base, &veilleur, &keys, &agent_dir, &site_state] {
+        private_dir(dir);
+    }
+    let root = base.join("www");
+    copy_tree(
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("agent/php/tests/fixtures/wp-healthy"),
+        &root,
+    );
+    let original = std::fs::read(root.join(".htaccess")).unwrap();
+    let (_site, site_port) = serve_site(&php, &root, &site_state);
+
+    let commands_public = key::create(&keys.join("commands.key")).unwrap();
+    key::create(&keys.join("audit.key")).unwrap();
+    let audit_key = key::load(&keys.join("audit.key")).unwrap();
+    let config_path = veilleur.join("config.toml");
+    std::fs::write(
+        &config_path,
+        format!(
+            "database = '{db}'\n[commands]\nkey_file = '{k}'\naudit_key_file = '{a}'\n[alerts]\nto = \"alertes@example.org\"\nfrom = \"vigie@example.org\"\nsmtp_host = \"smtp.example.org\"\npassword_file = '{p}'\n[[sites]]\nid = \"site-a\"\nurl = \"https://site-a.example.org/\"\nkind = \"wordpress\"\n",
+            db = veilleur.join("vigie.db").display(),
+            k = keys.join("commands.key").display(),
+            a = keys.join("audit.key").display(),
+            p = veilleur.join("smtp-password").display(),
+        ),
+    )
+    .unwrap();
+    let config = config::load(&config_path).unwrap();
+    let mut store = Store::open(&config.database).unwrap();
+    // Neuf passages de 61 s : partir 250 s avant l'heure réelle garde toute
+    // l'horloge du veilleur dans la tolérance de ±300 s de l'agent.
+    let clock = Arc::new(FakeClock::new(SystemClock.unix() - 250));
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let router = serve::router_with(
+        config.clone(),
+        Arc::clone(&clock) as Arc<dyn Clock>,
+        Some(config_path.clone()),
+    );
+    std::thread::spawn(move || {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.block_on(async move {
+            let listener = tokio::net::TcpListener::from_std(listener).unwrap();
+            axum::serve(listener, router).await
+        })
+    });
+
+    let agent_config = agent_dir.join("config.json");
+    private_file(
+        &agent_config,
+        &serde_json::json!({
+            "site": "site-a",
+            "endpoint": format!("http://127.0.0.1:{port}/r/v1/report"),
+            "root": root,
+            "kind": "wordpress",
+            "critical": [".htaccess"],
+            "url": format!("http://127.0.0.1:{site_port}/"),
+            "tz": "Europe/Paris",
+            "commands": {
+                "endpoint": format!("http://127.0.0.1:{port}/r/v1/commands"),
+                "pubkey": STANDARD.encode(commands_public.to_bytes()),
+            }
+        })
+        .to_string(),
+    );
+    let agent = Agent {
+        php,
+        script: Path::new(env!("CARGO_MANIFEST_DIR")).join("agent/php/vigie-agent.php"),
+        config: agent_config,
+    };
+    let init = agent.run(&["--init"]);
+    assert!(init.status.success(), "{init:?}");
+    let public = String::from_utf8_lossy(&init.stdout)
+        .lines()
+        .find(|l| l.len() == 44 && l.ends_with('='))
+        .expect("clé publique")
+        .to_owned();
+    let public: [u8; 32] = STANDARD.decode(&public).unwrap().try_into().unwrap();
+    store.add_key("site-a", &public, clock.unix()).unwrap();
+    store
+        .set_commands_enabled("site-a", true, clock.unix(), &audit_key)
+        .unwrap();
+    let typology = config::typology_fingerprint(&config);
+    let enqueue = |store: &mut Store, kind: CommandKind, params: String| {
+        let id = uuid_v7(clock.unix_ms()).unwrap();
+        store
+            .enqueue_command(
+                "site-a",
+                kind,
+                Runtime::Php,
+                &params,
+                &typology,
+                &id,
+                clock.unix(),
+                false,
+                &audit_key,
+            )
+            .unwrap()
+            .expect("en file");
+        id
+    };
+    let run = |clock: &FakeClock, agent: &Agent| {
+        let out = agent.run(&[]);
+        assert!(out.status.success(), "{out:?}");
+        clock.advance(61);
+    };
+    let integrity = |store: &Store| {
+        store
+            .open_incidents()
+            .unwrap()
+            .into_iter()
+            .filter(|i| i.check_name == "agent:integrity")
+            .count()
+    };
+    let result = |store: &Store, id: &str| -> serde_json::Value {
+        let command = store.command(id).unwrap().unwrap();
+        assert_eq!(command.state, State::Done, "{:?}", command.result);
+        serde_json::from_str(&command.result.unwrap()).unwrap()
+    };
+
+    // Premier rapport : référence posée.
+    run(&clock, &agent);
+    let previous = recommend::history::reported_htaccess(&store, "site-a")
+        .unwrap()
+        .unwrap()
+        .unwrap();
+
+    // Bloc proposé, calcul de l'empreinte par l'agent.
+    let tz = jiff::tz::TimeZone::get("Europe/Paris").unwrap();
+    let plan = recommend::plan(
+        &[],
+        &[Proposal::UserAgent {
+            bot: "Bytespider".into(),
+            literal: "Bytespider".into(),
+        }],
+        SystemClock.unix(),
+        &tz,
+    )
+    .unwrap();
+    let block = plan.block();
+    htaccess::validate(block.as_bytes(), SystemClock.unix(), &tz).unwrap();
+    let compute = enqueue(
+        &mut store,
+        CommandKind::HtaccessApply,
+        serde_json::json!({"block": block, "previous_sha256": previous, "new_sha256": null})
+            .to_string(),
+    );
+    run(&clock, &agent);
+    run(&clock, &agent);
+    let prepared = recommend::history::prepared(&store, "site-a", Some(&previous))
+        .unwrap()
+        .expect("calcul préparé");
+    assert_eq!(prepared.command_id, compute);
+    assert_eq!(std::fs::read(root.join(".htaccess")).unwrap(), original);
+
+    // Application : bac à sable, bascule, smoke-test ; le rapport qui porte
+    // le nouveau .htaccess n'ouvre pas l'incident d'intégrité.
+    let apply = enqueue(
+        &mut store,
+        CommandKind::HtaccessApply,
+        serde_json::to_string(&prepared.params).unwrap(),
+    );
+    run(&clock, &agent);
+    let applied = std::fs::read_to_string(root.join(".htaccess")).unwrap();
+    assert!(applied.starts_with(&block), "{applied}");
+    run(&clock, &agent);
+    let data = &result(&store, &apply)["data"];
+    let new = prepared.params.new_sha256.clone().unwrap();
+    assert_eq!(data["current_sha256"], new.as_str());
+    assert_eq!(integrity(&store), 0);
+    run(&clock, &agent);
+    assert_eq!(integrity(&store), 0);
+    assert_eq!(
+        recommend::history::block_in_place(&store, "site-a", &new)
+            .unwrap()
+            .expect("bloc en place")
+            .command_id,
+        apply
+    );
+    assert!(std::fs::read_dir(&root).unwrap().all(|e| {
+        !e.unwrap()
+            .file_name()
+            .to_string_lossy()
+            .starts_with("vigie-essai-")
+    }));
+
+    // Retour arrière en une commande.
+    let params = recommend::history::rollback_params(&store, "site-a", &new)
+        .unwrap()
+        .expect("retour arrière possible");
+    let rollback = enqueue(
+        &mut store,
+        CommandKind::HtaccessRollback,
+        serde_json::to_string(&params).unwrap(),
+    );
+    run(&clock, &agent);
+    run(&clock, &agent);
+    assert_eq!(
+        result(&store, &rollback)["data"]["current_sha256"],
+        previous.as_str()
+    );
+    assert_eq!(std::fs::read(root.join(".htaccess")).unwrap(), original);
+    run(&clock, &agent);
+    assert_eq!(integrity(&store), 0);
+
+    let records = store.audit_records("site-a").unwrap();
+    vigie::command::audit::verify("site-a", &records, &audit_key.verifying_key(), None).unwrap();
+    let _ = std::fs::remove_dir_all(&base);
+}

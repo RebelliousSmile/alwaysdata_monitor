@@ -1,6 +1,6 @@
 ---
 objective: "À partir de la dernière analyse d'un site (#8), Vigie propose des actions graduées (robots.txt, puis user-agent, puis IP à durée limitée), jamais contre un moteur, un navigateur ou un aperçu social ; une proposition validée par l'exploitant part par le canal de commandes (#10) sous forme d'un bloc `# BEGIN vigie` que l'agent revalide par sa propre liste fermée, essaie en bac à sable, bascule atomiquement avec copie précédente, et défait seul si le site ne répond plus."
-status: pending
+status: done
 issue_number: 13
 ---
 
