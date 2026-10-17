@@ -1,6 +1,6 @@
 ---
 objective: "Le veilleur porte un modèle interne unique des failles (sous-ensemble strict d'OSV 1.9.x, validé, borné sur des mesures des vrais exports, licence et attribution par enregistrement), des comparateurs de versions par écosystème de la source (Composer selon composer/semver, semver pour npm et Cargo, version_compare de PHP pour WordPress et PrestaShop) prouvés par vecteurs, fuzz à graine fixe et test différentiel contre PHP, le module purl unique partagé avec l'inventaire (F5), une base SQLite où chaque source est remplacée atomiquement par générations réservées et sous bail sans tenir le verrou face à serve, et la CLI de lecture vigie vulns sources | show | match ; une version ou une plage illisible n'est jamais « non vulnérable » et aucune faille d'un paquet identifié n'est supprimée en silence."
-status: pending
+status: done
 issue_number: 15
 ---
 

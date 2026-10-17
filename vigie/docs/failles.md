@@ -409,9 +409,192 @@ n'aident pas au rapprochement et peuvent porter des données du client.
   libre de Friends-Of-Presta non reconnue le constat « plage inconnue », signalé
   pour toute version du module. Les deux sont de gravité information, sauf sur une faille critique (avertissement).
 
+Le modèle est écrit par l'issue #15 (F1) : `src/vulns/` (plan
+`aidd_docs/tasks/2026_10/2026_10_17_modele-failles/`). Les sous-sections
+qui suivent en fixent les règles.
+
+### Bornes
+
+Mesurées le 2026-10-17 sur les exports OSV (crates.io et Packagist en
+entier ; npm par son répertoire central et un échantillon de 1 600 entrées) :
+
+| Mesure | crates.io | Packagist | npm (échantillon) | Borne |
+| --- | --- | --- | --- | --- |
+| taille d'une entrée | 146 124 o | 34 543 o | 1 148 610 o | 4 Mio (au-delà : faille écartée, `too_large`) |
+| `affected` par faille | 406 | 24 | 92 | 1 024 (au-delà : `too_large`) |
+| plages par `affected` | 1 | 6 | 2 | 256 (au-delà : ligne gardée `unevaluable`) |
+| événements par plage | 46 | 2 | 2 | 128 (au-delà : ligne `unevaluable`) |
+| `versions[]` par `affected` | 2 | 2 340 | 148 | 10 000 (entrée de trop ignorée seule) |
+| longueur d'une version | 14 | 31 | 74 | 128, grammaire commune |
+| alias | 16 | 6 | 8 | 32 |
+| références | 146 | 121 | 149 | toutes lues, 10 gardées (`ADVISORY`, `FIX`, `WEB`, puis ordre de la source) |
+| `severity[]` | 2 | 2 | 2 | 4 |
+| CWE | 6 | 5 | 5 | 8 |
+| longueur d'un id | 19 | 23 | 19 | 64 (`[A-Za-z0-9][A-Za-z0-9._:-]{0,63}`) |
+| résumé | 163 car. | 241 car. (728 sans `summary`, DRUPAL) | 210 car. | 500 car. ; à défaut, première ligne de `details` ; `details` jamais stocké |
+
+Le résumé et l'attribution (2 000 caractères) sont assainis comme le texte
+des logs (`LogText` : contrôles, séparateurs Unicode et bidirectionnels en
+U+FFFD). Les alias sont normalisés (`cve-` → `CVE-`, préfixes connus en
+majuscules).
+
+### Comparateurs
+
+Le comparateur suit l'écosystème de la source (`SourceEcosystem`), jamais
+celui du site : `Packagist` → Composer, `npm` et `crates.io` → semver,
+Wordfence et Friends-Of-Presta → `version_compare`. Une plage OSV `SEMVER`
+passe par semver quel que soit l'écosystème. Une plage Packagist sur
+`pkg:prestashop/module/<x>` ou `pkg:wordpress/plugin/<slug>` reste une
+plage Composer. Toute version est d'abord dans la grammaire commune
+`[0-9A-Za-z.+_-]{1,128}` ; un composant numérique de plus de 18 chiffres est
+illisible (sauf identifiant de préversion semver).
+
+- **semver** (npm, Cargo) : semver 2.0 strict, sans `v`, `=`, forme
+  partielle ni zéro initial (`1.2`, `v1.2.3`, `01.2.3` illisibles) ;
+  préversions selon la §11 (`1.0.0-alpha < 1.0.0-alpha.1 < 1.0.0-beta.2 <
+  1.0.0-beta.11 < 1.0.0-rc.1 < 1.0.0`), identifiants numériques comparés par
+  longueur puis ordre lexical (aucun débordement) ; build ignoré
+  (`1.0.0+a` = `1.0.0+b`), au contraire de la crate `semver`.
+- **version_compare** (WordPress, PrestaShop) : canonisation exacte de
+  `php_canonicalize_version` (`ext/standard/versioning.c`), puis comparaison
+  par composants (`5.9 < 5.9.0`, `6.4-beta1 < 6.4-RC1 < 6.4 < 6.4.1`,
+  `1.0 < 1.0pl1`, `1.01` = `1.1`). **Domaine accepté** : PHP apparie un mot
+  inconnu par préfixe (`bogus` vaut `b`) et n'est pas transitif sur ces
+  mots ; Vigie n'accepte que `dev`, `alpha`, `a`, `beta`, `b`, `RC`, `rc`,
+  `pl`, `p`, sensibles à la casse comme PHP (`1.0-ALPHA`, `1.0-patch`,
+  `1.0-bogus` illisibles), et refuse un composant vide (`1.0.`, `.1`). Sur ce
+  domaine, l'ordre est total et identique à PHP (test différentiel).
+- **Composer** (Packagist) : `VersionParser::normalize` de `composer/semver`
+  (branche `main` du 2026-10-17, version 3.5.1), puis `version_compare` sur
+  la forme normalisée : `v` et `+build` retirés, quatre composants
+  (`1.2` → `1.2.0.0`), majeur de 5 chiffres au plus, sinon versions-dates
+  (`20260101`, `2026-01-01` → `2026.01.01` ; `2026.01.01` reste une forme
+  classique, `2026.01.01.0`), suffixes insensibles à la casse (`b2` →
+  `beta2`, `rc1` → `RC1`, `p1`/`pl1`/`patch1` → `patch1`, `-stable`
+  retiré), `-dev` final ; ordre `1.0.0-dev < 1.0.0-alpha < 1.0.0-beta2 <
+  1.0.0-RC1 < 1.0.0 < 1.0.0-patch1`. Branches (`dev-main`, `1.x-dev`) et
+  contraintes illisibles.
+- **Plancher** : `introduced: "0"` est le plancher « depuis toujours »
+  (`Bound::Floor`), jamais analysé comme version (`0` n'est pas semver) ;
+  une plage avec `fixed` sans `introduced` reçoit ce plancher.
+
+Vecteurs : `tests/fixtures/versions/<écosystème>.json` (Composer : cas de
+`VersionParserTest`, texte MIT complet dans `NOTICE`) ; fuzz à graine fixe
+(aucune panique, réflexivité, antisymétrie, transitivité) ; test
+différentiel `tests/vulns_php_diff.rs` contre `version_compare` de PHP 8.1
+en CI (`VIGIE_PHP`).
+
+### Verdicts et agrégation
+
+Par plage, le pseudo-code « Evaluation » d'OSV (événements triés, plancher
+en tête, `introduced`, `fixed`, `last_affected`, `limit`), y compris une
+plage qui mêle `fixed` et `last_affected`. Une ligne `affected` est touchée
+si l'une de ses plages l'est. Pour un purl, une faille est :
+
+1. **touchée** si l'une de ses lignes l'est, avec le plus petit `fixed`
+   supérieur à la version parmi les lignes qui la contiennent (une GHSA
+   peut porter une ligne par branche) ;
+2. sinon **touchée avec `divergence`** si la version figure dans l'union
+   des `versions[]` de ses lignes (contrôle croisé ; l'union d'OSV est la
+   lecture prudente) ;
+3. sinon **inconnue** si l'une des lignes l'est : « plage inconnue »
+   (ligne `unevaluable`) avant « version inconnue » (version absente ou
+   illisible pour le comparateur) ;
+4. sinon **non touchée**.
+
+Une plage ouverte au-delà de `last_known_affected_version_range` (`< v`,
+`<= v`) reste touchée, drapeau `beyond_last_known`. Aucun chemin ne rend
+« non touchée » pour une version ou une plage illisible.
+
+### Écarts comptés
+
+Aucune faille d'un paquet identifié n'est supprimée en silence. Chaque
+écart est compté par raison (`Tally`), sans texte de la source :
+
+| Issue | Raisons |
+| --- | --- |
+| faille perdue (`Reason::is_drop`, numérateur du taux d'écart de F2) | `too_large`, `bad_json`, `bad_id`, `bad_date` (`modified` absent ou non RFC 3339), `duplicate_id` (la seconde), `no_affected`, `bad_entry_name` (F2) |
+| faille non gardée, exclusion normale | `withdrawn`, `no_affected_out_of_scope` (chaque `affected` d'un autre écosystème) |
+| `affected` écarté seul | `bad_purl` (nom hors grammaire), `out_of_scope` (autre écosystème, dont `Packagist:https://packages.drupal.org/8`) |
+| ligne gardée `unevaluable` (« plage inconnue ») | événement à zéro ou plusieurs clés, borne vide, hors grammaire ou illisible, type de plage inconnu, plus de 128 événements, plus de 256 plages, ni plage ni version : `unevaluable` |
+| faille gardée | `unknown_license` (licence « inconnue », visible dans `vulns sources` et `show`) |
+| entrée ignorée seule | `bad_version_entry`, `bad_reference`, `bad_severity`, `bad_last_known`, `bad_alias`, `bad_cwe` ; `purl_mismatch` (`package.purl` d'OSV différent du purl calculé, qui l'emporte) |
+
+### Licences et attribution
+
+Chaque faille porte sa licence et son attribution, reproduites partout où
+elle est affichée. Table fermée par préfixe d'identifiant : `GHSA`, `EEF` →
+`CC-BY-4.0` ; `DRUPAL` → `MIT` ; `MAL` → `Apache-2.0` ; `RUSTSEC` →
+`CC0-1.0`. Un préfixe inconnu dans un dump OSV garde la faille, licence
+« inconnue », attribution « OSV.dev » et lien vers l'enregistrement : une
+faille connue ne disparaît jamais du rapprochement pour une raison
+administrative. Les convertisseurs de F3 passent leur licence et leur
+attribution (`copyrights` de Wordfence) par `Draft` et la même validation
+(`Advisory::build`).
+
+### Stockage par générations
+
+Migration 15 : `vuln_sources`, `vuln_advisories`, `vuln_aliases`,
+`vuln_affected` (`src/vulns/store.rs`). Seule la synchronisation (F2) écrit ;
+`serve` lit. Un chargement réserve une génération (`next_generation`,
+jamais réutilisée) sous bail de 6 h ; un second chargement est refusé tant
+que le bail court, le reprend après. Les failles s'écrivent par lots de 500
+(une transaction IMMEDIATE chacun, bail revérifié à chaque lot) ; la bascule
+de `active_generation` est un compare-and-swap (génération active attendue
+et bail détenu, sinon échec et génération orpheline) ; la purge retire par
+lots tout sauf l'active et celle sous bail, puis `PRAGMA
+wal_checkpoint(PASSIVE)`. Un lecteur ne voit que l'ancien jeu complet ou le
+nouveau. Les corrections de plage de Friends-Of-Presta (F3) seront clées
+`(source, advisory_id, purl)`, hors des générations.
+
+### CLI
+
+`vigie vulns sources | show <id|alias> | match <purl>`, en lecture seule
+(`README.md`). `match` sans version donne chaque faille du paquet en
+« version inconnue », jamais « aucune faille ». Un purl ou un identifiant
+mal formé sort en code 2 ; une base absente ou antérieure à la migration 15
+répond « aucune base de failles ».
+
+### Fixtures
+
+`tests/fixtures/vulns/osv/` : trois enregistrements réels intacts (GHSA
+Composer, GHSA npm à scope, RUSTSEC), avec `NOTICE` (source, licence, lien,
+modifications). `fictif/` et `hostile/` : cas inventés (`example.org`) ;
+Wordfence et Friends-Of-Presta toujours fictifs, imités par `Draft`.
+`purl.json` (format `[{"in", "out", "why"}]`) est rejoué par l'agent PHP
+(F5) ; `osv-purl.json` et `cvss.json` (exemples de la spécification 3.1 de
+FIRST) sont propres au Rust.
+
+### Limites connues
+
+- Aucun score n'est calculé depuis un vecteur CVSS v4 ; un vecteur v3.0 est
+  calculé par la formule 3.1 (arrondi au dixième près, rarement différent).
+- Les dépôts `Packagist:<url>` (Drupal) sont hors périmètre : Drupal n'est
+  pas une typologie de Vigie.
+- La borne basse exclusive de Wordfence (`from_inclusive: false`) est
+  traduite en `introduced` inclusif par F3 : un signalement de trop plutôt
+  qu'en moins.
+- `last_known_affected_version_range` n'est qu'une information : il ne
+  réduit jamais le verdict.
+- Les contraintes Composer d'origine (`database_specific.constraint` des
+  DRUPAL) ne sont pas conservées ; seules les plages OSV comptent.
+- Les plages `GIT` sont ignorées (aucun composant n'est identifié par un
+  commit) ; une ligne sans autre plage ni `versions[]` est `unevaluable`.
+- Sémantique de `version_compare` : `1.0.0` est au-dessus de `1.0`, si bien
+  qu'une borne Wordfence ou Friends-Of-Presta `last_affected: 1.0`
+  n'inclut pas une version installée `1.0.0` ; c'est le comportement de
+  PHP, gardé tel quel.
+- La forme canonique d'un purl ne garde ni qualificatifs ni sous-chemin
+  (validés, hors clé de rapprochement) ; elle encode chaque segment comme
+  `rawurlencode` (`@` en `%40`, `+` d'une version en `%2B`).
+
 ## Gravité
 
-Score CVSS lu dans cet ordre, le premier présent l'emporte :
+Score CVSS lu dans cet ordre, le premier présent l'emporte. Il est stocké en
+**dixièmes entiers** (98 pour 9,8, `Score { tenths }`, 0 à 100) : aucun
+flottant ne sort du modèle, et les seuils ci-dessous se comparent à 90 et 70.
+Le texte décimal d'une source (`9.8`) est lu en dixièmes ; plus d'une
+décimale, plus de 10,0, un signe ou un exposant sont refusés.
 
 1. `cvss.score` de Wordfence ;
 2. score de la ligne `severity` de Friends-Of-Presta (`critical (9.8)` → 9,8) ;

@@ -243,6 +243,29 @@ F0). Les marques [V], [S] et [NV] des faits cités y sont.
 | Réseau : wordfence.com, cisa.gov et les hôtes EPSS ne sont joignables que depuis le VPS. Les tests utilisent des fixtures locales. La liste des hôtes à autoriser est dans `failles.md` | Le conteneur de développement refuse ces hôtes ; un test ne doit dépendre d'aucun réseau |
 | Fixtures : jamais l'inventaire d'un client. Wordfence et Friends-Of-Presta toujours fictives, de même structure ; vrais enregistrements OSV ou GHSA admis seulement avec un fichier `NOTICE` dans leur dossier (source, licence, lien, modifications) | Dépôt public : c'est une redistribution |
 
+### Modèle des failles (issue #15)
+
+Plan : `aidd_docs/tasks/2026_10/2026_10_17_modele-failles/plan.md` ; règles
+détaillées dans [`failles.md`](./failles.md#modèle-interne-et-versions).
+
+| Décision du 2026-10-17 | Raison |
+| --- | --- |
+| Aucune dépendance ajoutée : comparateurs, purl et CVSS 3.1 écrits dans `src/vulns/` ; dates par `jiff`, URL par `url`, JSON par `serde_json` | Le rapprochement est le cœur de la fiabilité : lisible et testé ici. Aucune crate ne reproduit `version_compare` ni `VersionParser::normalize` |
+| Comparateur semver maison (npm, Cargo, plages `SEMVER`) : semver 2.0 strict, préversions numériques par (longueur, lexical), build ignoré | Seul l'ordre compte ; la crate `semver` départage par le build, ce que semver 2.0 exclut ; aucun débordement |
+| `version_compare` en deux étapes : canonisation exacte de PHP, puis jetons classés ; domaine accepté limité aux mots exacts de PHP, sensibles à la casse ; hors domaine, « version inconnue » | PHP apparie les mots inconnus par préfixe et n'est pas transitif sur eux ; sur le domaine, l'ordre est total et égal à PHP (test différentiel en CI) |
+| Composer = `VersionParser::normalize` de `composer/semver`, puis les jetons de `version_compare` avec `patch` au rang de `pl` ; branches illisibles | C'est ce que fait le `Comparator` de Composer ; une branche n'est pas une version exacte |
+| `introduced: "0"` est un plancher, jamais une version | `0` n'est pas une version semver ; il signifie « depuis toujours » |
+| Verdict à trois états (touché, non touché, inconnu : version ou plage) ; agrégation par faille sur toutes ses lignes ; `versions[]` en union, drapeau `divergence` | Une GHSA porte une ligne par branche ; une version ou une plage illisible n'est jamais « non vulnérable » |
+| Aucune suppression silencieuse : écarts comptés par raison (`Tally`), `Reason::is_drop` sans joker pour les pertes, `withdrawn` et `no_affected_out_of_scope` comptés à part ; ligne d'un paquet identifié mais illisible gardée `unevaluable` (dont plus de 256 plages) ; licence inconnue gardée | Une donnée cassée ne casse pas la synchronisation, et une faille connue reste visible, au pire en « plage inconnue » |
+| GHSA multi-écosystèmes : seuls les `affected` de l'écosystème du dump ; `Packagist:<dépôt>` (Drupal) hors périmètre | Chaque faille arrive par le dump de son écosystème, sans doublon ; Drupal n'est pas une typologie de Vigie |
+| Scores en dixièmes entiers (`Score { tenths: u8 }`, colonne INTEGER 0 à 100) ; CVSS 3.0 et 3.1 calculés par la formule 3.1 avec le `Roundup` entier de l'annexe A ; v4 validé, jamais calculé | Aucun flottant hors de `cvss.rs` (F4, F7 comparent à 90 et 70) ; un seul calculateur, vérifié sur les exemples de FIRST |
+| Licence et attribution par enregistrement (table fermée par préfixe), `copyrights` de Wordfence passé par `Draft` | Chaque mention est conservée et reproduite partout où la faille est affichée |
+| Une seule validation, `Advisory::build(Draft)`, pour OSV et pour les convertisseurs de F3 ; borne basse exclusive Wordfence traduite en inclusive | Mêmes bornes pour toutes les sources ; un signalement de trop plutôt qu'une faille tue |
+| `vulns/purl.rs` est le module purl unique, partagé avec l'inventaire (F5) ; `purl.json` au format `[{"in", "out", "why"}]` rejoué par l'agent PHP | Une grammaire, un module, des vecteurs partagés : un composant émis n'est jamais écarté en silence à la réception |
+| Stockage par générations réservées sous bail de 6 h, lots de 500 failles (bail revérifié), bascule en compare-and-swap, purge par lots, `wal_checkpoint(PASSIVE)` | Remplacement atomique d'un dump npm sans tenir le verrou face à `serve` ; deux synchronisations ne se mélangent ni ne s'écrasent ; le WAL ne grossit pas |
+| `vigie vulns sources \| show \| match` en lecture seule ; erreur d'usage (`UsageError`) en code 2 comme une erreur de configuration | Périmètre de l'issue ; codes de sortie cohérents avec le reste de la CLI |
+| Fixtures OSV réelles intactes sous `NOTICE` ; Wordfence et Friends-Of-Presta fictifs ; vecteurs Composer repris sous la licence MIT complète | Dépôt public : c'est une redistribution |
+
 ## Dépendances (issue #22)
 
 Plan : `aidd_docs/tasks/2026_10/2026_10_17_osv-scanner/plan.md`. Job `deps`

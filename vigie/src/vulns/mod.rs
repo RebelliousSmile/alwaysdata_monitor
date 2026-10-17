@@ -10,8 +10,15 @@ pub mod advisory;
 pub mod cvss;
 pub mod purl;
 pub mod range;
+pub mod store;
 pub mod version;
 
 pub use advisory::{Advisory, Draft, Reason, Score, ScoreOrigin, Tally, from_osv};
 pub use purl::Purl;
 pub use range::{UnknownReason, Verdict, match_advisory};
+
+/// Erreur d'usage de la CLI (`vigie vulns`) : purl ou identifiant mal formé.
+/// Rendue avec le code 2, comme une erreur de configuration.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{0}")]
+pub struct UsageError(pub String);

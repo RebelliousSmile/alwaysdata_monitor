@@ -373,3 +373,126 @@ fn six_writers_in_parallel_raise_no_sqlite_busy_and_lose_nothing() {
         "{commands:?}"
     );
 }
+
+#[path = "support/vulns_data.rs"]
+mod vulns_data;
+
+/// Chargement de 20 000 failles (#15) pendant les écritures de `serve` (lots
+/// de logs) et de `tick`, et une lecture du rapprochement : aucun
+/// `SQLITE_BUSY`, aucune écriture perdue, aucun jeu partiel vu du lecteur.
+#[test]
+fn a_vulns_load_in_contention_with_serve_tick_and_a_reader() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    use vigie::clock::SystemClock;
+    use vigie::vulns::purl::Purl;
+    use vigie::vulns::store::{Load, VULN_BATCH, active_count, match_purl};
+
+    const ADVISORIES: usize = 20_000;
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("vigie.db");
+    let key = agent().verifying_key().to_bytes();
+    {
+        let mut store = Store::open(&path).expect("open");
+        store.add_key("site-a", &key, 0).expect("add_key");
+        vulns_data::source(&mut store, vulns_data::SOURCE);
+    }
+    // Préparées hors de la fenêtre mesurée.
+    let advisories: Vec<_> = (0..ADVISORIES)
+        .map(|i| vulns_data::fictive(i, "charge"))
+        .collect();
+    let done = Arc::new(AtomicBool::new(false));
+    let start = Arc::new(Barrier::new(4));
+
+    let loader = {
+        let (path, start, done) = (path.clone(), Arc::clone(&start), Arc::clone(&done));
+        std::thread::spawn(move || -> Result<(usize, Duration)> {
+            let mut store = Store::open(&path)?;
+            start.wait();
+            let clock = SystemClock;
+            let mut load = Load::begin(&mut store, vulns_data::SOURCE, &clock)?;
+            let mut slowest = Duration::ZERO;
+            for chunk in advisories.chunks(VULN_BATCH) {
+                let t = Instant::now();
+                load.push(chunk)?;
+                slowest = slowest.max(t.elapsed());
+            }
+            let committed = load.commit(None)?;
+            done.store(true, Ordering::SeqCst);
+            Ok((committed.entries as usize, slowest))
+        })
+    };
+    let ticks = {
+        let (path, start, done) = (path.clone(), Arc::clone(&start), Arc::clone(&done));
+        std::thread::spawn(move || -> Result<i64> {
+            let mut store = Store::open(&path)?;
+            start.wait();
+            let mut round = 0;
+            while !done.load(Ordering::SeqCst) || round == 0 {
+                round += 1;
+                store.record_tick(1_000 + round)?;
+            }
+            Ok(round)
+        })
+    };
+    let batches = {
+        let (path, start, done) = (path.clone(), Arc::clone(&start), Arc::clone(&done));
+        std::thread::spawn(move || -> Result<i64> {
+            let mut store = Store::open(&path)?;
+            start.wait();
+            let mut round = 0;
+            while !done.load(Ordering::SeqCst) || round == 0 {
+                round += 1;
+                let outcome = accept_batch(&mut store, round, round, &key)?;
+                ensure!(
+                    outcome == LogsOutcome::Accepted { gap: 0 },
+                    "lot {outcome:?}"
+                );
+            }
+            Ok(round)
+        })
+    };
+    let reader = {
+        let (path, start, done) = (path.clone(), Arc::clone(&start), Arc::clone(&done));
+        std::thread::spawn(move || -> Result<i64> {
+            let store = Store::open_read(&path)?.expect("base");
+            let purl = Purl::parse("pkg:composer/exemple/p7@1.1.0").expect("purl");
+            start.wait();
+            let mut reads = 0;
+            while !done.load(Ordering::SeqCst) || reads == 0 {
+                reads += 1;
+                let n = active_count(&store, vulns_data::SOURCE)?;
+                ensure!(n == 0 || n == ADVISORIES as i64, "jeu partiel vu : {n}");
+                let matches = match_purl(&store, &purl)?;
+                ensure!(
+                    matches.is_empty() || matches.len() == ADVISORIES / 50,
+                    "rapprochement partiel : {}",
+                    matches.len()
+                );
+            }
+            Ok(reads)
+        })
+    };
+
+    let (entries, slowest) = loader
+        .join()
+        .expect("thread")
+        .unwrap_or_else(|e| panic!("chargement : {e:#}"));
+    assert_eq!(entries, ADVISORIES);
+    eprintln!("lot de {VULN_BATCH} failles le plus lent : {slowest:?}");
+    let ticks = ticks.join().expect("thread").expect("ticks");
+    let batches = batches.join().expect("thread").expect("lots");
+    let reads = reader.join().expect("thread").expect("lecteur");
+    assert!(reads > 0);
+
+    let store = Store::open(&path).expect("open");
+    assert_eq!(store.last_tick().expect("tick"), Some(1_000 + ticks));
+    let logged = store
+        .log_entries_after("site-a", 0, 10_000_000)
+        .expect("entrées");
+    assert_eq!(logged.len() as i64, batches * ENTRIES as i64);
+    assert_eq!(
+        active_count(&store, vulns_data::SOURCE).expect("failles"),
+        ADVISORIES as i64
+    );
+}

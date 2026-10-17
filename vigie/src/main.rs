@@ -27,6 +27,7 @@ use vigie::store::{
     SCHEMA_AGENT_SOURCES, SCHEMA_AGENTS, SCHEMA_COMMANDS, SCHEMA_DEVICES, SCHEMA_FINDINGS,
     SCHEMA_INCIDENTS, SCHEMA_META, Store,
 };
+use vigie::vulns::{self, store as vulns_store};
 use vigie::{human_age, iso_utc, recommend, serve, tick};
 
 /// Code de retour d'une configuration invalide ou introuvable.
@@ -88,6 +89,29 @@ enum Command {
     Commands {
         #[command(subcommand)]
         action: CommandsAction,
+    },
+    /// Failles connues : sources, détail d'une faille, rapprochement d'un
+    /// composant (lecture seule, docs/failles.md)
+    Vulns {
+        #[command(subcommand)]
+        action: VulnsAction,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum VulnsAction {
+    /// Sources de failles : licence, âge, entrées, écarts par raison
+    Sources,
+    /// Détail d'une faille, par identifiant ou alias (CVE-…)
+    Show {
+        /// Identifiant (GHSA-…, RUSTSEC-…) ou alias
+        id: String,
+    },
+    /// Failles d'un composant : pkg:type/namespace/nom@version
+    Match {
+        /// purl, version comprise ; sans version, chaque faille du paquet est
+        /// en « version inconnue »
+        purl: String,
     },
 }
 
@@ -225,7 +249,9 @@ fn main() -> ExitCode {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
             eprintln!("erreur : {err:#}");
-            if err.downcast_ref::<ConfigError>().is_some() {
+            if err.downcast_ref::<ConfigError>().is_some()
+                || err.downcast_ref::<vulns::UsageError>().is_some()
+            {
                 ExitCode::from(EXIT_CONFIG)
             } else {
                 ExitCode::FAILURE
@@ -248,6 +274,7 @@ fn run(cli: Cli) -> anyhow::Result<()> {
         Command::Ack { id } => ack(&config, id, now),
         Command::Device { action } => device(&config, action, now),
         Command::Commands { action } => commands_keys(&config, action),
+        Command::Vulns { action } => vulns_cli(&config, action, now),
         Command::TestAlert => {
             let notifier = SmtpNotifier::new(config.alerts.clone());
             notifier
@@ -1099,4 +1126,209 @@ fn audit(
         }
         Err(broken) => bail!("journal de {id} altéré : {broken}"),
     }
+}
+
+/// Base des failles lisible, sinon « aucune base de failles » (base absente
+/// ou antérieure à la migration 15).
+fn vulns_store_read(config: &config::Config) -> anyhow::Result<Store> {
+    match Store::open_read(&config.database)? {
+        Some(store) if vulns_store::available(&store)? => Ok(store),
+        _ => bail!("aucune base de failles"),
+    }
+}
+
+/// Texte relu de la base, assaini pour le terminal.
+fn clean(raw: &str) -> String {
+    vigie::api::log_text::LogText::detail(raw).into()
+}
+
+/// Score en dixièmes, écrit à la française : `9,8`.
+fn tenths(t: u8) -> String {
+    format!("{},{}", t / 10, t % 10)
+}
+
+fn vulns_cli(config: &config::Config, action: VulnsAction, now: i64) -> anyhow::Result<()> {
+    match action {
+        VulnsAction::Sources => {
+            let store = vulns_store_read(config)?;
+            let sources = vulns_store::sources(&store)?;
+            if sources.is_empty() {
+                println!("aucune source de failles");
+            }
+            for s in sources {
+                let age = s.last_success_at.map_or("jamais chargée".to_owned(), |t| {
+                    format!("chargée il y a {}", human_age(now - t))
+                });
+                let license = if s.license.is_empty() {
+                    "par enregistrement".to_owned()
+                } else {
+                    clean(&s.license)
+                };
+                println!(
+                    "{}  licence {license}  {age}  entrées {}  écartées {}  hors périmètre {}",
+                    clean(&s.id),
+                    s.entries,
+                    s.dropped,
+                    s.out_of_scope
+                );
+                let detail: Vec<String> = s
+                    .dropped_detail
+                    .iter()
+                    .map(|(reason, n)| format!("{} {n}", clean(reason)))
+                    .collect();
+                if !detail.is_empty() {
+                    println!("  compteurs : {}", detail.join(", "));
+                }
+                if let Some(n) = s.dropped_detail.get("unknown_license").filter(|n| **n > 0) {
+                    println!("  licence inconnue : {n} faille(s) gardée(s), licence à résoudre");
+                }
+                if let Some(since) = s.loading_since {
+                    println!("  chargement en cours depuis {}", human_age(now - since));
+                }
+                if let Some(err) = s.last_error {
+                    println!("  dernière erreur : {}", clean(&err));
+                }
+                if !s.attribution.is_empty() {
+                    println!("  attribution : {}", clean(&s.attribution));
+                }
+            }
+            Ok(())
+        }
+        VulnsAction::Show { id } => {
+            if vulns::advisory::normalize_alias(&id).is_none() {
+                return Err(vulns::UsageError(
+                    "identifiant mal formé : [A-Za-z0-9][A-Za-z0-9._:-]{0,63} attendu".into(),
+                )
+                .into());
+            }
+            let store = vulns_store_read(config)?;
+            let found = vulns_store::advisory(&store, &id)?;
+            if found.is_empty() {
+                bail!("aucune faille {}", clean(&id));
+            }
+            for (i, s) in found.iter().enumerate() {
+                if i > 0 {
+                    println!();
+                }
+                print_advisory(s);
+            }
+            Ok(())
+        }
+        VulnsAction::Match { purl } => {
+            let purl = vulns::Purl::parse(&purl).map_err(|e| vulns::UsageError(format!("{e}")))?;
+            let store = vulns_store_read(config)?;
+            let matches = vulns_store::match_purl(&store, &purl)?;
+            let mut shown = 0;
+            for (c, verdict) in &matches {
+                let a = &c.advisory;
+                let mut line = format!("{}  ", clean(&a.id));
+                match verdict {
+                    vulns::Verdict::NotAffected => continue,
+                    vulns::Verdict::Affected {
+                        fixed,
+                        divergence,
+                        beyond_last_known,
+                    } => {
+                        line.push_str("touché");
+                        match fixed {
+                            Some(f) => line.push_str(&format!("  corrigée en {}", clean(f))),
+                            None => line.push_str("  aucun correctif connu"),
+                        }
+                        if *divergence {
+                            line.push_str("  [divergence : listée hors plages]");
+                        }
+                        if *beyond_last_known {
+                            line.push_str("  [au-delà de la dernière version connue]");
+                        }
+                    }
+                    vulns::Verdict::Unknown(vulns::UnknownReason::VersionUnknown) => {
+                        line.push_str("version inconnue");
+                    }
+                    vulns::Verdict::Unknown(vulns::UnknownReason::RangeUnknown) => {
+                        line.push_str("plage inconnue");
+                    }
+                }
+                match a.score {
+                    Some(s) => line.push_str(&format!(
+                        "  score {} ({})",
+                        tenths(s.tenths),
+                        s.origin.as_str()
+                    )),
+                    None => line.push_str("  score inconnu"),
+                }
+                if a.malicious {
+                    line.push_str("  [paquet malveillant]");
+                }
+                if a.informational {
+                    line.push_str("  [informational]");
+                }
+                line.push_str(&format!("  source {}", clean(&c.source)));
+                println!("{line}");
+                shown += 1;
+            }
+            if shown == 0 {
+                println!(
+                    "aucune faille connue pour {} ({} faille(s) du paquet examinée(s))",
+                    purl,
+                    matches.len()
+                );
+            }
+            Ok(())
+        }
+    }
+}
+
+fn print_advisory(s: &vulns_store::Stored) {
+    let a = &s.advisory;
+    println!("{}  (source {})", clean(&a.id), clean(&s.source));
+    if !a.aliases.is_empty() {
+        let aliases: Vec<String> = a.aliases.iter().map(|x| clean(x)).collect();
+        println!("  alias : {}", aliases.join(", "));
+    }
+    if !a.summary.is_empty() {
+        println!("  résumé : {}", clean(&a.summary));
+    }
+    match a.score {
+        Some(score) => println!(
+            "  score : {} ({})",
+            tenths(score.tenths),
+            score.origin.as_str()
+        ),
+        None => println!("  score : inconnu"),
+    }
+    for sev in &a.severity {
+        println!("  {} : {}", clean(&sev.kind), clean(&sev.vector));
+    }
+    if a.malicious {
+        println!("  paquet malveillant");
+    }
+    if a.informational {
+        println!("  informational (Wordfence)");
+    }
+    if !a.cwe.is_empty() {
+        let cwe: Vec<String> = a.cwe.iter().map(|x| clean(x)).collect();
+        println!("  CWE : {}", cwe.join(", "));
+    }
+    if let Some(p) = a.published {
+        println!("  publiée : {}", iso_utc(p));
+    }
+    println!("  modifiée : {}", iso_utc(a.modified));
+    for line in &a.affected {
+        let state = if line.unevaluable {
+            "  [plage inconnue]"
+        } else {
+            ""
+        };
+        println!(
+            "  composant : {} ({}){state}",
+            line.purl,
+            line.scheme.as_str()
+        );
+    }
+    for r in &a.references {
+        println!("  {} : {}", clean(&r.kind), clean(&r.url));
+    }
+    println!("  licence : {}", clean(&a.license));
+    println!("  attribution : {}", clean(&a.attribution));
+    println!("  lien : {}", clean(&a.source_url));
 }
