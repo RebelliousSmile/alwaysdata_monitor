@@ -1,0 +1,15 @@
+{
+    "_readme": [
+        "Fixture fictive."
+    ],
+    "content-hash": "00000000000000000000000000000000",
+    "packages": [
+        {
+            "name": "Exemple/Outil",
+            "version": "1.3.0",
+            "type": "library",
+            "notification-url": "https://packagist.org/downloads/"
+        }
+    ],
+    "packages-dev": []
+}

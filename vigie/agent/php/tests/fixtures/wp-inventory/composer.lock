@@ -1,0 +1,58 @@
+{
+    "_readme": [
+        "Fixture fictive."
+    ],
+    "content-hash": "00000000000000000000000000000000",
+    "packages": [
+        {
+            "name": "exemple/outil",
+            "version": "1.2.0",
+            "type": "library",
+            "notification-url": "https://packagist.org/downloads/"
+        },
+        {
+            "name": "wpackagist-plugin/exemple-bedrock",
+            "version": "1.9.0",
+            "source": {
+                "type": "svn",
+                "url": "https://plugins.svn.wordpress.org/exemple-bedrock/",
+                "reference": "tags/1.9.0"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://downloads.wordpress.org/plugin/exemple-bedrock.1.9.0.zip"
+            },
+            "require": {
+                "composer/installers": "^1.0 || ^2.0"
+            },
+            "type": "wordpress-plugin",
+            "homepage": "https://wordpress.org/plugins/exemple-bedrock/"
+        },
+        {
+            "name": "wpackagist-theme/exemple-theme-seul",
+            "version": "3.0",
+            "source": {
+                "type": "svn",
+                "url": "https://themes.svn.wordpress.org/exemple-theme-seul/",
+                "reference": "3.0"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://downloads.wordpress.org/theme/exemple-theme-seul.3.0.zip"
+            },
+            "require": {
+                "composer/installers": "^1.0 || ^2.0"
+            },
+            "type": "wordpress-theme",
+            "homepage": "https://wordpress.org/themes/exemple-theme-seul/"
+        }
+    ],
+    "packages-dev": [
+        {
+            "name": "exemple/outil-test",
+            "version": "v3.0.0",
+            "type": "library",
+            "notification-url": "https://packagist.org/downloads/"
+        }
+    ]
+}
