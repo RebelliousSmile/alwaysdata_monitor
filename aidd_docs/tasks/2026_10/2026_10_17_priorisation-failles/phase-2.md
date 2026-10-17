@@ -4,7 +4,7 @@ status: pending
 
 # Instruction: Stockage KEV et EPSS par générations, lecture pour F7
 
-Prérequis : F1 phase 3 livrée (`vuln_sources` à générations et bail, `Load`, purge par lots, `vuln_aliases` indexée par `alias`) et F2 (plan commité en 1b5a76e) : migration 0017 (validateurs, `last_outcome`, `loader_version`, `recent_entries`, `last_request_at`, `retry_after_until`), `Load::begin(.., lease)`, `finish_unchanged(source, g, expected, validators: Validators::{Keep, Set(..)}, outcome, now)` (primitive générique, une seule instruction en compare-and-swap, partagée par `Load` et `EnrichLoad` ; `mark_fresh` n'existe pas), `Load::release`, `Load::commit(tally, SyncMeta)`, `claim_request`, `record_outcome`.
+Prérequis : F1 phase 3 livrée (`vuln_sources` à générations et bail, `Load`, purge par lots, `vuln_aliases` indexée par `alias`) et F2 (plan commité en 7d88945) : migration 0017 (validateurs, `last_outcome`, `loader_version`, `recent_entries`, `last_request_at`, `retry_after_until`), `Load::begin(.., lease)`, `finish_unchanged(source, g, expected, validators: Validators::{Keep, Set(..)}, outcome, now)` (primitive générique, une seule instruction en compare-and-swap, partagée par `Load` et `EnrichLoad` ; `mark_fresh` n'existe pas), `Load::release`, `Load::commit(tally, SyncMeta)`, `claim_request`, `record_outcome`.
 
 ## Architecture projection
 
