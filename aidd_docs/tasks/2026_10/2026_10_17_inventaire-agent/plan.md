@@ -1,6 +1,6 @@
 ---
 objective: "L'agent PHP 0.5.0 relève en lecture seule, sans jamais exécuter ni inclure de PHP du site, les composants d'un site WordPress, PrestaShop ou PHP générique (cœur, extensions, thèmes, modules, composer.lock, package-lock.json), les décrit en CycloneDX 1.7 avec les purl de la grammaire commune de failles.md, et pousse l'inventaire signé (préfixe vigie-inventory-v1) à POST /r/v1/inventory quand il change et au moins toutes les 24 h ; le veilleur, pour un site qui déclare [sites.inventory], le valide par liste blanche, garde le dernier inventaire et 30 jours d'historique, le purge avec site remove, et ne le traite jamais comme une preuve de vie."
-status: pending
+status: done
 issue_number: 19
 ---
 

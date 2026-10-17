@@ -1,7 +1,8 @@
 //! Bout en bout réel : le routeur de `serve` sur 127.0.0.1 et l'agent PHP,
 //! lancé comme par la tâche planifiée. `ping` puis `rotate-key` vont jusqu'à
 //! leur accusé ; un lot de logs va jusqu'à `log_entries`, et son renvoi après
-//! une réponse perdue n'y est compté qu'une fois.
+//! une réponse perdue n'y est compté qu'une fois ; l'inventaire va jusqu'à
+//! `site_inventory`, renvoyé inchangé puis remplacé.
 //!
 //! Hors de `cargo test` ordinaire (pas de PHP dans le CI Rust) : lancé par
 //! `VIGIE_E2E_PHP="<commande php>" cargo test --test agent_e2e -- --ignored`.
@@ -212,6 +213,209 @@ fn ping_then_rotate_key_go_end_to_end_with_the_real_php_agent() {
 
     let records = store.audit_records("site-a").unwrap();
     vigie::command::audit::verify("site-a", &records, &audit_key.verifying_key(), None).unwrap();
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+fn copy_dir(from: &Path, to: &Path) {
+    std::fs::create_dir_all(to).unwrap();
+    for entry in std::fs::read_dir(from).unwrap() {
+        let entry = entry.unwrap();
+        let target = to.join(entry.file_name());
+        if entry.file_type().unwrap().is_dir() {
+            copy_dir(&entry.path(), &target);
+        } else {
+            std::fs::copy(entry.path(), &target).unwrap();
+        }
+    }
+}
+
+/// Inventaire de bout en bout (issue #19). L'horloge du veilleur est recalée
+/// avant chaque passage, et le test affirme qu'elle reste à 270 s au plus de
+/// l'heure réelle, sous la tolérance de ±300 s : P1 à −240 s (premier
+/// inventaire) ; P2 sans avance (rapport refusé par le débit, inventaire ni
+/// relu ni envoyé) ; P3 à `seen_at` + 241 après un recul de 25 h de
+/// `sent_at` (renvoi inchangé) ; P4 à `seen_at` + 241 après un en-tête
+/// modifié (nouvel inventaire).
+#[test]
+#[ignore = "lancé avec VIGIE_E2E_PHP (voir l'en-tête)"]
+fn the_inventory_goes_end_to_end_resent_unchanged_then_replaced() {
+    use ed25519_dalek::SigningKey;
+
+    let php = php_command();
+    let base = std::env::temp_dir().join(format!("vigie-e2e-inventory-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    let veilleur = base.join("veilleur");
+    let agent_dir = base.join("agent");
+    for dir in [&base, &veilleur, &agent_dir] {
+        private_dir(dir);
+    }
+    let site_root = base.join("www");
+    copy_dir(
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("agent/php/tests/fixtures/wp-inventory"),
+        &site_root,
+    );
+    let config_path = veilleur.join("config.toml");
+    std::fs::write(
+        &config_path,
+        format!(
+            "database = '{db}'\n[alerts]\nto = \"alertes@example.org\"\nfrom = \"vigie@example.org\"\nsmtp_host = \"smtp.example.org\"\npassword_file = '{p}'\n[[sites]]\nid = \"site-a\"\nurl = \"https://site-a.example.org/\"\nkind = \"wordpress\"\n[sites.inventory]\nsource = \"agent-php\"\n",
+            db = veilleur.join("vigie.db").display(),
+            p = veilleur.join("smtp-password").display(),
+        ),
+    )
+    .unwrap();
+    let config = config::load(&config_path).unwrap();
+    let mut store = Store::open(&config.database).unwrap();
+    let clock = Arc::new(FakeClock::new(SystemClock.unix() - 240));
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let router = serve::router_with(
+        config.clone(),
+        Arc::clone(&clock) as Arc<dyn Clock>,
+        Some(config_path.clone()),
+    );
+    std::thread::spawn(move || {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.block_on(async move {
+            let listener = tokio::net::TcpListener::from_std(listener).unwrap();
+            axum::serve(listener, router).await
+        })
+    });
+    let agent_config = agent_dir.join("config.json");
+    private_file(
+        &agent_config,
+        &serde_json::json!({
+            "site": "site-a",
+            "endpoint": format!("http://127.0.0.1:{port}/r/v1/report"),
+            "root": site_root,
+            "kind": "wordpress",
+            "critical": ["wp-includes/version.php"],
+            "inventory": { "enabled": true, "composer": ["app/composer.lock"] },
+        })
+        .to_string(),
+    );
+    let agent = Agent {
+        php,
+        script: Path::new(env!("CARGO_MANIFEST_DIR")).join("agent/php/vigie-agent.php"),
+        config: agent_config,
+    };
+    let init = agent.run(&["--init"]);
+    assert!(init.status.success(), "{init:?}");
+    let public = String::from_utf8_lossy(&init.stdout)
+        .lines()
+        .find(|l| l.len() == 44 && l.ends_with('='))
+        .expect("clé publique")
+        .to_owned();
+    let public: [u8; 32] = STANDARD.decode(&public).unwrap().try_into().unwrap();
+    store.add_key("site-a", &public, clock.unix()).unwrap();
+
+    let near_real_time = |clock: &FakeClock| {
+        let gap = (clock.unix() - SystemClock.unix()).abs();
+        assert!(
+            gap <= 270,
+            "horloge du veilleur à {gap} s de l'heure réelle"
+        );
+    };
+    let heads = |store: &Store| store.inventory_history("site-a").unwrap();
+
+    // P1 : rapport et premier inventaire.
+    near_real_time(&clock);
+    let p1 = agent.run(&[]);
+    assert!(p1.status.success(), "{p1:?}");
+    let history = heads(&store);
+    assert_eq!(history.len(), 1, "{p1:?}");
+    let first = history[0].clone();
+    assert!(first.complete);
+    assert_eq!(first.agent, "vigie-agent-php/0.5.0");
+    let rows = store.inventory_components(first.id, 0, 100).unwrap();
+    assert_eq!(rows.len(), 18);
+    assert!(
+        rows.iter()
+            .any(|r| r.purl == "pkg:wordpress/plugin/exemple-formulaire@5.9.3")
+    );
+    let state = agent_dir.join("state.json");
+    assert!(!state.exists(), "state.json jamais écrit par l'inventaire");
+
+    // P2 : sans avance d'horloge, rien de changé.
+    near_real_time(&clock);
+    let p2 = agent.run(&[]);
+    assert_eq!(
+        p2.status.code(),
+        Some(1),
+        "rapport refusé par le débit : {p2:?}"
+    );
+    assert!(
+        !String::from_utf8_lossy(&p2.stderr).contains("Inventaire"),
+        "{p2:?}"
+    );
+    assert_eq!(heads(&store), history, "ni envoi ni seen_at avancé");
+
+    // P3 : sent_at reculé de 25 h : renvoi inchangé.
+    let inventory_json = agent_dir.join("inventory.json");
+    let mut saved: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&inventory_json).unwrap()).unwrap();
+    saved["sent_at"] = (saved["sent_at"].as_i64().unwrap() - 25 * 3600).into();
+    private_file(&inventory_json, &saved.to_string());
+    clock.set(first.seen_at + 241);
+    near_real_time(&clock);
+    let p3 = agent.run(&[]);
+    assert!(p3.status.success(), "{p3:?}");
+    let history = heads(&store);
+    assert_eq!(history.len(), 1, "renvoi inchangé : {p3:?}");
+    assert_eq!(history[0].seen_at, first.seen_at + 241);
+
+    // P4 : en-tête Version modifié en place (mtime changé).
+    let header = site_root.join("wp-content/plugins/exemple-formulaire/exemple-formulaire.php");
+    let content = std::fs::read_to_string(&header).unwrap();
+    std::fs::write(&header, content.replace("5.9.3", "5.9.4")).unwrap();
+    std::fs::File::options()
+        .write(true)
+        .open(&header)
+        .unwrap()
+        .set_modified(std::time::SystemTime::now() + std::time::Duration::from_secs(2))
+        .unwrap();
+    clock.set(history[0].seen_at + 241);
+    near_real_time(&clock);
+    let p4 = agent.run(&[]);
+    assert!(p4.status.success(), "{p4:?}");
+    let history = heads(&store);
+    assert_eq!(history.len(), 2, "{p4:?}");
+    let rows = store.inventory_components(history[0].id, 0, 100).unwrap();
+    assert!(
+        rows.iter()
+            .any(|r| r.purl == "pkg:wordpress/plugin/exemple-formulaire@5.9.4")
+    );
+
+    // Un rapport signé par la clé de l'agent : refusé sur /r/v1/inventory,
+    // accepté sur /r/v1/report.
+    let secret = std::fs::read_to_string(agent_dir.join("secret.key")).unwrap();
+    let secret = STANDARD.decode(secret.trim()).unwrap();
+    let signing = SigningKey::from_bytes(&secret[..32].try_into().unwrap());
+    clock.advance(61);
+    let report = serde_json::json!({
+        "v": 1, "site": "site-a", "seq": clock.unix_ms() + 10_000_000, "sent_at": clock.unix(),
+        "agent": "vigie-agent-php/0.5.0", "findings": [], "facts": {}, "files": {},
+    })
+    .to_string();
+    let signature = key::sign(&signing, b"", &[report.as_bytes()]);
+    let post = |route: &str| {
+        let mut stream = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+        write!(
+            stream,
+            "POST {route} HTTP/1.1\r\nHost: 127.0.0.1\r\nX-Vigie-Site: site-a\r\nX-Vigie-Signature: {signature}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{report}",
+            report.len()
+        )
+        .unwrap();
+        let mut response = String::new();
+        std::io::Read::read_to_string(&mut stream, &mut response).unwrap();
+        response.lines().next().unwrap_or("").to_owned()
+    };
+    assert_eq!(post("/r/v1/inventory"), "HTTP/1.1 404 Not Found");
+    assert_eq!(post("/r/v1/report"), "HTTP/1.1 204 No Content");
     let _ = std::fs::remove_dir_all(&base);
 }
 
@@ -807,13 +1011,14 @@ fn a_held_lock_makes_the_agent_skip_without_waiting() {
                 "pubkey": STANDARD.encode([3u8; 32]),
             },
             "logs": { "dir": logs, "hosts": ["site-a.example.org"] },
+            "inventory": { "enabled": true },
         }),
     );
     store.add_key("site-a", &public, clock.unix()).unwrap();
 
-    // Un autre passage tient les deux verrous.
+    // Un autre passage tient les trois verrous.
     let mut held = Vec::new();
-    for name in ["state.lock", "logs.lock"] {
+    for name in ["state.lock", "logs.lock", "inventory.lock"] {
         let path = agent_dir.join(name);
         private_file(&path, "");
         let file = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
@@ -832,6 +1037,10 @@ fn a_held_lock_makes_the_agent_skip_without_waiting() {
     );
     assert!(stderr.contains("un autre passage lit les logs"), "{out:?}");
     assert!(
+        stderr.contains("un autre passage relève l'inventaire : ce passage le saute"),
+        "{out:?}"
+    );
+    assert!(
         !stderr.contains("Envoi échoué"),
         "le rapport part : {out:?}"
     );
@@ -839,6 +1048,10 @@ fn a_held_lock_makes_the_agent_skip_without_waiting() {
     let agent_state = store.agent("site-a").unwrap().unwrap();
     assert!(agent_state.last_valid_at.is_some(), "rapport accepté");
     assert!(!agent_dir.join("logs.json").exists(), "logs non lus");
+    assert!(
+        !agent_dir.join("inventory.json").exists(),
+        "inventaire non relevé"
+    );
     drop(held);
     let _ = std::fs::remove_dir_all(&base);
 }

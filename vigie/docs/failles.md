@@ -389,6 +389,43 @@ une propriété hors de l'espace `vigie:*` est refusé en entier, pas seulement
 le champ, par le 404 muet du point d'entrée, et compté au journal : ces champs
 n'aident pas au rapprochement et peuvent porter des données du client.
 
+Contrat complet (enveloppe, champs, propriétés `vigie:path`, `vigie:scope`,
+`vigie:parent`, `vigie:config-version`, ordre des vérifications) :
+[`protocole-agent.md`](./protocole-agent.md#inventaire-des-composants-issue-19),
+issue #19 (F5).
+
+Côté extension (agent PHP 0.5.0, `agent-php.md`) :
+
+- **Doublons** : pour `wordpress` et `prestashop`, un composant par purl sans
+  version, le relevé du disque l'emportant sur un lockfile (Bedrock,
+  `prestashop-module`) ; pour `composer` et `npm`, un par (purl complet,
+  `vigie:path`) : deux lockfiles peuvent porter deux versions réelles du même
+  paquet. Le veilleur garde sa règle `(purl, path)` : un inventaire de l'agent
+  n'y perd rien.
+- **`complete`** : faux dès qu'une source attendue est refusée ou illisible
+  (lien symbolique, hors racine, lecture en échec, lockfile trop gros,
+  invalide ou en version non gérée), qu'un composant ou un paquet hors
+  registre est écarté (`skipped`), ou qu'une borne (2 000 composants, 500
+  entrées par dossier, 20 s, 512 Kio) a tronqué le relevé. **Seul un
+  inventaire complet vaut absence d'un composant** : F7 ne conclut jamais
+  « faille corrigée » d'un composant qui manque à un relevé partiel.
+- **Hors registre** (règle commune avec l'outil #20) : un paquet de
+  `composer.lock` vient d'un registre s'il porte `notification-url` ou si son
+  nom est `wpackagist-plugin/…` ou `wpackagist-theme/…` ; dans
+  `package-lock.json`, `resolved` en `git+`, `git:`, `github:`, `file:` ou
+  hors de la forme `…/-/<fichier>.tgz` est hors registre. Hors registre :
+  écarté et compté dans `skipped`. Membres du projet (workspaces, liens) : ni
+  émis ni comptés.
+- **Alias npm** : nom réel lu dans le champ `name` de l'entrée, sinon après le
+  dernier `node_modules/` de la clé ; vecteurs communs à l'agent et à l'outil
+  dans `tests/fixtures/inventory/npm-alias.json` (`[{key, entry, out, why}]`).
+- **Limites V1** : disposition Bedrock complète, `roots/wordpress` et
+  `johnpbloch/wordpress` comme cœur, `vendor/composer/installed.json` seul,
+  `package-lock.json` v1, yarn et pnpm (outil #20), drop-ins, thèmes
+  PrestaShop, licences et hachages ; extension à fichier unique nommée comme
+  son fichier (`hello.php` n'est pas `hello-dolly`) ; un `wpackagist-*` sur un
+  site `generic` reste `pkg:composer` et n'est jamais rapproché.
+
 ## Modèle interne et versions
 
 - Sous-ensemble du schéma OSV 1.9.x ; champs inconnus ignorés, champs retenus

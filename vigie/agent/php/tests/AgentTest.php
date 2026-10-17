@@ -479,6 +479,70 @@ function key_paths(mixed $value, string $prefix = ''): array
     return $paths;
 }
 
+/**
+ * Routeur `php -S` qui garde chaque requête (une ligne JSON par requête dans
+ * requests.jsonl) ; statut de /r/v1/inventory lu dans inventory-status
+ * (une valeur par ligne, consommée dans l'ordre ; 204 par défaut).
+ */
+function inventory_router(string $dir): string
+{
+    $router = $dir . '/router.php';
+    file_put_contents($router, <<<'PHP'
+        <?php
+        $status = 204;
+        $uri = $_SERVER['REQUEST_URI'];
+        if ($uri === '/r/v1/inventory' && is_file(__DIR__ . '/inventory-status')) {
+            $lines = file(__DIR__ . '/inventory-status', FILE_IGNORE_NEW_LINES);
+            if ($lines !== []) {
+                $status = (int) array_shift($lines);
+                file_put_contents(__DIR__ . '/inventory-status', implode("\n", $lines));
+            }
+        } elseif ($uri !== '/r/v1/report' && $uri !== '/r/v1/inventory') {
+            $status = 404;
+        }
+        file_put_contents(__DIR__ . '/requests.jsonl', json_encode([
+            'uri' => $uri,
+            'headers' => array_change_key_case(getallheaders(), CASE_LOWER),
+            'body' => file_get_contents('php://input'),
+        ]) . "\n", FILE_APPEND);
+        http_response_code($status);
+        PHP);
+
+    return $router;
+}
+
+/** Requêtes reçues par le routeur d'inventaire, pour une route. */
+function received(string $dir, string $uri): array
+{
+    $lines = is_file("{$dir}/requests.jsonl") ? file("{$dir}/requests.jsonl", \FILE_IGNORE_NEW_LINES) : [];
+
+    return array_values(array_filter(array_map(static fn (string $l): array => json_decode($l, true), $lines), static fn (array $r): bool => $r['uri'] === $uri));
+}
+
+/**
+ * Agent initialisé sur une copie de wp-inventory, inventaire activé, envoyé
+ * au routeur d'inventaire. Rend [config, dossier de l'agent, racine, dossier
+ * du serveur, arrêt].
+ */
+function inventory_agent(): array
+{
+    $root = tmp_inventory_site('wp-inventory');
+    $server = tmp_dir();
+    [$port, $stop] = php_server(inventory_router($server), $server);
+    [$path] = init_agent($root, [
+        'endpoint' => "http://127.0.0.1:{$port}/r/v1/report",
+        'critical' => [], 'must_contain' => [],
+        'inventory' => ['enabled' => true],
+    ]);
+
+    return [load_config($path), \dirname($path), $root, $server, $stop];
+}
+
+function inventory_state(string $dir): array
+{
+    return json_decode((string) file_get_contents("{$dir}/inventory.json"), true, 8, \JSON_THROW_ON_ERROR);
+}
+
 /** Contenu et mtime de tous les fichiers d'un dossier. */
 function snapshot(string $dir): array
 {
@@ -969,6 +1033,182 @@ return [
         }
     },
 
+    'inventaire : relevé et envoi au premier passage, rien au second, renvoi après 24 h, état 0600, state.json intact' => function (): void {
+        [$config, $dir, $root, $server, $stop] = inventory_agent();
+        try {
+            file_put_contents("{$dir}/state.json", '{"pull_seq":5,"last_command_seq":0,"running":null,"result":null,"rotation":null}');
+            chmod("{$dir}/state.json", 0600);
+            $stateBefore = file_get_contents("{$dir}/state.json");
+            $now = 1_792_152_000;
+            \Vigie\Agent\send_inventory($config, $dir, $now);
+            $sent = received($server, '/r/v1/inventory');
+            same(1, \count($sent), 'un envoi');
+            $state = inventory_state($dir);
+            same([$now, $now, 0], [$state['scanned_at'], $state['sent_at'], $state['failed_at']], 'relevé et envoi notés');
+            check($state['stat_paths'] !== [] && $state['stat_sha256'] !== '', 'chemins du relevé économe');
+            if (\DIRECTORY_SEPARATOR === '/') {
+                same(0600, fileperms("{$dir}/inventory.json") & 0777, 'droits de inventory.json');
+            }
+            $body = $sent[0]['body'];
+            same('site-a', $sent[0]['headers']['x-vigie-site'], 'en-tête du site');
+            $public = sodium_crypto_sign_publickey_from_secretkey(\Vigie\Agent\load_secret($dir));
+            check(sodium_crypto_sign_verify_detached(base64_decode($sent[0]['headers']['x-vigie-signature']), \Vigie\Agent\DOMAIN_INVENTORY . $body, $public), 'signé sur vigie-inventory-v1');
+            same($state['seq'], json_decode($body, true)['seq'], 'seq envoyé');
+
+            // Second passage, rien de changé : ni relevé ni envoi.
+            \Vigie\Agent\send_inventory($config, $dir, $now + 300);
+            same(1, \count(received($server, '/r/v1/inventory')), 'aucun envoi');
+            same($state, inventory_state($dir), 'aucun relevé');
+
+            // sent_at reculé de 25 h : relevé et renvoi.
+            $state['sent_at'] = $now - 25 * 3600;
+            \Vigie\Agent\save_inventory_state($dir, $state);
+            \Vigie\Agent\send_inventory($config, $dir, $now + 600);
+            same(2, \count(received($server, '/r/v1/inventory')), 'renvoi des 24 h');
+            same($now + 600, inventory_state($dir)['sent_at'], 'sent_at avancé');
+
+            // En-tête modifié en place : mtime changé, relevé et envoi.
+            $file = "{$root}/wp-content/plugins/exemple-formulaire/exemple-formulaire.php";
+            file_put_contents($file, str_replace('5.9.3', '5.9.4', (string) file_get_contents($file)));
+            touch($file, time() + 2);
+            \Vigie\Agent\send_inventory($config, $dir, $now + 900);
+            $sent = received($server, '/r/v1/inventory');
+            same(3, \count($sent), 'envoi après modification');
+            check(str_contains($sent[2]['body'], 'pkg:wordpress/plugin/exemple-formulaire@5.9.4'), 'nouvelle version');
+            same($stateBefore, file_get_contents("{$dir}/state.json"), 'state.json identique octet pour octet');
+        } finally {
+            $stop();
+        }
+    },
+
+    'inventaire : refus du veilleur, code 1, pas de nouvel essai avant 1 h' => function (): void {
+        [$config, $dir, $root, $server, $stop] = inventory_agent();
+        try {
+            file_put_contents("{$server}/inventory-status", "404");
+            $now = 1_792_152_000;
+            try {
+                \Vigie\Agent\send_inventory($config, $dir, $now);
+                throw new Failure('refus non signalé');
+            } catch (\Vigie\Agent\SendError $e) {
+                check(str_contains($e->getMessage(), 'nouvel essai dans 1 h'), $e->getMessage());
+            }
+            same(1, \count(received($server, '/r/v1/inventory')), 'un essai, sans repli (aucune clé en rotation)');
+            same($now, inventory_state($dir)['failed_at'], 'failed_at écrit');
+            // Relevé horaire dû, mais pas de nouvel essai avant 1 h.
+            $file = "{$root}/wp-content/plugins/exemple-cache/chargeur.php";
+            touch($file, time() + 5);
+            \Vigie\Agent\send_inventory($config, $dir, $now + 3599);
+            same(1, \count(received($server, '/r/v1/inventory')), 'aucun envoi dans l\'heure');
+            \Vigie\Agent\send_inventory($config, $dir, $now + 3600 + 3600);
+            same(2, \count(received($server, '/r/v1/inventory')), 'nouvel essai une heure plus tard');
+            same(0, inventory_state($dir)['failed_at'], 'failed_at remis à zéro');
+
+            // CLI : le rapport part (204), l'inventaire refusé donne le code 1.
+            file_put_contents("{$server}/inventory-status", "404");
+            unlink("{$dir}/inventory.json");
+            $cli = agent('--config', "{$dir}/config.json");
+            same(1, $cli['code'], "code 1 : {$cli['stderr']}");
+            check(str_contains($cli['stderr'], 'Inventaire : inventaire refusé'), $cli['stderr']);
+            check(received($server, '/r/v1/report') !== [], 'rapport envoyé malgré le refus de l\'inventaire');
+        } finally {
+            $stop();
+        }
+    },
+
+    'inventaire : rotation non accusée : repli sur secret.key.new' => function (): void {
+        [$config, $dir, , $server, $stop] = inventory_agent();
+        try {
+            $pair = sodium_crypto_sign_keypair();
+            file_put_contents("{$dir}/secret.key.new", base64_encode(sodium_crypto_sign_secretkey($pair)) . "\n");
+            chmod("{$dir}/secret.key.new", 0600);
+            file_put_contents("{$server}/inventory-status", "404\n204");
+            \Vigie\Agent\send_inventory($config, $dir, 1_792_152_000);
+            $sent = received($server, '/r/v1/inventory');
+            same(2, \count($sent), 'ancienne clé, puis nouvelle');
+            check(json_decode($sent[1]['body'], true)['seq'] > json_decode($sent[0]['body'], true)['seq'], 'seq croissant');
+            check(sodium_crypto_sign_verify_detached(base64_decode($sent[1]['headers']['x-vigie-signature']), \Vigie\Agent\DOMAIN_INVENTORY . $sent[1]['body'], sodium_crypto_sign_publickey($pair)), 'signé par la nouvelle clé');
+            same(1_792_152_000, inventory_state($dir)['sent_at'], 'accepté');
+        } finally {
+            $stop();
+        }
+    },
+
+    'inventaire : état forgé, ouvert ou lien refusé ; verrou tenu : passage sauté' => function (): void {
+        [$config, $dir, , $server, $stop] = inventory_agent();
+        try {
+            $refused = static function (string $content, string $why) use ($config, $dir): void {
+                file_put_contents("{$dir}/inventory.json", $content);
+                chmod("{$dir}/inventory.json", 0600);
+                try {
+                    \Vigie\Agent\send_inventory($config, $dir, 1_792_152_000);
+                    throw new Failure("état accepté : {$why}");
+                } catch (UsageError $e) {
+                    check(str_contains($e->getMessage(), 'le supprimer refait un relevé'), $e->getMessage());
+                }
+            };
+            $valid = \Vigie\Agent\empty_inventory_state();
+            $refused(json_encode($valid + ['autre' => 1]), 'clé en trop');
+            $refused(json_encode(['sent_sha256' => 'xyz'] + $valid), 'sha256 invalide');
+            $refused(json_encode(['stat_paths' => ['../wp-config.php']] + $valid), 'chemin hors racine');
+            $refused('{', 'JSON');
+            if (\DIRECTORY_SEPARATOR === '/') {
+                file_put_contents("{$dir}/inventory.json", json_encode($valid));
+                chmod("{$dir}/inventory.json", 0644);
+                try {
+                    \Vigie\Agent\send_inventory($config, $dir, 1_792_152_000);
+                    throw new Failure('état 0644 accepté');
+                } catch (UsageError) {
+                }
+                unlink("{$dir}/inventory.json");
+                $target = tmp_dir() . '/ailleurs.json';
+                file_put_contents($target, json_encode($valid));
+                chmod($target, 0600);
+                symlink($target, "{$dir}/inventory.json");
+                try {
+                    \Vigie\Agent\send_inventory($config, $dir, 1_792_152_000);
+                    throw new Failure('état en lien accepté');
+                } catch (UsageError) {
+                }
+                unlink("{$dir}/inventory.json");
+            }
+            same([], received($server, '/r/v1/inventory'), 'rien envoyé');
+
+            $lock = fopen("{$dir}/inventory.lock", 'c');
+            flock($lock, \LOCK_EX);
+            try {
+                \Vigie\Agent\send_inventory($config, $dir, 1_792_152_000);
+                throw new Failure('verrou ignoré');
+            } catch (\Vigie\Agent\SendError $e) {
+                same("un autre passage relève l'inventaire : ce passage le saute", $e->getMessage(), 'message');
+            } finally {
+                flock($lock, \LOCK_UN);
+                fclose($lock);
+            }
+            check(!is_file("{$dir}/inventory.json"), 'rien relevé');
+        } finally {
+            $stop();
+        }
+    },
+
+    '--inventory : enveloppe affichée, rien de signé, envoyé ni écrit ; exclusif' => function (): void {
+        $root = inventory_fixture('ps8-inventory');
+        $path = write_config($root, ['kind' => 'prestashop', 'critical' => [], 'must_contain' => []]);
+        $out = agent('--inventory', '--config', $path);
+        same(0, $out['code'], $out['stderr']);
+        $doc = json_decode($out['stdout'], true, 32, \JSON_THROW_ON_ERROR);
+        same(['inventory', 'CycloneDX', 4], [$doc['type'], $doc['bom']['bomFormat'], \count($doc['bom']['components'])], 'inventaire relu avant activation');
+        same(['config.json'], array_values(array_diff(scandir(\dirname($path)), ['.', '..'])), 'aucun fichier écrit');
+        same(2, agent('--inventory', '--dry-run', '--config', $path)['code'], '--inventory et --dry-run exclusifs');
+        same(2, agent('--init', '--inventory', '--config', $path)['code'], '--init et --inventory exclusifs');
+    },
+
+    'inventaire : section absente : aucun relevé, aucun fichier inventory.*' => function (): void {
+        [$path] = init_agent(fixture(), ['endpoint' => 'http://127.0.0.1:' . free_port() . '/r/v1/report']);
+        $out = agent('--config', $path);
+        same(1, $out['code'], 'rapport non envoyé (port fermé)');
+        same([], glob(\dirname($path) . '/inventory.*') ?: [], 'aucun état d\'inventaire');
+    },
+
     'libellés : contrôles et UTF-8 invalide remplacés, longueur bornée' => function (): void {
         same('a?b?c?', printable("a\nb\u{85}c\x7F", 300), 'contrôles C0, C1, DEL');
         same('a?', printable("a\xFF", 300), 'UTF-8 invalide');
@@ -1056,11 +1296,16 @@ return [
     },
 
     "fixture d'interopérabilité à jour et signature valide" => function (): void {
-        $tracked = @file_get_contents(interop_path());
-        check($tracked !== false, 'fixture absente : php vigie/agent/php/tests/make-interop-fixture.php');
-        same(interop_json(), $tracked, 'fixture périmée : relancer make-interop-fixture.php');
-        $fixture = json_decode($tracked, true);
+        foreach (interop_files() as $name => $content) {
+            $tracked = @file_get_contents(interop_path($name));
+            check($tracked !== false, "{$name} absente : php vigie/agent/php/tests/make-interop-fixture.php");
+            same($content, $tracked, "{$name} périmée : relancer make-interop-fixture.php");
+        }
+        $fixture = json_decode((string) file_get_contents(interop_path()), true);
         check(sodium_crypto_sign_verify_detached(base64_decode($fixture['signature']), $fixture['body'], base64_decode($fixture['public_key'])), 'signature');
+        $inventory = json_decode((string) file_get_contents(interop_path('php-signed-inventory.json')), true);
+        check(sodium_crypto_sign_verify_detached(base64_decode($inventory['signature']), \Vigie\Agent\DOMAIN_INVENTORY . $inventory['body'], base64_decode($inventory['public_key'])), 'signature de l\'inventaire');
+        same(false, sodium_crypto_sign_verify_detached(base64_decode($inventory['signature']), $inventory['body'], base64_decode($inventory['public_key'])), 'sans préfixe : refusée');
     },
 
     'commandes : chaque vecteur de réponse reçoit son verdict' => function (): void {
