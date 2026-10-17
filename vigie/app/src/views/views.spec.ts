@@ -157,6 +157,150 @@ describe('Santé', () => {
   })
 })
 
+describe('Disponibilité, incidents clos par pages', () => {
+  it('« Afficher plus » ajoute la page suivante, puis disparaît', async () => {
+    const veilleur = mockVeilleur()
+    const first = veilleur.data.history['site-a']
+    first.next_cursor = 'hist-2'
+    veilleur.data.moreHistory['hist-2'] = {
+      ...first,
+      incidents: [{ ...first.incidents[0]!, id: 8, detail: 'Constat plus ancien' }],
+      next_cursor: null,
+    }
+    const { wrapper } = await open('/s/site-a/sante')
+    expect(wrapper.findAll('[data-closed]')).toHaveLength(1)
+    await wrapper.get('[data-more]').trigger('click')
+    await settle()
+    expect(wrapper.findAll('[data-closed]').map((c) => c.text())).toEqual([
+      expect.stringContaining('Texte attendu absent'),
+      expect.stringContaining('Constat plus ancien'),
+    ])
+    expect(wrapper.find('[data-more]').exists()).toBe(false)
+  })
+})
+
+describe('Trafic', () => {
+  it('Visiteurs : verdicts d’IP, « Afficher plus » et propositions sans écriture', async () => {
+    const veilleur = mockVeilleur()
+    const { wrapper } = await open('/s/site-a/trafic')
+    expect(wrapper.find('h1').text()).toBe('Visiteurs')
+    expect(wrapper.get('[data-summary]').text()).toMatch(/à 09:55.*31 IP notées, 2 sans score fiable/s)
+    let verdicts = wrapper.findAll('[data-verdict]').map((v) => v.text())
+    expect(verdicts).toHaveLength(2)
+    expect(verdicts[0]).toMatch(/192\.0\.2\.10.*Élevé.*Score 85 sur 100.*Outil.*beaucoup de pages à facettes/s)
+    expect(verdicts[1]).toContain('autre raison')
+
+    await wrapper.get('[data-more]').trigger('click')
+    await settle()
+    verdicts = wrapper.findAll('[data-verdict]').map((v) => v.text())
+    expect(verdicts).toHaveLength(3)
+    expect(verdicts[2]).toContain('198.51.100.7')
+    expect(wrapper.find('[data-more]').exists()).toBe(false)
+
+    // IPv4 : bloquer ou autoriser ; IPv6 : l'abonnement (/64) en plus.
+    const proposals = wrapper.findAll('[data-proposal]')
+    expect(proposals[0]?.findAll('[data-option]').map((o) => o.find('span').text())).toEqual([
+      'Bloquer cette IP',
+      'Autoriser',
+    ])
+    expect(proposals[1]?.text()).toContain('Bloquer l’abonnement (/64)')
+    for (const proposal of proposals) {
+      expect(proposal.get('[data-command]').text()).toBe('vigie site recommend site-a')
+      expect(proposal.findAll('button')).toHaveLength(0)
+    }
+    // Aucune commande d'écriture : seulement des lectures.
+    expect(veilleur.calls.filter((c) => !['status', 'site', 'logs', 'log_ips'].includes(c))).toEqual([])
+  })
+
+  it('Visiteurs : un curseur expiré fait reprendre la liste au début, avec un avis', async () => {
+    const veilleur = mockVeilleur()
+    const { wrapper } = await open('/s/site-a/trafic')
+    veilleur.expired = true
+    await wrapper.get('[data-more]').trigger('click')
+    await settle()
+    expect(wrapper.findAll('[data-verdict]')).toHaveLength(2)
+    expect(wrapper.get('[data-list-notice]').text()).toContain('reprend au début')
+    expect(wrapper.find('[data-more-error]').exists()).toBe(false)
+  })
+
+  it('Visiteurs : 429 dit quand réessayer, sans relance automatique', async () => {
+    const veilleur = mockVeilleur()
+    const { wrapper } = await open('/s/site-a/trafic')
+    veilleur.limited = true
+    const before = veilleur.calls.length
+    await wrapper.get('[data-more]').trigger('click')
+    await settle()
+    expect(wrapper.get('[data-more-error]').text()).toBe('trop de requêtes, réessayer dans 12 s')
+    expect(veilleur.calls.length - before).toBe(1)
+    expect(wrapper.findAll('[data-verdict]')).toHaveLength(2)
+  })
+
+  it('Blocages : règles et robots ; un robot protégé n’a pas de proposition', async () => {
+    mockVeilleur()
+    const { wrapper } = await open('/s/site-a/trafic/blocages')
+    const rules = wrapper.findAll('[data-rule]').map((r) => r.text())
+    expect(rules[0]).toMatch(/spike-404.*Dépassée.*sur le site · 140 requêtes en 5 min \(seuil 100\)/s)
+    expect(rules[1]).toMatch(/login-burst.*Sous le seuil.*par IP/s)
+    const bots = wrapper.findAll('[data-bot]')
+    expect(bots[0]?.text()).toMatch(/GPTBot.*Robot IA.*OpenAI · 42 requêtes · respecte robots.txt/s)
+    expect(bots[0]?.find('[data-proposal]').exists()).toBe(true)
+    expect(bots[1]?.find('[data-protected]').exists()).toBe(true)
+    expect(bots[1]?.find('[data-proposal]').exists()).toBe(false)
+  })
+
+  it('un nom de robot ou une métadonnée en HTML s’affichent en texte', async () => {
+    const veilleur = mockVeilleur()
+    const hostile = '<img src=x onerror=alert(1)>'
+    const analysis = veilleur.data.logs['site-a']!.analysis!
+    analysis.bots[0] = { ...analysis.bots[0]!, name: hostile, publisher: hostile, purpose: hostile, class: hostile }
+    analysis.rules[0] = { ...analysis.rules[0]!, rule: hostile }
+    veilleur.data.ips['site-a']!.items[0] = { ...veilleur.data.ips['site-a']!.items[0]!, ip: hostile, reasons: [hostile], class: hostile }
+    for (const path of ['/s/site-a/trafic/blocages', '/s/site-a/trafic']) {
+      const { wrapper } = await open(path)
+      expect(wrapper.find('img').exists()).toBe(false)
+      expect(wrapper.text()).toContain(hostile)
+      expect(wrapper.html()).toContain('&lt;img src=x onerror=alert(1)&gt;')
+      wrapper.unmount()
+    }
+  })
+
+  it('Ressources : charge par heure et heures au-delà du seuil', async () => {
+    mockVeilleur()
+    const { wrapper } = await open('/s/site-a/sante/ressources')
+    const hours = wrapper.findAll('[data-hour]').map((h) => h.text())
+    expect(hours).toHaveLength(3)
+    expect(hours[0]).toMatch(/08:00.*300 requêtes · 4 refusées · 10 % de robots · 120 s de service/s)
+    expect(hours[1]).toMatch(/09:00.*Au-delà du seuil.*2\s000 s de service/s)
+    expect(hours[0]).not.toContain('Au-delà du seuil')
+    expect(hours[2]).toContain('durées absentes des logs')
+    expect(wrapper.text()).toContain('Ressources du compte')
+  })
+
+  it.each(['/s/site-b/trafic', '/s/site-b/trafic/blocages', '/s/site-b/sante/ressources'])(
+    'site sans source de logs (404) : %s pas encore disponible',
+    async (path) => {
+      mockVeilleur()
+      const { wrapper } = await open(path)
+      const notYet = wrapper.get('[data-notyet]')
+      expect(notYet.text()).toContain('Pas encore disponible')
+      expect(notYet.text()).toContain('[sites.logs]')
+      expect(wrapper.find('[data-state-screen]').exists()).toBe(false)
+    },
+  )
+
+  it('analyse pas encore écrite : « analyse en attente »', async () => {
+    const veilleur = mockVeilleur()
+    veilleur.data.logs['site-a'] = { analysis: null }
+    veilleur.data.ips['site-a'] = { site: 'site-a', generated_at: null, items: [], next_cursor: null }
+    for (const path of ['/s/site-a/trafic', '/s/site-a/trafic/blocages', '/s/site-a/sante/ressources']) {
+      const { wrapper } = await open(path)
+      expect(wrapper.get('[data-pending]').text()).toContain('Analyse en attente')
+      expect(wrapper.find('[data-verdict], [data-rule], [data-hour]').exists()).toBe(false)
+      wrapper.unmount()
+    }
+  })
+})
+
 describe('Paramètres et Réglages', () => {
   it('Paramètres cite les commandes de la CLI pour ce site', async () => {
     mockVeilleur()
@@ -316,6 +460,9 @@ describe('aucune valeur d’exemple des maquettes', () => {
     '/s/site-a/alerte/12',
     '/s/site-a/sante',
     '/s/site-a/sante/controles',
+    '/s/site-a/trafic',
+    '/s/site-a/trafic/blocages',
+    '/s/site-a/sante/ressources',
     '/s/site-a/parametres',
     '/reglages',
   ])('%s', async (path) => {

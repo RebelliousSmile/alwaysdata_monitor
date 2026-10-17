@@ -12,7 +12,8 @@ use serde::Serialize;
 use tauri::{Manager, State};
 
 use client::{
-    ApiError, Client, ErrorKind, Incident, Overview, Settings, SiteDetail, SiteIncidents,
+    ApiError, Client, ErrorKind, Incident, LogIps, Overview, Settings, SiteDetail, SiteIncidents,
+    SiteLogs,
 };
 use secret::{SecretStore, TokenStorage};
 
@@ -220,10 +221,34 @@ async fn site(console: State<'_, Console>, id: String) -> Result<SiteDetail, Api
         .await
 }
 
+/// Une page des incidents clos ; `cursor` absent pour la première.
 #[tauri::command]
-async fn incidents(console: State<'_, Console>, site: String) -> Result<SiteIncidents, ApiError> {
+async fn incidents(
+    console: State<'_, Console>,
+    site: String,
+    cursor: Option<String>,
+) -> Result<SiteIncidents, ApiError> {
     console
-        .call(|client| async move { client.incidents(&site).await })
+        .call(|client| async move { client.incidents(&site, cursor.as_deref()).await })
+        .await
+}
+
+#[tauri::command]
+async fn logs(console: State<'_, Console>, site: String) -> Result<SiteLogs, ApiError> {
+    console
+        .call(|client| async move { client.logs(&site).await })
+        .await
+}
+
+/// Une page des verdicts d'IP ; `cursor` absent pour la première.
+#[tauri::command]
+async fn log_ips(
+    console: State<'_, Console>,
+    site: String,
+    cursor: Option<String>,
+) -> Result<LogIps, ApiError> {
+    console
+        .call(|client| async move { client.log_ips(&site, cursor.as_deref()).await })
         .await
 }
 
@@ -261,7 +286,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            status, pair, unpair, overview, site, incidents, incident, ack, settings
+            status, pair, unpair, overview, site, incidents, logs, log_ips, incident, ack, settings
         ])
         .run(tauri::generate_context!())
         .expect("échec du lancement de la console Vigie");
@@ -361,6 +386,8 @@ mod tests {
                 "overview",
                 "site",
                 "incidents",
+                "logs",
+                "log_ips",
                 "incident",
                 "ack",
                 "settings"

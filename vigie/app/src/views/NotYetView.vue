@@ -5,8 +5,8 @@ import NotYet from '@/components/NotYet.vue'
 import { FEATURES } from '@/lib/features'
 import { useSiteLinks } from '@/lib/links'
 
-// Écran d'une fonctionnalité sans source : Visiteurs, Journal, Blocages,
-// Erreurs, Ressources, Ajouter un site, E-mails.
+// Écran d'une fonctionnalité sans source : Journal, Erreurs, Ajouter un
+// site, E-mails. Visiteurs, Blocages et Ressources passent par Trafic.
 const route = useRoute()
 const { to } = useSiteLinks()
 

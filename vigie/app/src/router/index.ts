@@ -19,7 +19,7 @@ declare module 'vue-router' {
     nav?: NavKey
     /** Sélecteur à trois segments affiché au-dessus du contenu. */
     segments?: SegmentGroup
-    /** Fonctionnalité sans source, rendue par NotYet. */
+    /** Fonctionnalité sans source, rendue par NotYet (par Trafic sur un 404). */
     feature?: FeatureKey
     /** Titre d'un écran global. */
     title?: string
@@ -29,6 +29,7 @@ declare module 'vue-router' {
 }
 
 const NotYetView = () => import('@/views/NotYetView.vue')
+const Trafic = () => import('@/views/Trafic.vue')
 
 export const routes: RouteRecordRaw[] = [
   { path: '/', name: 'sites', component: () => import('@/views/Main.vue') },
@@ -44,7 +45,7 @@ export const routes: RouteRecordRaw[] = [
   {
     path: '/s/:site/trafic',
     name: 'trafic',
-    component: NotYetView,
+    component: Trafic,
     meta: { site: true, nav: 'trafic', segments: 'trafic', feature: 'visiteurs' },
   },
   {
@@ -56,7 +57,7 @@ export const routes: RouteRecordRaw[] = [
   {
     path: '/s/:site/trafic/blocages',
     name: 'blocages',
-    component: NotYetView,
+    component: Trafic,
     meta: { site: true, nav: 'trafic', segments: 'trafic', feature: 'blocages' },
   },
   {
@@ -74,7 +75,7 @@ export const routes: RouteRecordRaw[] = [
   {
     path: '/s/:site/sante/ressources',
     name: 'ressources',
-    component: NotYetView,
+    component: Trafic,
     meta: { site: true, nav: 'sante', segments: 'sante', feature: 'ressources' },
   },
   {
