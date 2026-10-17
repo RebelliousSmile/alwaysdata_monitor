@@ -1,6 +1,6 @@
 ---
 objective: "La console Vigie (Tauri 2, déjà publiée en 0.1.1) couvre toute l'issue #12 : vue des logs alimentée par l'API (#5), listes paginées, jeton dans le Credential Manager sous Windows et dans le stockage privé sous Android, CSP, capacités et absence de v-html verrouillées par des tests, et aucune écriture hors de l'acquittement."
-status: pending
+status: done
 issue_number: 12
 ---
 
