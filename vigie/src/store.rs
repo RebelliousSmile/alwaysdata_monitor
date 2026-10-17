@@ -86,7 +86,12 @@ const MIGRATIONS: &[&str] = &[
     // Le numéro 16 revient à l'inventaire (#19), fusionné en parallèle : la
     // version réelle est la place dans cette liste ([`SCHEMA_VULNS_SYNC`]).
     include_str!("../migrations/0017.sql"),
-    // Fichier 0020 (18 après #16) : outil d'inventaire (#20, F6) :
+    // 18 : corrections de plage auditées (`vulns/corrections.rs`, issue #17),
+    // en ajout seul, hors des générations. Numéro de fichier pris d'avance
+    // (F4 prend 0019, F6 0020) : la version réelle est la place dans cette
+    // liste ([`SCHEMA_RANGE_CORRECTIONS`]).
+    include_str!("../migrations/0018.sql"),
+    // Fichier 0020 : outil d'inventaire (#20, F6) :
     // clé d'inventaire de chaque site (`site_inventory_keys`, `seq` de la
     // source `ci`), source de chaque inventaire (`agent` pour les lignes
     // existantes), index du dernier inventaire par (site, source). Numéro de
@@ -157,6 +162,9 @@ pub const SCHEMA_INVENTORY: usize = 16;
 /// Version de schéma à partir de laquelle l'état de synchronisation des
 /// sources de failles existe (issue #16, fichier `0017.sql`).
 pub const SCHEMA_VULNS_SYNC: usize = version_of(include_str!("../migrations/0017.sql"));
+/// Version de schéma à partir de laquelle les corrections de plage existent
+/// (issue #17, fichier `0018.sql`).
+pub const SCHEMA_RANGE_CORRECTIONS: usize = version_of(include_str!("../migrations/0018.sql"));
 /// Version de schéma à partir de laquelle les clés d'inventaire et la source
 /// des inventaires existent (issue #20) : position de `0020.sql` dans
 /// [`MIGRATIONS`], la suivante de celle qui la précède à la fusion.
@@ -3259,6 +3267,7 @@ mod tests {
             ("index", "vuln_affected_purl"),
             ("index", "vuln_aliases_advisory"),
             ("index", "vuln_aliases_alias"),
+            ("index", "vuln_range_corrections_key"),
             ("table", "agent_sources"),
             ("table", "audit_notified"),
             ("table", "baselines"),
@@ -3290,9 +3299,12 @@ mod tests {
             ("table", "vuln_advisories"),
             ("table", "vuln_affected"),
             ("table", "vuln_aliases"),
+            ("table", "vuln_range_corrections"),
             ("table", "vuln_sources"),
             ("trigger", "command_audit_no_delete"),
             ("trigger", "command_audit_no_update"),
+            ("trigger", "vuln_range_corrections_no_delete"),
+            ("trigger", "vuln_range_corrections_no_update"),
         ];
         let objects: Vec<(&str, &str)> = objects
             .iter()
@@ -3415,6 +3427,37 @@ mod tests {
         // Rejouées sans effet.
         let store = Store::open(&path).expect("réouverture");
         assert_eq!(store.schema_version().expect("version"), MIGRATIONS.len());
+    }
+
+    #[test]
+    fn migrates_a_vulns_sync_database_to_range_corrections() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("vigie.db");
+        {
+            let conn = Connection::open(&path).expect("open");
+            for migration in &MIGRATIONS[..SCHEMA_VULNS_SYNC] {
+                conn.execute_batch(migration).expect("migration");
+            }
+            conn.pragma_update(None, "user_version", SCHEMA_VULNS_SYNC as i64)
+                .expect("user_version");
+            conn.execute(
+                "INSERT INTO vuln_sources (id, revision) VALUES ('friends-of-presta', 'abc')",
+                [],
+            )
+            .expect("source");
+        }
+        let store = Store::open(&path).expect("open");
+        assert_eq!(store.schema_version().expect("version"), MIGRATIONS.len());
+        const { assert!(SCHEMA_RANGE_CORRECTIONS > SCHEMA_VULNS_SYNC) };
+        let (corrections, revision): (i64, String) = store
+            .conn
+            .query_row(
+                "SELECT (SELECT count(*) FROM vuln_range_corrections), revision FROM vuln_sources",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("tables");
+        assert_eq!((corrections, revision.as_str()), (0, "abc"));
     }
 
     #[test]

@@ -1,0 +1,325 @@
+[
+ {
+  "in": "< 2.0.0",
+  "out": [
+   {
+    "introduced": "0"
+   },
+   {
+    "fixed": "2.0.0"
+   }
+  ],
+  "why": "strictement inférieur"
+ },
+ {
+  "in": "<= 1.5.0",
+  "out": [
+   {
+    "introduced": "0"
+   },
+   {
+    "last_affected": "1.5.0"
+   }
+  ],
+  "why": "inférieur ou égal"
+ },
+ {
+  "in": "<=1.5.0",
+  "out": [
+   {
+    "introduced": "0"
+   },
+   {
+    "last_affected": "1.5.0"
+   }
+  ],
+  "why": "opérateur collé"
+ },
+ {
+  "in": "= 1.0.0",
+  "out": [
+   {
+    "introduced": "1.0.0"
+   },
+   {
+    "last_affected": "1.0.0"
+   }
+  ],
+  "why": "égalité"
+ },
+ {
+  "in": "1.0.0",
+  "out": [
+   {
+    "introduced": "1.0.0"
+   },
+   {
+    "last_affected": "1.0.0"
+   }
+  ],
+  "why": "version seule"
+ },
+ {
+  "in": "v1.2.3",
+  "out": [
+   {
+    "introduced": "1.2.3"
+   },
+   {
+    "last_affected": "1.2.3"
+   }
+  ],
+  "why": "v initial retiré"
+ },
+ {
+  "in": ">= 1.0.0 <= 2.0.0",
+  "out": [
+   {
+    "introduced": "1.0.0"
+   },
+   {
+    "last_affected": "2.0.0"
+   }
+  ],
+  "why": "deux bornes"
+ },
+ {
+  "in": ">= 1.0.0, <= 2.0.0",
+  "out": [
+   {
+    "introduced": "1.0.0"
+   },
+   {
+    "last_affected": "2.0.0"
+   }
+  ],
+  "why": "deux bornes, virgule"
+ },
+ {
+  "in": ">= 1.0.0 < 2.0.0",
+  "out": [
+   {
+    "introduced": "1.0.0"
+   },
+   {
+    "fixed": "2.0.0"
+   }
+  ],
+  "why": "borne haute exclue"
+ },
+ {
+  "in": ">= 1.0.0, < 2.0.0",
+  "out": [
+   {
+    "introduced": "1.0.0"
+   },
+   {
+    "fixed": "2.0.0"
+   }
+  ],
+  "why": "borne haute exclue, virgule"
+ },
+ {
+  "in": "1.0.0 - 2.0.0",
+  "out": [
+   {
+    "introduced": "1.0.0"
+   },
+   {
+    "last_affected": "2.0.0"
+   }
+  ],
+  "why": "tiret entouré d'espaces"
+ },
+ {
+  "in": "1.0 to 2.0",
+  "out": [
+   {
+    "introduced": "1.0"
+   },
+   {
+    "last_affected": "2.0"
+   }
+  ],
+  "why": "to"
+ },
+ {
+  "in": "from 1.0 to 2.0",
+  "out": [
+   {
+    "introduced": "1.0"
+   },
+   {
+    "last_affected": "2.0"
+   }
+  ],
+  "why": "from … to"
+ },
+ {
+  "in": "FROM 1.0 TO 2.0",
+  "out": [
+   {
+    "introduced": "1.0"
+   },
+   {
+    "last_affected": "2.0"
+   }
+  ],
+  "why": "mots-clés sans casse"
+ },
+ {
+  "in": "between 1.0 and 2.0",
+  "out": [
+   {
+    "introduced": "1.0"
+   },
+   {
+    "last_affected": "2.0"
+   }
+  ],
+  "why": "between … and"
+ },
+ {
+  "in": ">= 3.0",
+  "out": [
+   {
+    "introduced": "3.0"
+   }
+  ],
+  "why": "plage ouverte"
+ },
+ {
+  "in": "<= 1.5.0 (1.5.1 fixed the vulnerability)",
+  "out": [
+   {
+    "introduced": "0"
+   },
+   {
+    "last_affected": "1.5.0"
+   },
+   {
+    "fixed": "1.5.1"
+   }
+  ],
+  "why": "remarque : V > B"
+ },
+ {
+  "in": "<= 1.6.1.24 (fixed in 1.6.1.25)",
+  "out": [
+   {
+    "introduced": "0"
+   },
+   {
+    "last_affected": "1.6.1.24"
+   },
+   {
+    "fixed": "1.6.1.25"
+   }
+  ],
+  "why": "quatre composants, fixed in"
+ },
+ {
+  "in": "<= 2.0 (2.1 fixes the issue)",
+  "out": [
+   {
+    "introduced": "0"
+   },
+   {
+    "last_affected": "2.0"
+   },
+   {
+    "fixed": "2.1"
+   }
+  ],
+  "why": "remarque V fixes …"
+ },
+ {
+  "in": "< 2.0.0 (fixed in 2.0.0)",
+  "out": [
+   {
+    "introduced": "0"
+   },
+   {
+    "fixed": "2.0.0"
+   }
+  ],
+  "why": "remarque : V = B sur fixed"
+ },
+ {
+  "in": "<= 1.5.0 (WARNING NO PATCH)",
+  "out": [
+   {
+    "introduced": "0"
+   },
+   {
+    "last_affected": "1.5.0"
+   }
+  ],
+  "why": "remarque ignorée"
+ },
+ {
+  "in": "<= 1.5.0 (1.4.0 fixed the vulnerability)",
+  "out": null,
+  "why": "remarque : V < B"
+ },
+ {
+  "in": "<= 1.5.0 (1.5.0 fixed the vulnerability)",
+  "out": null,
+  "why": "remarque : V = B sur last_affected"
+ },
+ {
+  "in": "< 2.0.0 (fixed in 2.0.1)",
+  "out": null,
+  "why": "remarque : V ≠ B sur fixed"
+ },
+ {
+  "in": ">= 3.0 (fixed in 3.5)",
+  "out": null,
+  "why": "remarque sur une plage ouverte"
+ },
+ {
+  "in": "1.0-2.0",
+  "out": null,
+  "why": "tiret sans espaces : pas une plage"
+ },
+ {
+  "in": "all versions",
+  "out": null,
+  "why": "texte libre"
+ },
+ {
+  "in": "<= 1.2 and 2.0",
+  "out": null,
+  "why": "plusieurs plages"
+ },
+ {
+  "in": "1.x",
+  "out": null,
+  "why": "joker"
+ },
+ {
+  "in": "<= 1.0-bogus",
+  "out": null,
+  "why": "version illisible"
+ },
+ {
+  "in": "",
+  "out": null,
+  "why": "vide"
+ },
+ {
+  "in": ">= 2.0 <= 1.0",
+  "out": null,
+  "why": "bornes inversées"
+ },
+ {
+  "in": ">= 2.0 < 2.0",
+  "out": null,
+  "why": "plage vide"
+ },
+ {
+  "in": "< 1.0 (fixed in (1.0))",
+  "out": null,
+  "why": "parenthèses imbriquées"
+ }
+]

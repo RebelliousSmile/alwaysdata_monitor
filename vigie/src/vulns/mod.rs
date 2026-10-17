@@ -6,6 +6,7 @@
 //! télécharge rien : la synchronisation des bases ([`sync`], F2) l'alimente.
 
 pub mod advisory;
+pub mod corrections;
 pub mod cvss;
 pub mod purl;
 pub mod range;

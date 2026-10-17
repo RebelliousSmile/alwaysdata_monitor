@@ -1,6 +1,6 @@
 ---
 objective: "Le veilleur importe les deux sources propres aux CMS des sites surveillés, Wordfence Intelligence v3 (WordPress) et Friends-Of-Presta (modules PrestaShop), converties par Advisory::build vers le modèle de F1 et chargées par le cadre de synchronisation de F2. Wordfence reste désactivé, avec un refus explicite, tant que la relecture des conditions depuis le VPS n'est pas consignée et datée dans failles.md ; son jeton vit dans un fichier 0600 vérifié par le code, sa limite d'une requête par 30 minutes est tenue, et la mention copyrights de chaque enregistrement est conservée. Une version libre de Friends-Of-Presta non reconnue donne une plage inconnue, jamais un « non vulnérable », et l'exploitant peut la corriger par une correction de plage auditée."
-status: pending
+status: done
 issue_number: 17
 ---
 
@@ -27,6 +27,7 @@ issue_number: 17
   - le constat `vulns-sync/<source>` du pseudo-site réservé `_veilleur` (`WATCHER_SITE`), ouvert par `tick` au-delà de 3 jours sans succès ;
   - `SyncOptions { trust, endpoint_override, limits_override }`, construit par le code seulement, et le serveur HTTPS de test `tests/support/dump_server.rs` ;
   - `flate2` promu en dépendance par F2 ; F2 n'écrit **ni lecteur tar ni lecteur YAML** : le lecteur tar est à F3 (`vulns/sources/tar.rs`, phase 2).
+- **F2 tel qu'implémenté (relu avant la phase 3, écarts reportés)** : `SourceMeta.loader_version` existait déjà (F3 n'ajoute que `redistribution`) ; la colonne `vuln_sources.revision` existait (0017) sans écrivain : F3 ajoute `Dumped.revision` et `SyncMeta.revision`, écrits avec la bascule, et `SyncState.revision` ; `registry::build(id)` ne reçoit pas la configuration : F3 ajoute `registry::build_with(config, id)` (Wordfence et sa section), appelé par `sync::run` ; `NotReady` est une chaîne (pas d'énumération) ; `Request.sensitive_headers` passe de `String` à `HeaderValue` (valeur marquée sensible) ; F3 ajoute `SyncError::Format` (flux ou archive illisible) et `SyncError::NotReady` (verrou revérifié par `fetch`), et les messages 401/403 disent « jeton refusé » ; le débit réserve la fenêtre avant `fetch`, si bien qu'un refus de `fetch` consomme la fenêtre de 30 min (aucune requête ne part).
 
 ### Décisions F0 appliquées ici (résumé ; `decisions.md` fait foi)
 

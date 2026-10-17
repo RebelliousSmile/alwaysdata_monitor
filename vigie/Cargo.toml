@@ -45,7 +45,9 @@ log = "0.4"
 qrcode = { version = "0.14", default-features = false }
 rusqlite = { version = "0.37", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+# raw_value : flux Wordfence lu entrée par entrée (`Box<RawValue>`), sans
+# arbre complet en mémoire (F3).
+serde_json = { version = "1", features = ["raw_value"] }
 sha2 = "0.10"
 subtle = "2"
 thiserror = "2"

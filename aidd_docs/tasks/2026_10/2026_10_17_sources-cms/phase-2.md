@@ -1,5 +1,5 @@
 ---
-status: pending
+status: done
 ---
 
 # Instruction: Convertisseur Friends-Of-Presta (archive, en-tête, plages libres)

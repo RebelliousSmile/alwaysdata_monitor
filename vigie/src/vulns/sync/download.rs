@@ -24,7 +24,7 @@ use std::time::{Duration, Instant};
 
 use sha2::{Digest, Sha256};
 use ureq::Agent;
-use ureq::http::HeaderMap;
+use ureq::http::{HeaderMap, HeaderValue};
 use url::Url;
 
 use super::origin::Origins;
@@ -42,8 +42,9 @@ pub const MAX_ETAG: usize = 256;
 #[derive(Clone)]
 pub struct Request {
     pub url: Url,
-    /// En-têtes envoyés à l'origine de départ seulement (`Authorization`).
-    pub sensitive_headers: Vec<(String, String)>,
+    /// En-têtes envoyés à l'origine de départ seulement (`Authorization`),
+    /// valeurs marquées sensibles (`HeaderValue::set_sensitive`).
+    pub sensitive_headers: Vec<(String, HeaderValue)>,
 }
 
 impl Request {
@@ -198,7 +199,7 @@ impl Download {
             }
             if sensitive {
                 for (name, value) in &request.sensitive_headers {
-                    builder = builder.header(name.as_str(), value.as_str());
+                    builder = builder.header(name.as_str(), value.clone());
                 }
             }
             let response = builder
@@ -442,7 +443,10 @@ mod tests {
     fn debug_masks_sensitive_headers() {
         let request = Request {
             url: Url::parse("https://dumps.example.org/all.zip").unwrap(),
-            sensitive_headers: vec![("Authorization".into(), "Bearer secret".into())],
+            sensitive_headers: vec![(
+                "Authorization".into(),
+                HeaderValue::from_static("Bearer secret"),
+            )],
         };
         let shown = format!("{request:?}");
         assert!(shown.contains("Authorization: ***"), "{shown}");

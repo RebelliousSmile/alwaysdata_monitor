@@ -118,6 +118,7 @@ impl Env {
         let mut config = veilleur::config(dir.path().join("data").join("vigie.db"));
         config.vulns = Some(Vulns {
             sources: sources.iter().map(|s| (*s).to_owned()).collect(),
+            wordfence: None,
         });
         Self {
             _dir: dir,

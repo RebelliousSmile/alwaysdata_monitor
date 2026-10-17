@@ -1,5 +1,5 @@
 ---
-status: pending
+status: done
 ---
 
 # Instruction: Branchement sur F2 : jeton, verrou de relecture, débit, plafonds

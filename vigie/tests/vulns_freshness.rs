@@ -34,6 +34,7 @@ impl Harness {
         config.sites.clear();
         config.vulns = Some(Vulns {
             sources: sources.iter().map(|s| (*s).to_owned()).collect(),
+            wordfence: None,
         });
         Store::open(&config.database).unwrap();
         Self {
@@ -188,6 +189,7 @@ fn a_removed_source_is_closed_as_unwatched_never_restored() {
     assert_eq!(h.open_keys().len(), 2);
     h.config.vulns = Some(Vulns {
         sources: vec!["osv-crates-io".into()],
+        wordfence: None,
     });
     let mails = h.tick(T0 + STALE_AFTER + 60);
     assert_eq!(h.open_keys(), ["_veilleur/vulns-sync/osv-crates-io"]);
