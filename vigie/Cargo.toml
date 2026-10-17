@@ -8,6 +8,18 @@ rust-version = "1.93.0"
 description = "Veilleur multi-sites : contrôles externes, rapports signés, alertes par e-mail"
 publish = false
 
+# Outil d'inventaire des projets sans agent PHP (issue #20, docs/inventaire.md) :
+# même crate, même liste blanche et même signature que le veilleur ; version
+# propre (`vigie::inventory::TOOL_VERSION`). Le binaire `vigie` reste
+# src/main.rs.
+[[bin]]
+name = "vigie-inventory"
+path = "src/bin/vigie-inventory.rs"
+
+[[bin]]
+name = "vigie"
+path = "src/main.rs"
+
 [dependencies]
 anyhow = "1"
 # matched-path : gabarit de route cité par le journal des appels de /api/v1.

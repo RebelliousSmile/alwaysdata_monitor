@@ -19,6 +19,7 @@ pub mod bom;
 pub mod build;
 pub mod lockfile;
 pub mod receive;
+pub mod tool;
 
 use std::time::Duration;
 
