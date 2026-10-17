@@ -699,8 +699,10 @@ async fn populated() -> (Veilleur, Seeds) {
                 facts: "{\"php\":\"8.3\"}",
                 files: "{}",
                 findings: &[],
+                dropped: 0,
             },
             T0 - 300,
+            &|_, _| true,
         )
         .expect("accept_report");
     store

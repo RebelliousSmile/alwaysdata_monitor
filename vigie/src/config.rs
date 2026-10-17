@@ -202,7 +202,7 @@ fn default_smtp_port() -> u16 {
     587
 }
 
-/// Type de CMS : filtre les contrôles (`CheckKind::cms`).
+/// Type de CMS : filtre les contrôles (`capability::Control::cms`).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SiteKind {

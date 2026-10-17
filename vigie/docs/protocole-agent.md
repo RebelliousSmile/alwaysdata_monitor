@@ -105,10 +105,21 @@ Un refus répété se lit dans `journalctl -u vigie-serve` sur le veilleur.
 ## Effets d'un rapport accepté
 
 - Le `seq`, l'heure de réception et `facts` sont enregistrés.
-- Les constats passent dans le cycle des incidents des contrôles externes, sous
-  le contrôle `agent:<check>` : un constat nouveau ouvre un incident, un constat
-  disparu le clôt. Les constats `info` sont montrés dans `vigie status` et
-  jamais envoyés par e-mail.
+- Registre des capacités (`capability.rs`, issue #4) : seules les familles
+  qu'émet l'agent PHP sont connues (`root`, `critical-file`, `must-contain`,
+  `uploads-php`), `uploads-php` pour un site `wordpress` seulement, et aucune
+  pour un site dont le runtime effectif n'est pas `php`. Un constat d'une
+  famille bien formée mais inconnue, ou non admise pour le site, est
+  **écarté et compté** : le rapport reste accepté, le nombre d'écartés du
+  dernier rapport est enregistré (`reports.dropped`), journalisé par `serve`
+  et montré par `vigie status`. `integrity`, lui, fait refuser tout le rapport
+  (ci-dessus).
+- Les constats admis passent dans le cycle des incidents des contrôles
+  externes, sous le contrôle `agent:<check>` : un constat nouveau ouvre un
+  incident, un constat disparu le clôt. Les constats `info` sont montrés dans
+  `vigie status` et jamais envoyés par e-mail. Un incident d'une famille que
+  le registre ne surveille plus pour ce site n'est ni clos ni noté « ok » par
+  le rapport : `tick` le clôt « plus surveillé ».
 - Les empreintes `files` sont comparées à la référence du site (ci-dessous).
 - Un incident « agent silencieux » ouvert pour ce site est clos.
 - `serve` n'envoie aucun e-mail : le passage suivant de `vigie tick`, dans la
@@ -161,7 +172,10 @@ $ ~/vigie/bin/vigie site remove site-a
 - La clé publique fait 32 octets (44 caractères en base64). Côté PHP :
   `$pair = sodium_crypto_sign_keypair()`, puis
   `base64_encode(sodium_crypto_sign_publickey($pair))`.
-- `site add` refuse un site absent de la configuration ou qui a déjà une clé.
+- `site add` refuse un site absent de la configuration ou qui a déjà une clé,
+  et, comme `site rotate-key`, un site dont le runtime effectif n'est pas
+  `php` (issue #4) : déclarer `runtime = "php"` pour un site `generic` en PHP.
+  Une clé déjà en base sur un tel site ouvre l'avertissement `typology`.
 - `site rotate-key` remplace la clé : un rapport signé avec l'ancienne est
   refusé dès la rotation. La séquence repart de zéro (celle des lots de logs
   aussi), puisque l'ancienne clé ne

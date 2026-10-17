@@ -106,3 +106,13 @@ jobs:
       - run: cargo zigbuild --release --locked --target x86_64-unknown-linux-musl
       - name: binaire statique
         run: file target/x86_64-unknown-linux-musl/release/vigie | grep -q "statically linked"
+      # Empreinte et binaire publiés : le relevé de la cible les compare
+      # (docs/audit-chemin-critique.md, « Cible réelle »).
+      - name: empreinte SHA-256
+        run: sha256sum target/x86_64-unknown-linux-musl/release/vigie
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: vigie-musl
+          path: vigie/target/x86_64-unknown-linux-musl/release/vigie
+          retention-days: 14
+          if-no-files-found: error

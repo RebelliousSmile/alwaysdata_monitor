@@ -111,8 +111,10 @@ fn report(dir: &Path, seq: i64, htaccess: &str) {
                 facts: "{}",
                 files: &files,
                 findings: &[],
+                dropped: 0,
             },
             at,
+            &|_, _| true,
         )
         .unwrap();
 }

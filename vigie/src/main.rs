@@ -310,6 +310,21 @@ fn require_site(config: &config::Config, id: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Une clé d'agent n'est enregistrée que pour un site au runtime effectif
+/// `php` : ailleurs, le registre ne surveillerait rien de l'agent.
+fn require_php_site(config: &config::Config, id: &str) -> anyhow::Result<()> {
+    require_site(config, id)?;
+    let site = config.sites.iter().find(|s| s.id == id);
+    if site.and_then(config::Site::effective_runtime) != Some(Runtime::Php) {
+        bail!(
+            "{id} n'a pas de runtime php : l'agent PHP n'y serait pas surveillé ; \
+             déclarer `runtime = \"php\"` dans config.toml (implicite pour wordpress et prestashop), \
+             puis relancer serve"
+        );
+    }
+    Ok(())
+}
+
 /// Agents enregistrés, ou aucun si la base est absente ou précède les agents.
 fn read_agents(config: &config::Config) -> anyhow::Result<Vec<Agent>> {
     match Store::open_read(&config.database)? {
@@ -318,11 +333,26 @@ fn read_agents(config: &config::Config) -> anyhow::Result<Vec<Agent>> {
     }
 }
 
-/// État de l'agent d'un site, pour `site list` et `status`.
-fn agent_state(agent: Option<&Agent>, now: i64) -> String {
+/// État de l'agent d'un site, pour `site list` et `status`, avec le
+/// verdict du registre des capacités : une clé sur un site sans runtime
+/// `php` n'ouvre aucun contrôle d'agent.
+fn agent_state(site: &config::Site, agent: Option<&Agent>, now: i64) -> String {
     let Some(agent) = agent else {
         return "sans agent".into();
     };
+    let ctx = capability::Ctx {
+        agent: true,
+        baseline: false,
+    };
+    let state = agent_activity(agent, now);
+    if capability::Control::Heartbeat.watched(site, &ctx) {
+        state
+    } else {
+        format!("{state} ; non surveillé : runtime php absent")
+    }
+}
+
+fn agent_activity(agent: &Agent, now: i64) -> String {
     let name = agent.agent.as_deref().unwrap_or("agent");
     match agent.last_valid_at {
         Some(at) => format!(
@@ -347,26 +377,17 @@ fn site(config: &config::Config, action: SiteAction, now: i64) -> anyhow::Result
                     "{}\t{}\t{}\t{}",
                     site.id,
                     site.url,
-                    agent_state(agent, now),
+                    agent_state(site, agent, now),
                     site.effective_runtime().map_or("-", Runtime::as_str)
                 );
             }
         }
         SiteAction::Add { id, pubkey } => {
-            require_site(config, &id)?;
+            require_php_site(config, &id)?;
             let key = parse_pubkey(&pubkey)?;
             let mut store = Store::open(&config.database)?;
             match store.add_key(&id, &key, now)? {
-                KeyOutcome::Done => {
-                    println!("clé de l'agent de {id} enregistrée");
-                    let site = config.sites.iter().find(|s| s.id == id);
-                    if site.is_some_and(|s| capability::allowed(s).is_empty()) {
-                        eprintln!(
-                            "attention : {id} n'admet aucune commande (runtime absent ou non admis) ; \
-                             poser `runtime = \"php\"` dans config.toml pour un site PHP déclaré generic"
-                        );
-                    }
-                }
+                KeyOutcome::Done => println!("clé de l'agent de {id} enregistrée"),
                 KeyOutcome::AlreadyPresent => {
                     bail!("{id} a déjà une clé : `vigie site rotate-key {id}` pour la remplacer")
                 }
@@ -374,7 +395,7 @@ fn site(config: &config::Config, action: SiteAction, now: i64) -> anyhow::Result
             }
         }
         SiteAction::RotateKey { id, pubkey } => {
-            require_site(config, &id)?;
+            require_php_site(config, &id)?;
             let key = parse_pubkey(&pubkey)?;
             let mut store = Store::open(&config.database)?;
             store.reset_commands(&id, now, audit_key(config)?.as_ref(), "site rotate-key")?;
@@ -651,6 +672,10 @@ fn status(config: &config::Config, now: i64) -> anyhow::Result<()> {
         Some(store) if store.schema_version()? >= SCHEMA_AGENTS => store.agents()?,
         _ => Vec::new(),
     };
+    let drops = match &store {
+        Some(store) => store.report_drops()?,
+        None => Vec::new(),
+    };
     println!("sites : {}", config.sites.len());
     for site in &config.sites {
         let last = runs
@@ -663,7 +688,12 @@ fn status(config: &config::Config, now: i64) -> anyhow::Result<()> {
         });
         println!("  {}  {}  {last}", site.id, site.url);
         let agent = agents.iter().find(|a| a.site == site.id);
-        println!("    agent : {}", agent_state(agent, now));
+        println!("    agent : {}", agent_state(site, agent, now));
+        if let Some((_, dropped)) = drops.iter().find(|(s, _)| *s == site.id) {
+            println!(
+                "    constats écartés au dernier rapport : {dropped} (famille hors du registre des capacités ou non admise pour le site)"
+            );
+        }
     }
     if let Some(store) = &store {
         let open = store.open_incidents()?;

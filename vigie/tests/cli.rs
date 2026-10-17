@@ -53,7 +53,7 @@ fn tick_then_status_succeeds_and_migrations_rerun_cleanly() {
     let after = vigie(&config, &["status"]);
     assert!(after.status.success(), "{after:?}");
     let stdout = String::from_utf8_lossy(&after.stdout);
-    assert!(stdout.contains("schéma v13"), "{stdout}");
+    assert!(stdout.contains("schéma v14"), "{stdout}");
     assert!(stdout.contains("→ ok"), "{stdout}");
     assert!(stdout.contains("incidents ouverts : aucun"), "{stdout}");
     assert!(stdout.contains("notifications en attente : 0"), "{stdout}");
@@ -84,7 +84,12 @@ fn ack_of_an_unknown_incident_fails() {
 const KEY_1: &str = "11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=";
 const KEY_2: &str = "PUAXw+hDiVqStwqnTRt+vJyYLM8uxJaMwM1V8Sr0Zgw=";
 
-const SITE_A: &str = "[[sites]]\nid = \"site-a\"\nurl = \"https://site-a.example.org/\"\n";
+/// Site A, `generic` en PHP : une clé d'agent n'y est admise qu'avec
+/// `runtime = "php"` (registre des capacités, #4).
+const SITE_A: &str =
+    "[[sites]]\nid = \"site-a\"\nurl = \"https://site-a.example.org/\"\nruntime = \"php\"\n";
+/// Site A, `generic` sans runtime.
+const SITE_A_BARE: &str = "[[sites]]\nid = \"site-a\"\nurl = \"https://site-a.example.org/\"\n";
 
 fn stdout(out: &Output) -> String {
     String::from_utf8_lossy(&out.stdout).into_owned()
@@ -320,22 +325,69 @@ fn device_revoke_marks_a_paired_device_revoked() {
 }
 
 #[test]
-fn a_site_without_runtime_warns_and_lists_a_dash() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let config = write_config(dir.path(), SITE_A);
-    let out = vigie(&config, &["site", "add", "site-a", "--pubkey", KEY_1]);
-    assert!(out.status.success(), "{out:?}");
-    assert!(stderr(&out).contains("n'admet aucune commande"), "{out:?}");
-    let out = vigie(&config, &["site", "list"]);
-    assert!(stdout(&out).trim_end().ends_with("\t-"), "{out:?}");
+fn a_key_is_refused_for_a_site_without_the_php_runtime() {
+    for extra in ["", "runtime = \"static\"\n", "runtime = \"node\"\n"] {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let config = write_config(dir.path(), &format!("{SITE_A_BARE}{extra}"));
+        for action in ["add", "rotate-key"] {
+            let out = vigie(&config, &["site", action, "site-a", "--pubkey", KEY_1]);
+            assert_eq!(out.status.code(), Some(1), "{extra:?} {action} : {out:?}");
+            assert!(
+                stderr(&out).contains("n'a pas de runtime php"),
+                "{extra:?} {action} : {out:?}"
+            );
+        }
+        assert!(!dir.path().join("vigie.db").exists(), "{extra:?}");
+        let out = vigie(&config, &["site", "list"]);
+        let expected = if extra.is_empty() { "\t-" } else { "" };
+        assert!(stdout(&out).trim_end().ends_with(expected), "{out:?}");
+    }
 
     let dir = tempfile::tempdir().expect("tempdir");
-    let config = write_config(dir.path(), &format!("{SITE_A}kind = \"wordpress\"\n"));
+    let config = write_config(dir.path(), &format!("{SITE_A_BARE}kind = \"wordpress\"\n"));
     let out = vigie(&config, &["site", "add", "site-a", "--pubkey", KEY_1]);
-    assert!(out.status.success(), "{out:?}");
-    assert!(!stderr(&out).contains("n'admet aucune commande"), "{out:?}");
+    assert!(out.status.success(), "implicite pour wordpress : {out:?}");
     let out = vigie(&config, &["site", "list"]);
     assert!(stdout(&out).trim_end().ends_with("\tphp"), "{out:?}");
+}
+
+/// Clé enregistrée quand le site était en PHP, puis `runtime` retiré de la
+/// configuration : `tick` ouvre l'avertissement `typology`, et `status` le
+/// montre avec un agent « non surveillé », au lieu de tout clore en silence.
+#[test]
+fn status_shows_a_key_on_a_site_without_php() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let config = write_config(dir.path(), SITE_A);
+    assert!(
+        vigie(&config, &["site", "add", "site-a", "--pubkey", KEY_1])
+            .status
+            .success()
+    );
+    // Contrôles externes faits : `tick` ne sort pas sur le réseau.
+    let now = vigie::now();
+    let mut store = vigie::store::Store::open(&dir.path().join("vigie.db")).expect("base");
+    for kind in vigie::checks::CheckKind::ALL {
+        store
+            .record_run("site-a", kind.name(), now)
+            .expect("record_run");
+    }
+    drop(store);
+    let config = write_config(dir.path(), SITE_A_BARE);
+    let out = vigie(&config, &["tick"]);
+    assert!(out.status.success(), "{out:?}");
+    let text = stdout(&vigie(&config, &["status"]));
+    assert!(
+        text.contains("non surveillé : runtime php absent"),
+        "{text}"
+    );
+    assert!(
+        text.contains(
+            "site-a typology avertissement : agent enregistré sur un site sans runtime php"
+        ),
+        "{text}"
+    );
+    let list = stdout(&vigie(&config, &["site", "list"]));
+    assert!(list.contains("non surveillé"), "{list}");
 }
 
 #[test]

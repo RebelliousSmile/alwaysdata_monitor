@@ -12,7 +12,9 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use ed25519_dalek::{Signature, VerifyingKey};
 
-use crate::config::is_valid_id;
+use crate::capability;
+use crate::config::{Site, is_valid_id};
+use crate::finding::Finding;
 use crate::report::{self, MAX_CLOCK_SKEW};
 use crate::store::{AcceptedReport, ReportOutcome, Store};
 
@@ -23,6 +25,9 @@ pub const HEADER_SIGNATURE: &str = "x-vigie-signature";
 pub struct Accepted {
     pub site: String,
     pub seq: i64,
+    /// Constats écartés : famille inconnue du registre ou non admise pour le
+    /// site. Le rapport reste accepté.
+    pub dropped: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -139,12 +144,26 @@ impl fmt::Display for Refusal {
     }
 }
 
-/// Vérifie et enregistre un rapport. `sites` : identifiants de la configuration.
+/// Garde les constats que le registre admet pour ce site et compte les
+/// autres : une famille bien formée mais inconnue (agent plus récent), ou non
+/// admise pour son CMS, est écartée sans refuser le rapport (fail-closed).
+pub fn screen(site: &Site, findings: Vec<Finding>) -> (Vec<Finding>, usize) {
+    let total = findings.len();
+    let kept: Vec<Finding> = findings
+        .into_iter()
+        .filter(|f| capability::admits_agent_finding(site, &f.check))
+        .collect();
+    let dropped = total - kept.len();
+    (kept, dropped)
+}
+
+/// Vérifie et enregistre un rapport. `sites` : configuration typée des
+/// sites, celle que `serve` a chargée (même source que `typology.serve`).
 /// `store` est la connexion d'écriture de `serve` (`writer.rs`) : l'appelant
 /// décide d'une base absente, qu'il refuse comme un site inconnu.
 pub fn ingest(
     store: &mut Store,
-    sites: &[String],
+    sites: &[Site],
     site_header: Option<&str>,
     signature_header: Option<&str>,
     body: &[u8],
@@ -156,9 +175,9 @@ pub fn ingest(
     let site = site_header
         .filter(|s| is_valid_id(s))
         .ok_or_else(|| refuse(Reason::MissingSite))?;
-    if !sites.iter().any(|s| s == site) {
+    let Some(config) = sites.iter().find(|s| s.id == site) else {
         return Err(refuse(Reason::UnknownSite));
-    }
+    };
     let internal = |e: anyhow::Error| refuse(Reason::Internal(format!("{e:#}")));
     let agent = store
         .agent(site)
@@ -183,7 +202,9 @@ pub fn ingest(
         return Err(refuse(Reason::Clock { skew }).with_seq(valid.seq));
     }
 
-    // Séquence et débit, sous verrou d'écriture.
+    // Constats hors registre écartés, puis séquence et débit, sous verrou
+    // d'écriture.
+    let (findings, dropped) = screen(config, valid.findings);
     let outcome = store
         .accept_report(
             &AcceptedReport {
@@ -193,9 +214,11 @@ pub fn ingest(
                 agent: &valid.agent,
                 facts: &valid.facts,
                 files: &valid.files,
-                findings: &valid.findings,
+                findings: &findings,
+                dropped,
             },
             now,
+            &|check, ctx| capability::watched(config, check, ctx),
         )
         .map_err(|e| internal(e).with_seq(valid.seq))?;
     let reason = match outcome {
@@ -203,6 +226,7 @@ pub fn ingest(
             return Ok(Accepted {
                 site: site.to_owned(),
                 seq: valid.seq,
+                dropped,
             });
         }
         ReportOutcome::UnknownSite => Reason::UnknownSite,

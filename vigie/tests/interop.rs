@@ -18,6 +18,7 @@ use tower::ServiceExt;
 mod veilleur;
 
 use vigie::clock::FakeClock;
+use vigie::config::SiteKind;
 use vigie::ingest::{HEADER_SIGNATURE, HEADER_SITE};
 use vigie::serve;
 use vigie::store::Store;
@@ -85,10 +86,11 @@ async fn the_ingestion_accepts_the_php_report_as_is() {
         .add_key("site-a", &public_key(&fixture).to_bytes(), SENT_AT - 600)
         .expect("add_key");
 
-    let router = serve::router_with_clock(
-        veilleur::config(database.clone()),
-        Arc::new(FakeClock::new(SENT_AT)),
-    );
+    // Le rapport vient d'un WordPress : `uploads-php` n'est admis que là
+    // (registre des capacités, #4).
+    let mut config = veilleur::config(database.clone());
+    config.sites[0].kind = SiteKind::Wordpress;
+    let router = serve::router_with_clock(config, Arc::new(FakeClock::new(SENT_AT)));
     let request = Request::post("/r/v1/report")
         .header(HEADER_SITE, "site-a")
         .header(HEADER_SIGNATURE, &fixture.signature)
