@@ -53,7 +53,7 @@ fn tick_then_status_succeeds_and_migrations_rerun_cleanly() {
     let after = vigie(&config, &["status"]);
     assert!(after.status.success(), "{after:?}");
     let stdout = String::from_utf8_lossy(&after.stdout);
-    assert!(stdout.contains("schéma v12"), "{stdout}");
+    assert!(stdout.contains("schéma v13"), "{stdout}");
     assert!(stdout.contains("→ ok"), "{stdout}");
     assert!(stdout.contains("incidents ouverts : aucun"), "{stdout}");
     assert!(stdout.contains("notifications en attente : 0"), "{stdout}");
@@ -418,7 +418,9 @@ fn site_command_previews_then_applies_with_every_guard() {
         &config,
         &["site", "command", "site-a", "htaccess-apply", "--apply"],
     );
-    assert!(stderr(&out).contains("pas encore disponible"), "{out:?}");
+    assert!(stderr(&out).contains("site recommend"), "{out:?}");
+    let out = vigie(&config, &["site", "command", "site-a", "htaccess-rollback"]);
+    assert!(stderr(&out).contains("rapport"), "{out:?}");
     let out = vigie(&config, &["site", "command", "site-a", "shell"]);
     assert!(stderr(&out).contains("commande inconnue"), "{out:?}");
 

@@ -299,6 +299,160 @@ function with_logs_server(callable $fn): void
 }
 
 
+// --- .htaccess (#13) ------------------------------------------------------
+//
+// Le site est servi par `php -S` : son routeur lit le bloc vigie du
+// .htaccess du dossier demandé et en applique les groupes (UA « contient,
+// sans casse », REMOTE_ADDR, %{TIME} à l'heure du scénario), à la place
+// d'Apache. Le scénario simule les pannes : 500 dans le bac à sable, 200
+// sans la page témoin, horloge décalée, accueil en 500 une fois le bloc
+// posé, fichier modifié par un tiers.
+
+/** Vecteurs de la grammaire, générés par vigie/tests/htaccess.rs. */
+function htaccess_vectors(): array
+{
+    return json_decode((string) file_get_contents(__DIR__ . '/../../../tests/fixtures/htaccess/vectors.json'), true, 32, \JSON_THROW_ON_ERROR);
+}
+
+function site_router(string $dir, array $scenario): string
+{
+    file_put_contents("{$dir}/site.json", json_encode($scenario + ['tz' => 'Europe/Paris', 'clock_offset' => 0]));
+
+    return __DIR__ . '/site-router.php';
+}
+
+/**
+ * Site servi par php -S et son agent configuré (url, tz) ; fn(Config,
+ * dossier de l'agent, racine, dossier du serveur, port).
+ */
+function with_htaccess_site(array $scenario, callable $fn, array $override = []): void
+{
+    $root = tmp_site();
+    file_put_contents("{$root}/.htaccess", SC_BLOCK . "\n" . file_get_contents("{$root}/.htaccess"));
+    $server = tmp_dir();
+    [$port, $stop] = php_server(site_router($server, $scenario), $root, ['VIGIE_SITE_DIR' => $server]);
+    try {
+        $path = write_config($root, ['url' => "http://127.0.0.1:{$port}/", 'tz' => 'Europe/Paris'] + $override);
+        $fn(load_config($path), \dirname($path), $root, $server, $port);
+    } finally {
+        $stop();
+    }
+}
+
+/** Bloc du module PrestaShop, à garder intact. */
+const SC_BLOCK = "# BEGIN sc_alwaysdata protection\n<IfModule mod_rewrite.c>\nRewriteEngine on\n</IfModule>\n# END sc_alwaysdata protection";
+
+/** Bloc valide maintenant : un groupe d'UA de 24 h, et une IP si donnée. */
+function block_now(array $literals = ['Bytespider'], ?string $ip = null): string
+{
+    $until = (new \DateTimeImmutable('@' . (time() + 86400)))->setTimezone(new \DateTimeZone('Europe/Paris'))->format('YmdHis');
+    $lines = [\Vigie\Agent\HTACCESS_BEGIN, '# essai', \Vigie\Agent\HTACCESS_ENGINE];
+    foreach ($literals as $i => $literal) {
+        $lines[] = \Vigie\Agent\HTACCESS_UA . '"' . str_replace('.', '\\.', $literal) . '" ' . ($i + 1 === \count($literals) ? '[NC]' : '[NC,OR]');
+    }
+    $lines[] = \Vigie\Agent\HTACCESS_TIME . $until;
+    $lines[] = \Vigie\Agent\HTACCESS_RULE;
+    if ($ip !== null) {
+        $lines[] = \Vigie\Agent\HTACCESS_IP . '"^' . str_replace('.', '\\.', $ip) . '$"';
+        $lines[] = \Vigie\Agent\HTACCESS_TIME . $until;
+        $lines[] = \Vigie\Agent\HTACCESS_RULE;
+    }
+    $lines[] = \Vigie\Agent\HTACCESS_END;
+
+    return implode("\n", $lines) . "\n";
+}
+
+/** Exécute une commande htaccess-* comme le ferait un passage ; rend [résultat, état]. */
+function run_htaccess(\Vigie\Agent\Config $config, string $dir, string $name, array $params, ?array $state = null): array
+{
+    $state ??= \Vigie\Agent\empty_state();
+    $command = ['id' => '01a1e2f3-0000-7000-8000-0000000000c1', 'seq' => 5, 'name' => $name, 'params' => $params, 'expires_at' => time() + 3600];
+    $result = \Vigie\Agent\execute_command($config, $dir, $command, $state);
+
+    return [$result, $state];
+}
+
+/** Calcul seul puis application ; rend [résultat, empreinte d'avant, empreinte d'après]. */
+function apply_block(\Vigie\Agent\Config $config, string $dir, string $root, string $block): array
+{
+    $previous = hash_file('sha256', "{$root}/.htaccess");
+    [$computed] = run_htaccess($config, $dir, 'htaccess-apply', ['block' => $block, 'previous_sha256' => $previous, 'new_sha256' => null]);
+    same('ok', $computed['status'], "calcul : {$computed['detail']}");
+    $new = $computed['data']['new_sha256'];
+    [$result] = run_htaccess($config, $dir, 'htaccess-apply', ['block' => $block, 'previous_sha256' => $previous, 'new_sha256' => $new]);
+
+    return [$result, $previous, $new];
+}
+
+/** Aucun dossier de bac à sable laissé dans la racine. */
+function no_sandbox_left(string $root): void
+{
+    same([], glob("{$root}/vigie-essai-*") ?: [], 'dossiers du bac à sable supprimés');
+}
+
+/** Contenu et mtime de tous les fichiers d'un dossier. */
+function snapshot(string $dir): array
+{
+    $files = [];
+    foreach (mtimes($dir) as $path => $mtime) {
+        $files[$path] = [$mtime, is_file($path) ? hash_file('sha256', $path) : 'dossier'];
+    }
+
+    return $files;
+}
+
+
+/**
+ * Apache réel (opt-in : VIGIE_APACHE, chemin du binaire apache2) sur un
+ * port libre, fuseau $tz pour %{TIME} ; fn(Config, dossier de l'agent,
+ * racine). Configuration autonome : mod_rewrite, AllowOverride All.
+ */
+function with_apache(string $apache, string $tz, string $agentTz, callable $fn): void
+{
+    $base = tmp_dir();
+    chmod($base, 0755);
+    $root = "{$base}/www";
+    copy_tree(fixture(), $root);
+    $port = free_port();
+    $modules = '/usr/lib/apache2/modules';
+    $user = \function_exists('posix_geteuid') && posix_geteuid() === 0 ? "User www-data\nGroup www-data\n" : '';
+    file_put_contents("{$base}/httpd.conf", implode("\n", [
+        "ServerRoot \"{$base}\"",
+        "Listen 127.0.0.1:{$port}",
+        'ServerName 127.0.0.1',
+        "PidFile \"{$base}/httpd.pid\"",
+        "ErrorLog \"{$base}/error.log\"",
+        "LoadModule mpm_prefork_module {$modules}/mod_mpm_prefork.so",
+        "LoadModule authz_core_module {$modules}/mod_authz_core.so",
+        "LoadModule rewrite_module {$modules}/mod_rewrite.so",
+        "LoadModule dir_module {$modules}/mod_dir.so",
+        $user . 'DirectoryIndex index.php',
+        "DocumentRoot \"{$root}\"",
+        "<Directory \"{$root}\">",
+        '    AllowOverride All',
+        '    Require all granted',
+        '</Directory>',
+        '',
+    ]));
+    $run = static fn (string $action): array => run_process([$apache, '-f', "{$base}/httpd.conf", '-k', $action], ['TZ' => $tz, 'PATH' => (string) getenv('PATH')]);
+    $started = $run('start');
+    same(0, $started['code'], 'apache : ' . $started['stderr'] . @file_get_contents("{$base}/error.log"));
+    try {
+        $deadline = microtime(true) + 10;
+        while (@fsockopen('127.0.0.1', $port) === false && microtime(true) < $deadline) {
+            usleep(100_000);
+        }
+        $path = write_config($root, ['url' => "http://127.0.0.1:{$port}/", 'tz' => $agentTz]);
+        $fn(load_config($path), \dirname($path), $root);
+    } finally {
+        $run('stop');
+        $deadline = microtime(true) + 10;
+        while (is_file("{$base}/httpd.pid") && microtime(true) < $deadline) {
+            usleep(100_000);
+        }
+    }
+}
+
 return [
     'arborescence saine : aucun constat, faits complets' => function (): void {
         $root = tmp_site();
@@ -919,6 +1073,273 @@ return [
                 check(str_contains($e->getMessage(), 'chmod 600'), $e->getMessage());
             }
             same([], glob("{$dir}/.state-*") ?: [], 'aucun fichier temporaire laissé');
+        });
+    },
+    'htaccess : chaque vecteur et le fuzz différentiel reçoivent le verdict du validateur Rust' => function (): void {
+        $v = htaccess_vectors();
+        $tz = new \DateTimeZone($v['tz']);
+        $verdict = static fn (string $block): string => \Vigie\Agent\htaccess_validate($block, $v['now'], $tz)[0];
+        foreach ($v['vectors'] as $vector) {
+            same($vector['verdict'], $verdict($vector['block']), $vector['name']);
+        }
+        foreach ($v['fuzz'] as $i => $f) {
+            $block = $v['bases'][$f['base']];
+            $byte = \chr($f['byte']);
+            $block = match ($f['op']) {
+                'replace' => substr_replace($block, $byte, $f['at'], 1),
+                'insert' => substr_replace($block, $byte, $f['at'], 0),
+                'delete' => substr_replace($block, '', $f['at'], 1),
+            };
+            same($f['verdict'], $verdict($block), "fuzz n° {$i} ({$f['op']} {$f['at']})");
+        }
+        foreach ($v['goldens'] as $name) {
+            $golden = (string) file_get_contents(__DIR__ . "/../../../tests/fixtures/htaccess/{$name}");
+            same('valid', $verdict($golden), $name);
+        }
+    },
+
+    'htaccess : corpus d\'UA protégés égal à la fixture' => function (): void {
+        $lines = file(__DIR__ . '/../../../tests/fixtures/htaccess/protected-uas.txt', \FILE_IGNORE_NEW_LINES | \FILE_SKIP_EMPTY_LINES);
+        same($lines, \Vigie\Agent\PROTECTED_UAS, 'PROTECTED_UAS');
+        foreach (\Vigie\Agent\SANDBOX_SAMPLE as $index) {
+            check(isset(\Vigie\Agent\PROTECTED_UAS[$index]), "échantillon {$index}");
+        }
+        same(\Vigie\Agent\PROTECTED_UAS[0], \Vigie\Agent\GOOGLEBOT_UA, 'UA Googlebot');
+        check(\in_array(\Vigie\Agent\BROWSER_UA, \Vigie\Agent\PROTECTED_UAS, true), 'UA de navigateur');
+    },
+
+    'htaccess : bloc vigie remplacé ou ajouté en tête, bloc sc_alwaysdata intact au-dessus ou au-dessous' => function (): void {
+        $block = "# BEGIN vigie\nRewriteEngine On\n# END vigie\n";
+        $other = "# BEGIN vigie\n# autre\nRewriteEngine On\n# END vigie\n";
+        $wp = "# BEGIN WordPress\nRewriteEngine On\n# END WordPress\n";
+        same([$block . SC_BLOCK . "\n" . $wp, null], \Vigie\Agent\htaccess_merge(SC_BLOCK . "\n" . $wp, $block), 'ajouté en tête');
+        same([SC_BLOCK . "\n" . $other . $wp, null], \Vigie\Agent\htaccess_merge(SC_BLOCK . "\n" . $block . $wp, $other), 'sous le module');
+        same([$other . SC_BLOCK . "\n", null], \Vigie\Agent\htaccess_merge($block . SC_BLOCK . "\n", $other), 'au-dessus du module');
+        same([$other, null], \Vigie\Agent\htaccess_merge(rtrim($block, "\n"), $other), 'sans fin de ligne');
+        check(\Vigie\Agent\htaccess_merge($block . $block, $other)[0] === null, 'deux paires refusées');
+        check(\Vigie\Agent\htaccess_merge("# END vigie\n# BEGIN vigie\n", $other)[0] === null, 'ordre inversé refusé');
+        check(\Vigie\Agent\htaccess_merge(str_replace("\n", "\r\n", $block), $other)[0] === null, 'CRLF refusé');
+    },
+
+    'htaccess : calcul seul, application, page bloquée, copie privée, puis retour arrière' => function (): void {
+        with_htaccess_site([], static function (\Vigie\Agent\Config $config, string $dir, string $root): void {
+            $before = (string) file_get_contents("{$root}/.htaccess");
+            $snapshot = snapshot($root);
+            $block = block_now(['Bytespider', 'archive.org_bot']);
+            $previous = hash('sha256', $before);
+            [$computed] = run_htaccess($config, $dir, 'htaccess-apply', ['block' => $block, 'previous_sha256' => $previous, 'new_sha256' => null]);
+            same('ok', $computed['status'], $computed['detail']);
+            same($previous, $computed['data']['current_sha256'], 'empreinte actuelle');
+            same(hash('sha256', $block . $before), $computed['data']['new_sha256'], 'empreinte calculée');
+            same($snapshot, snapshot($root), 'le calcul seul n\'écrit rien');
+
+            [$result, $state] = run_htaccess($config, $dir, 'htaccess-apply', ['block' => $block, 'previous_sha256' => $previous, 'new_sha256' => $computed['data']['new_sha256']]);
+            same('ok', $result['status'], $result['detail']);
+            same($block . $before, file_get_contents("{$root}/.htaccess"), 'bloc en tête, reste intact');
+            same($computed['data']['new_sha256'], $result['data']['current_sha256'], 'current_sha256');
+            same($before, file_get_contents("{$dir}/" . \Vigie\Agent\HTACCESS_PREV), 'copie privée');
+            same(0600, fileperms("{$dir}/" . \Vigie\Agent\HTACCESS_PREV) & 0777, 'copie privée en 0600');
+            same(null, $state['htaccess_pending'], 'bascule close');
+            no_sandbox_left($root);
+            same([], glob("{$root}/.htaccess.vigie-*") ?: [], 'aucun fichier temporaire');
+            $deadline = hrtime(true) + 10_000_000_000;
+            same(403, \Vigie\Agent\http_get($config->siteUrl, 'Mozilla/5.0 (compatible; Bytespider)', $deadline)['status'], 'robot bloqué');
+            same(200, \Vigie\Agent\http_get($config->siteUrl, \Vigie\Agent\BROWSER_UA, $deadline)['status'], 'navigateur servi');
+
+            [$rollback] = run_htaccess($config, $dir, 'htaccess-rollback', ['expected_current_sha256' => $result['data']['current_sha256'], 'prev_sha256' => $previous]);
+            same('ok', $rollback['status'], $rollback['detail']);
+            same($before, file_get_contents("{$root}/.htaccess"), 'contenu d\'avant la dernière application');
+            same($previous, $rollback['data']['current_sha256'], 'current_sha256 du retour arrière');
+            [$again] = run_htaccess($config, $dir, 'htaccess-rollback', ['expected_current_sha256' => $result['data']['current_sha256'], 'prev_sha256' => $previous]);
+            same('refused', $again['status'], 'le .htaccess n\'a plus l\'empreinte attendue');
+        });
+    },
+
+    'htaccess : bloc refusé, paramètres ou empreinte différente : aucun fichier touché' => function (): void {
+        with_htaccess_site([], static function (\Vigie\Agent\Config $config, string $dir, string $root): void {
+            $snapshot = snapshot($root);
+            $previous = hash_file('sha256', "{$root}/.htaccess");
+            $evil = str_replace('RewriteEngine On', "RewriteEngine On\nphp_value auto_prepend_file /tmp/x", block_now());
+            foreach ([
+                'php_value' => ['block' => $evil, 'previous_sha256' => $previous, 'new_sha256' => null],
+                'googlebot' => ['block' => block_now(['Googlebot']), 'previous_sha256' => $previous, 'new_sha256' => null],
+                'empreinte' => ['block' => block_now(), 'previous_sha256' => str_repeat('0', 64), 'new_sha256' => null],
+                'paramètre en trop' => ['block' => block_now(), 'previous_sha256' => $previous, 'new_sha256' => null, 'shell' => 'id'],
+                'new_sha256 faux' => ['block' => block_now(), 'previous_sha256' => $previous, 'new_sha256' => str_repeat('a', 64)],
+            ] as $case => $params) {
+                [$result] = run_htaccess($config, $dir, 'htaccess-apply', $params);
+                same('refused', $result['status'], "{$case} : {$result['detail']}");
+            }
+            [$result] = run_htaccess($config, $dir, 'htaccess-rollback', ['expected_current_sha256' => $previous, 'prev_sha256' => $previous]);
+            same('refused', $result['status'], "rollback sans copie : {$result['detail']}");
+            same($snapshot, snapshot($root), 'mtime et contenu identiques');
+            same([], glob("{$dir}/htaccess.prev*") ?: [], 'aucune copie privée');
+        });
+    },
+
+    'htaccess : bac à sable en 500, 200 sans la page témoin, horloge décalée : refus, dossiers supprimés' => function (): void {
+        foreach ([
+            '500' => [['sandbox_500' => true], 'non représentatif'],
+            'sans nonce' => [['no_nonce' => true], 'non représentatif'],
+            'horloge' => [['clock_offset' => 3600], 'horloge Apache'],
+        ] as $case => [$scenario, $expected]) {
+            with_htaccess_site($scenario, static function (\Vigie\Agent\Config $config, string $dir, string $root) use ($case, $expected): void {
+                $before = file_get_contents("{$root}/.htaccess");
+                [$result] = apply_block($config, $dir, $root, block_now());
+                same('refused', $result['status'], "{$case} : statut");
+                check(str_contains($result['detail'], $expected), "{$case} : {$result['detail']}");
+                same($before, file_get_contents("{$root}/.htaccess"), "{$case} : aucune bascule");
+                check(!is_file("{$dir}/" . \Vigie\Agent\HTACCESS_PREV), "{$case} : aucune copie");
+                no_sandbox_left($root);
+            });
+        }
+    },
+
+    'htaccess : smoke-test en échec après la bascule : .htaccess remis à l\'identique' => function (): void {
+        with_htaccess_site(['home_500_with_vigie' => true], static function (\Vigie\Agent\Config $config, string $dir, string $root): void {
+            $before = file_get_contents("{$root}/.htaccess");
+            [$result, $previous] = apply_block($config, $dir, $root, block_now());
+            same('failed', $result['status'], $result['detail']);
+            check(str_contains($result['detail'], 'remis à l\'identique'), $result['detail']);
+            same($before, file_get_contents("{$root}/.htaccess"), 'contenu d\'avant');
+            same($previous, $result['data']['current_sha256'], 'current_sha256');
+        });
+    },
+
+    'htaccess : modifié par un tiers pendant le bac à sable ou pendant le smoke-test : rien n\'est écrasé' => function (): void {
+        with_htaccess_site(['tamper_in_sandbox' => true], static function (\Vigie\Agent\Config $config, string $dir, string $root): void {
+            $before = file_get_contents("{$root}/.htaccess");
+            [$result] = apply_block($config, $dir, $root, block_now());
+            same('failed', $result['status'], $result['detail']);
+            check(str_contains($result['detail'], 'modifié pendant l\'application'), $result['detail']);
+            same($before . "# tiers\n", file_get_contents("{$root}/.htaccess"), 'modification du tiers gardée');
+            check(!is_file("{$dir}/" . \Vigie\Agent\HTACCESS_PREV), 'aucune copie');
+        });
+        with_htaccess_site(['home_500_with_vigie' => true, 'tamper_after_swap' => true], static function (\Vigie\Agent\Config $config, string $dir, string $root): void {
+            $block = block_now();
+            $before = file_get_contents("{$root}/.htaccess");
+            [$result] = apply_block($config, $dir, $root, $block);
+            same('failed', $result['status'], $result['detail']);
+            check(str_contains($result['detail'], 'rien n\'est écrasé'), $result['detail']);
+            check(str_starts_with((string) file_get_contents("{$root}/.htaccess"), $block . $before . "# tiers\n"), 'pas de retour arrière qui écrase');
+        });
+    },
+
+    'htaccess : reprise d\'une bascule interrompue, avant tout retrait' => function (): void {
+        with_htaccess_site(['home_500_with_vigie' => true], static function (\Vigie\Agent\Config $config, string $dir, string $root): void {
+            $before = (string) file_get_contents("{$root}/.htaccess");
+            $new = block_now() . $before;
+            $pending = ['command_id' => 'c1', 'kind' => 'apply', 'prev_sha256' => hash('sha256', $before),
+                'new_sha256' => hash('sha256', $new), 'statuts_avant' => ['browser' => 200, 'googlebot' => 200]];
+            // Bascule non faite : rien n'est écrit.
+            $state = ['running' => ['id' => 'c1', 'seq' => 4, 'name' => 'htaccess-apply']] + ['htaccess_pending' => $pending] + \Vigie\Agent\empty_state();
+            \Vigie\Agent\resume_htaccess($config, $dir, $state);
+            same('failed', $state['result']['status'], 'bascule non faite');
+            check(str_contains($state['result']['detail'], 'bascule non faite'), $state['result']['detail']);
+            same([null, null, 4], [$state['running'], $state['htaccess_pending'], $state['last_command_seq']], 'état clos');
+            same($before, file_get_contents("{$root}/.htaccess"), 'rien écrit');
+            // Empreinte tierce : rien n'est écrit.
+            file_put_contents("{$root}/.htaccess", $before . "# tiers\n");
+            $state = ['htaccess_pending' => $pending] + \Vigie\Agent\empty_state();
+            \Vigie\Agent\resume_htaccess($config, $dir, $state);
+            check(str_contains($state['result']['detail'], 'modifié pendant l\'application'), $state['result']['detail']);
+            same($before . "# tiers\n", file_get_contents("{$root}/.htaccess"), 'rien écrit');
+            // Bascule faite, site en 500 : la copie privée revient.
+            \Vigie\Agent\write_private_copy($dir, $before);
+            \Vigie\Agent\settle_private_copy($dir, true);
+            file_put_contents("{$root}/.htaccess", $new);
+            $state = ['htaccess_pending' => $pending] + \Vigie\Agent\empty_state();
+            \Vigie\Agent\resume_htaccess($config, $dir, $state);
+            same('failed', $state['result']['status'], $state['result']['detail']);
+            same($before, file_get_contents("{$root}/.htaccess"), 'copie privée remise');
+            same(hash('sha256', $before), $state['result']['data']['current_sha256'], 'current_sha256');
+        });
+    },
+
+    'htaccess : la reprise passe avant le retrait, son résultat part au premier retrait' => function (): void {
+        $veilleur = tmp_dir();
+        [$commandsPort, $stopVeilleur] = php_server(veilleur_router($veilleur, []), $veilleur);
+        try {
+            with_htaccess_site(['home_500_with_vigie' => true], static function (\Vigie\Agent\Config $unused, string $dir, string $root, string $server, int $port) use ($commandsPort, $veilleur): void {
+                [$config, $agentDir] = commands_agent($commandsPort, ['root' => $root, 'url' => "http://127.0.0.1:{$port}/", 'tz' => 'Europe/Paris']);
+                $before = (string) file_get_contents("{$root}/.htaccess");
+                $new = block_now() . $before;
+                \Vigie\Agent\write_private_copy($agentDir, $before);
+                \Vigie\Agent\settle_private_copy($agentDir, true);
+                file_put_contents("{$root}/.htaccess", $new);
+                $state = \Vigie\Agent\empty_state();
+                $state['htaccess_pending'] = ['command_id' => 'c9', 'kind' => 'apply', 'prev_sha256' => hash('sha256', $before),
+                    'new_sha256' => hash('sha256', $new), 'statuts_avant' => ['browser' => 200, 'googlebot' => 200]];
+                file_put_contents("{$agentDir}/state.json", json_encode($state));
+                chmod("{$agentDir}/state.json", 0600);
+                $run = agent('--config', $config);
+                same(0, $run['code'], $run['stderr']);
+                same($before, file_get_contents("{$root}/.htaccess"), 'copie privée remise');
+                $pulls = pulls_of($veilleur);
+                same('c9', $pulls[0]['result']['command_id'] ?? null, 'résultat au premier retrait');
+                same('failed', $pulls[0]['result']['status'], 'échec déclaré');
+                same(null, state_of($agentDir)['htaccess_pending'], 'bascule close');
+            });
+        } finally {
+            $stopVeilleur();
+        }
+    },
+
+    'htaccess : état d\'un agent 0.2.0 ou 0.3.0 chargé et migré' => function (): void {
+        $dir = tmp_dir();
+        file_put_contents("{$dir}/state.json", json_encode(['pull_seq' => 12, 'last_command_seq' => 3, 'running' => null,
+            'result' => ['command_id' => 'x', 'status' => 'ok', 'detail' => 'pong'], 'rotation' => null]));
+        chmod("{$dir}/state.json", 0600);
+        $state = \Vigie\Agent\load_state($dir);
+        same(null, $state['htaccess_pending'], 'htaccess_pending ajouté');
+        same(12, $state['pull_seq'], 'séquence gardée');
+        \Vigie\Agent\save_state($dir, $state);
+        same(array_keys(\Vigie\Agent\empty_state()), array_keys(state_of($dir)), 'réécrit au format 0.4.0');
+        file_put_contents("{$dir}/state.json", json_encode(['htaccess_pending' => ['command_id' => 'x']] + \Vigie\Agent\empty_state()));
+        try {
+            \Vigie\Agent\load_state($dir);
+            throw new Failure('htaccess_pending forgé accepté');
+        } catch (UsageError $e) {
+            check(str_contains($e->getMessage(), 'État illisible'), $e->getMessage());
+        }
+    },
+
+    'htaccess : configuration url et tz' => function (): void {
+        refused_config(['url' => 'http://site-a.example.org/'], 'url');
+        refused_config(['url' => 'https://site-a.example.org/?x=1'], 'url');
+        refused_config(['tz' => 'Mars/Olympus'], 'tz');
+        $config = load_config(write_config(fixture(), ['url' => 'https://site-a.example.org', 'tz' => 'Europe/Paris']));
+        same('https://site-a.example.org/', $config->siteUrl, 'url finie par /');
+        $dir = tmp_dir();
+        $state = \Vigie\Agent\empty_state();
+        $bare = load_config(write_config(fixture()));
+        $result = \Vigie\Agent\execute_command($bare, $dir, ['id' => 'c', 'seq' => 1, 'name' => 'htaccess-apply',
+            'params' => ['block' => '', 'previous_sha256' => null, 'new_sha256' => null], 'expires_at' => time() + 60], $state);
+        same('refused', $result['status'], 'sans url ni tz');
+    },
+    'htaccess : Apache réel, bac à sable, bascule, blocage et horloge (opt-in VIGIE_APACHE)' => function (): void {
+        $apache = getenv('VIGIE_APACHE');
+        skip_unless(\is_string($apache) && $apache !== '', 'VIGIE_APACHE absent (chemin du binaire apache2)');
+        with_apache($apache, 'Europe/Paris', 'Europe/Paris', static function (\Vigie\Agent\Config $config, string $dir, string $root): void {
+            $before = (string) file_get_contents("{$root}/.htaccess");
+            [$result, $previous] = apply_block($config, $dir, $root, block_now(['Bytespider', 'archive.org_bot']));
+            same('ok', $result['status'], $result['detail']);
+            no_sandbox_left($root);
+            $deadline = hrtime(true) + 10_000_000_000;
+            same(403, \Vigie\Agent\http_get($config->siteUrl, 'Mozilla/5.0 (compatible; Bytespider/1.0)', $deadline)['status'], 'robot bloqué par Apache');
+            same(403, \Vigie\Agent\http_get($config->siteUrl . 'wp-config.php', 'archive.org_bot', $deadline)['status'], 'littéral avec un point');
+            same(200, \Vigie\Agent\http_get($config->siteUrl, \Vigie\Agent\BROWSER_UA, $deadline)['status'], 'navigateur servi');
+            same(200, \Vigie\Agent\http_get($config->siteUrl, 'Mozilla/5.0 (compatible; archiveXorg_bot)', $deadline)['status'], 'point échappé : pas de joker');
+            [$rollback] = run_htaccess($config, $dir, 'htaccess-rollback', ['expected_current_sha256' => $result['data']['current_sha256'], 'prev_sha256' => $previous]);
+            same('ok', $rollback['status'], $rollback['detail']);
+            same($before, file_get_contents("{$root}/.htaccess"), 'retour arrière');
+        });
+        // Apache à l'heure UTC, agent à l'heure de Paris : les sondes le voient.
+        with_apache($apache, 'UTC', 'Europe/Paris', static function (\Vigie\Agent\Config $config, string $dir, string $root): void {
+            [$result] = apply_block($config, $dir, $root, block_now());
+            same('refused', $result['status'], $result['detail']);
+            check(str_contains($result['detail'], 'horloge Apache'), $result['detail']);
+            no_sandbox_left($root);
         });
     },
 ];

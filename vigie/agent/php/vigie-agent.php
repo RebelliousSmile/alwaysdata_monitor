@@ -27,7 +27,7 @@ if (\PHP_SAPI !== 'cli') {
 // Compatible PHP 8.1 (version du site A) : ni classes readonly, ni constantes
 // typées, ni json_validate.
 
-const VERSION = '0.3.0';
+const VERSION = '0.4.0';
 const AGENT = 'vigie-agent-php/' . VERSION;
 const KEY_FILE = 'secret.key';
 const MAX_BODY = 65536;
@@ -72,6 +72,10 @@ final class Config
         /** @var list<string> */
         public readonly array $logsHosts = [],
         public readonly ?string $logsEndpoint = null,
+        /** Adresse publique de la racine du site, finie par « / » (htaccess-*). */
+        public readonly ?string $siteUrl = null,
+        /** Fuseau IANA du serveur web, celui de %{TIME} (htaccess-*). */
+        public readonly ?string $tz = null,
     ) {
     }
 }
@@ -187,7 +191,7 @@ function load_config(string $path): Config
     if (!\is_array($data) || array_is_list($data) && $data !== []) {
         throw new UsageError('Configuration : un objet JSON est attendu.');
     }
-    $known = ['site', 'endpoint', 'root', 'kind', 'critical', 'must_contain', 'uploads', 'commands', 'logs'];
+    $known = ['site', 'endpoint', 'root', 'kind', 'critical', 'must_contain', 'uploads', 'commands', 'logs', 'url', 'tz'];
     foreach (array_keys($data) as $key) {
         if (!\in_array($key, $known, true)) {
             throw new UsageError("Configuration : clé inconnue « {$key} ».");
@@ -239,10 +243,21 @@ function load_config(string $path): Config
 
     [$commandsEndpoint, $commandsKey] = commands_config($data['commands'] ?? null, $path);
     [$logsDir, $logsHosts, $logsEndpoint] = logs_config($data['logs'] ?? null, $endpoint);
+    $siteUrl = $data['url'] ?? null;
+    if ($siteUrl !== null) {
+        if (!\is_string($siteUrl) || !valid_endpoint($siteUrl) || parse_url($siteUrl, \PHP_URL_QUERY) !== null || parse_url($siteUrl, \PHP_URL_FRAGMENT) !== null) {
+            throw new UsageError('Configuration : url attendue, adresse https:// de la racine du site, sans requête.');
+        }
+        $siteUrl = rtrim($siteUrl, '/') . '/';
+    }
+    $tz = $data['tz'] ?? null;
+    if ($tz !== null && (!\is_string($tz) || !\in_array($tz, \DateTimeZone::listIdentifiers(), true))) {
+        throw new UsageError('Configuration : tz attendu, fuseau IANA du serveur web (Europe/Paris).');
+    }
 
     return new Config(
         $site, $endpoint, rtrim($root, '/\\'), $kind, $critical, $mustContain, $uploads, $commandsEndpoint, $commandsKey,
-        $logsDir, $logsHosts, $logsEndpoint,
+        $logsDir, $logsHosts, $logsEndpoint, $siteUrl, $tz,
     );
 }
 
@@ -722,8 +737,11 @@ function private_dir(string $dir): void
 /** État par défaut : rien d'envoyé, rien d'exécuté. */
 function empty_state(): array
 {
-    return ['pull_seq' => 0, 'last_command_seq' => 0, 'running' => null, 'result' => null, 'rotation' => null];
+    return ['pull_seq' => 0, 'last_command_seq' => 0, 'running' => null, 'result' => null, 'rotation' => null, 'htaccess_pending' => null];
 }
+
+/** Clés de l'état des agents 0.2.0 et 0.3.0, avant htaccess_pending. */
+const STATE_KEYS_0_3 = ['pull_seq', 'last_command_seq', 'running', 'result', 'rotation'];
 
 function load_state(string $dir): array
 {
@@ -739,8 +757,13 @@ function load_state(string $dir): array
     } catch (\JsonException) {
         $state = null;
     }
+    if (\is_array($state) && array_keys($state) === STATE_KEYS_0_3) {
+        // État d'un agent 0.2.0 ou 0.3.0 : migré, réécrit au prochain save_state.
+        $state['htaccess_pending'] = null;
+    }
     if (!\is_array($state) || array_keys($state) !== array_keys(empty_state())
-        || !\is_int($state['pull_seq']) || !\is_int($state['last_command_seq'])) {
+        || !\is_int($state['pull_seq']) || !\is_int($state['last_command_seq'])
+        || ($state['htaccess_pending'] !== null && !valid_htaccess_pending($state['htaccess_pending']))) {
         throw new UsageError("État illisible ({$path}) : le supprimer remet les séquences à zéro.");
     }
 
@@ -1002,6 +1025,11 @@ function pull_commands(Config $config, string $dir, int $now): void
         $state = load_state($dir);
         $usedNewKey = false;
         $nonce = '';
+        if ($state['htaccess_pending'] !== null) {
+            // Application interrompue entre la bascule et son résultat :
+            // décidée d'après l'empreinte actuelle, avant tout retrait.
+            resume_htaccess($config, $dir, $state);
+        }
         if ($state['running'] !== null) {
             // Passage précédent interrompu pendant l'exécution ; une nouvelle
             // paire à moitié créée bloquerait toute rotation future.
@@ -1062,7 +1090,7 @@ function pull_commands(Config $config, string $dir, int $now): void
         }
         $state['running'] = ['id' => $command['id'], 'seq' => $command['seq'], 'name' => $command['name']];
         save_state($dir, $state);
-        $result = execute_command($config, $dir, $command);
+        $result = execute_command($config, $dir, $command, $state);
         $state['running'] = null;
         $state['result'] = $result;
         $state['last_command_seq'] = $command['seq'];
@@ -1088,7 +1116,7 @@ function settle_rotation(string $dir, array &$state, string $acked, bool $accept
 }
 
 /** Liste fermée : match sur des constantes, aucun dispatch dynamique. */
-function execute_command(Config $config, string $dir, array $command): array
+function execute_command(Config $config, string $dir, array $command, array &$state): array
 {
     $id = $command['id'];
     $result = static fn (string $status, string $detail, array $data = []): array => $data === []
@@ -1098,7 +1126,8 @@ function execute_command(Config $config, string $dir, array $command): array
     return match ($command['name']) {
         'ping' => $command['params'] === [] ? $result('ok', 'pong') : $result('refused', 'paramètres inattendus'),
         'rotate-key' => $command['params'] === [] ? rotate_key($config, $dir, $id, $result) : $result('refused', 'paramètres inattendus'),
-        'htaccess-apply', 'htaccess-rollback' => $result('refused', 'indisponible dans cet agent'),
+        'htaccess-apply' => htaccess_apply($config, $dir, $command, $state, $result),
+        'htaccess-rollback' => htaccess_rollback($config, $dir, $command, $state, $result),
     };
 }
 
@@ -1132,6 +1161,928 @@ function rotate_key(Config $config, string $dir, string $id, callable $result): 
     sodium_memzero($pair);
 
     return $result('ok', 'nouvelle clé créée', ['new_pubkey' => $public, 'proof' => $proof]);
+}
+
+// --- .htaccess (vigie/docs/htaccess.md) -----------------------------------
+//
+// htaccess-apply remplace le bloc `# BEGIN vigie` du .htaccess de la racine,
+// htaccess-rollback remet la copie précédente. Le bloc est revalidé ici par
+// la même grammaire fermée que le veilleur (`recommend/htaccess.rs`), au code
+// de refus près (vecteurs partagés : tests/fixtures/htaccess/vectors.json) :
+// la validation tient même si le veilleur est compromis. Puis bac à sable
+// différentiel, compare-and-swap, copie privée dans le dossier de l'agent,
+// bascule par rename, smoke-test de l'accueil et retour automatique.
+
+const HTACCESS_BEGIN = '# BEGIN vigie';
+const HTACCESS_END = '# END vigie';
+const HTACCESS_ENGINE = 'RewriteEngine On';
+const HTACCESS_RULE = 'RewriteRule ^ - [F,L]';
+const HTACCESS_UA = 'RewriteCond %{HTTP_USER_AGENT} ';
+const HTACCESS_IP = 'RewriteCond %{REMOTE_ADDR} ';
+const HTACCESS_TIME = 'RewriteCond %{TIME} <';
+const HTACCESS_MAX_BYTES = 16384;
+const HTACCESS_MAX_LINES = 200;
+const HTACCESS_IP_MAX_TTL = 25 * 3600;
+const HTACCESS_UA_MAX_TTL = 31 * 86400;
+/** Copie privée du .htaccess d'avant la dernière bascule, dans le dossier de l'agent. */
+const HTACCESS_PREV = 'htaccess.prev';
+/** Marque d'un .htaccess absent avant la bascule : le retour arrière le supprime. */
+const HTACCESS_PREV_ABSENT = 'htaccess.prev.absent';
+/** 5 s par requête, 30 s en tout pour une commande. */
+const HTACCESS_HTTP_TIMEOUT = 5;
+const HTACCESS_HTTP_BUDGET = 30;
+const HTACCESS_SANDBOX = 'vigie-essai-';
+const BROWSER_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0';
+const GOOGLEBOT_UA = 'Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; Googlebot/2.1) Chrome/126.0.6478.126 Safari/537.36';
+/** Échantillon du corpus essayé dans le bac à sable (indices de PROTECTED_UAS). */
+const SANDBOX_SAMPLE = [3, 11, 20, 31, 36, 42];
+
+/**
+ * Corpus d'UA protégés : une condition d'UA qui en touche un fait refuser le
+ * bloc. Égal à tests/fixtures/htaccess/protected-uas.txt (test).
+ */
+const PROTECTED_UAS = [
+    'Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; Googlebot/2.1) Chrome/126.0.6478.126 Safari/537.36',
+    'Mozilla/5.0 (Linux; Android 6.0.1; Nexus 5X Build/MMB29P) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.6478.126 Mobile Safari/537.36 (compatible; Googlebot/2.1)',
+    'Googlebot-Image/1.0',
+    'Mozilla/5.0 (compatible; bingbot/2.0)',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_5) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/13.1.1 Safari/605.1.15 (Applebot/0.1)',
+    'DuckDuckBot/1.1',
+    'Mozilla/5.0 (compatible; YandexBot/3.0)',
+    'Mozilla/5.0 (compatible; Baiduspider/2.0)',
+    'Mozilla/5.0 (compatible; SeznamBot/4.0)',
+    'Mozilla/5.0 (Linux; Android 7.0;) AppleWebKit/537.36 (KHTML, like Gecko) Mobile Safari/537.36 (compatible; PetalBot)',
+    'Mozilla/5.0 (compatible; Qwantify/2.4w)',
+    'facebookexternalhit/1.1',
+    'Facebot',
+    'Twitterbot/1.0',
+    'LinkedInBot/1.0 (compatible; Mozilla/5.0; Apache-HttpClient)',
+    'Pinterestbot/1.0',
+    'Slackbot-LinkExpanding 1.0',
+    'TelegramBot (like TwitterBot)',
+    'WhatsApp/2.23.20.0',
+    'Mozilla/5.0 (compatible; Discordbot/2.0)',
+    'Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; ChatGPT-User/1.0)',
+    'Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; Claude-User/1.0)',
+    'Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; Perplexity-User/1.0)',
+    'meta-externalfetcher/1.1',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36 Edg/126.0.0.0',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0',
+    'Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15',
+    'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1',
+    'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36',
+    'Mozilla/5.0 (Linux; Android 14; SM-S911B) AppleWebKit/537.36 (KHTML, like Gecko) SamsungBrowser/25.0 Chrome/121.0.0.0 Mobile Safari/537.36',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36 OPR/111.0.0.0',
+    'Opera/9.80 (Windows NT 6.1) Presto/2.12.388 Version/12.18',
+    'vigie/0.3.0',
+    'vigie-agent-php/0.4.0',
+    'Stripe/1.0 (+webhooks)',
+    'PayPal IPN',
+    'Mollie HTTP Client/2.0',
+    'GuzzleHttp/7',
+    'WordPress/6.6.2; https://site-a.example.org',
+    'PrestaShop/8.1.7',
+    'curl/8.5.0',
+    'Wget/1.21.4',
+    'python-requests/2.31.0',
+    'Java/17.0.10',
+    'Go-http-client/1.1',
+];
+
+/**
+ * Valide un bloc, dans l'ordre exact du validateur Rust. Rend ['valid',
+ * groupes] ou [code, ligne] (ligne 0 : le bloc entier).
+ *
+ * @return array{0: string, 1: mixed}
+ */
+function htaccess_validate(string $block, int $now, \DateTimeZone $tz, bool $bounds = true): array
+{
+    if (\strlen($block) > HTACCESS_MAX_BYTES) {
+        return ['too-large', 0];
+    }
+    foreach (["\r" => 'cr', "\t" => 'tab', "\0" => 'nul'] as $byte => $code) {
+        if (str_contains($block, (string) $byte)) {
+            return [$code, 0];
+        }
+    }
+    if (preg_match('/[^\x20-\x7E\n]/', $block) === 1) {
+        return ['byte', 0];
+    }
+    if ($block === '' || $block[\strlen($block) - 1] !== "\n") {
+        return ['final-newline', 0];
+    }
+    $lines = explode("\n", substr($block, 0, -1));
+    if (\count($lines) > HTACCESS_MAX_LINES) {
+        return ['too-many-lines', 0];
+    }
+    foreach ($lines as $i => $line) {
+        if (str_ends_with($line, '\\')) {
+            return ['continuation', $i + 1];
+        }
+    }
+    if ($lines[0] !== HTACCESS_BEGIN) {
+        return ['begin', 1];
+    }
+    $last = \count($lines) - 1;
+    if ($last === 0 || $lines[$last] !== HTACCESS_END) {
+        return ['end', \count($lines)];
+    }
+    $groups = [];
+    $state = 'start';
+    $kind = null;
+    $literals = [];
+    $ip = null;
+    $until = null;
+    for ($i = 1; $i < $last; ++$i) {
+        $raw = $lines[$i];
+        $number = $i + 1;
+        if (str_starts_with($raw, '#')) {
+            if (!str_starts_with($raw, '# ') || str_contains($raw, 'BEGIN') || str_contains($raw, 'END') || str_contains($raw, '\\')) {
+                return ['comment', $number];
+            }
+            continue;
+        }
+        [$type, $value] = htaccess_classify($raw, $tz);
+        if ($type === 'error') {
+            return [$value, $number];
+        }
+        if ($state === 'start') {
+            if ($type !== 'engine') {
+                return ['engine', $number];
+            }
+            $state = 'group-start';
+            continue;
+        }
+        if ($type === 'engine') {
+            return ['engine', $number];
+        }
+        switch ($state) {
+            case 'group-start':
+                if ($type === 'ua') {
+                    $literals = [$value['literal']];
+                    [$state, $kind] = $value['or'] ? ['ua-conds', 'ua'] : ['need-time', 'ua'];
+                } elseif ($type === 'ip') {
+                    $ip = $value;
+                    [$state, $kind] = ['need-time', 'ip'];
+                } else {
+                    return ['group', $number];
+                }
+                break;
+            case 'ua-conds':
+                if ($type === 'ua') {
+                    $literals[] = $value['literal'];
+                    $state = $value['or'] ? 'ua-conds' : 'need-time';
+                } elseif ($type === 'time') {
+                    return ['or-last', $number];
+                } else {
+                    return ['group', $number];
+                }
+                break;
+            case 'need-time':
+                if ($type === 'time') {
+                    if ($bounds) {
+                        if ($value['ts'] <= $now) {
+                            return ['time-past', $number];
+                        }
+                        if ($value['ts'] > $now + ($kind === 'ua' ? HTACCESS_UA_MAX_TTL : HTACCESS_IP_MAX_TTL)) {
+                            return ['time-bound', $number];
+                        }
+                    }
+                    $until = $value;
+                    $state = 'need-rule';
+                } elseif ($type === 'ua' && $kind === 'ua') {
+                    return ['or-chain', $number];
+                } elseif ($type === 'rule') {
+                    return ['no-time', $number];
+                } else {
+                    return ['group', $number];
+                }
+                break;
+            case 'need-rule':
+                if ($type !== 'rule') {
+                    return ['group', $number];
+                }
+                $groups[] = ['kind' => $kind, 'literals' => $kind === 'ua' ? $literals : [], 'ip' => $kind === 'ip' ? $ip : null,
+                    'until' => $until['digits'], 'until_ts' => $until['ts']];
+                [$state, $kind, $literals, $ip, $until] = ['group-start', null, [], null, null];
+                break;
+        }
+    }
+    if ($state === 'group-start') {
+        return ['valid', $groups];
+    }
+
+    return [$state === 'start' ? 'engine' : 'group', \count($lines)];
+}
+
+/**
+ * Reconnaît une ligne non commentée.
+ *
+ * @return array{0: string, 1: mixed} type (engine, rule, ua, ip, time, error) et valeur
+ */
+function htaccess_classify(string $raw, \DateTimeZone $tz): array
+{
+    if ($raw === HTACCESS_ENGINE) {
+        return ['engine', null];
+    }
+    if ($raw === HTACCESS_RULE) {
+        return ['rule', null];
+    }
+    if (str_starts_with($raw, HTACCESS_UA)) {
+        $rest = substr($raw, \strlen(HTACCESS_UA));
+        if (!str_starts_with($rest, '"')) {
+            return ['error', 'quote'];
+        }
+        $rest = substr($rest, 1);
+        $close = strpos($rest, '"');
+        if ($close === false) {
+            return ['error', 'quote'];
+        }
+        $pattern = substr($rest, 0, $close);
+        $suffix = substr($rest, $close + 1);
+        if ($suffix === ' [NC,OR]') {
+            $or = true;
+        } elseif ($suffix === ' [NC]') {
+            $or = false;
+        } else {
+            return ['error', 'flags'];
+        }
+        $literal = htaccess_unescape($pattern, 'A-Za-z0-9 _\/-', ['.', '+']);
+        if ($literal === null) {
+            return ['error', 'ua-pattern'];
+        }
+        if (preg_match('/^[A-Za-z0-9][A-Za-z0-9 _\/.+-]{2,63}\z/', $literal) !== 1) {
+            return ['error', 'ua-literal'];
+        }
+        if (htaccess_touches_protected($literal)) {
+            return ['error', 'protected-ua'];
+        }
+
+        return ['ua', ['literal' => $literal, 'or' => $or]];
+    }
+    if (str_starts_with($raw, HTACCESS_IP)) {
+        $rest = substr($raw, \strlen(HTACCESS_IP));
+        if (\strlen($rest) < 2 || !str_starts_with($rest, '"') || !str_ends_with($rest, '"')) {
+            return ['error', 'quote'];
+        }
+        $inner = substr($rest, 1, -1);
+        if (!str_starts_with($inner, '^')) {
+            return ['error', 'ip-pattern'];
+        }
+        $inner = substr($inner, 1);
+        if (!str_ends_with($inner, '$')) {
+            return ['error', 'ip-pattern'];
+        }
+        $text = htaccess_unescape(substr($inner, 0, -1), '0-9a-f', ['.', ':']);
+        if ($text === null) {
+            return ['error', 'ip-pattern'];
+        }
+        $ip = htaccess_canonical_ip($text);
+
+        return $ip === null ? ['error', 'ip'] : ['ip', $ip];
+    }
+    if (str_starts_with($raw, HTACCESS_TIME)) {
+        $digits = substr($raw, \strlen(HTACCESS_TIME));
+        $ts = htaccess_to_unix($digits, $tz);
+
+        return $ts === null ? ['error', 'time-format'] : ['time', ['digits' => $digits, 'ts' => $ts]];
+    }
+
+    return ['error', 'directive'];
+}
+
+/** Motif → texte : caractères de $class, ou « \ » suivi d'un de $escaped ; null sinon. */
+function htaccess_unescape(string $pattern, string $class, array $escaped): ?string
+{
+    $out = '';
+    $length = \strlen($pattern);
+    for ($i = 0; $i < $length; ++$i) {
+        $c = $pattern[$i];
+        if ($c === '\\') {
+            $next = $pattern[$i + 1] ?? '';
+            if (!\in_array($next, $escaped, true)) {
+                return null;
+            }
+            $out .= $next;
+            ++$i;
+        } elseif (preg_match('/^[' . $class . ']\z/', $c) === 1) {
+            $out .= $c;
+        } else {
+            return null;
+        }
+    }
+
+    return $out;
+}
+
+/** Une condition d'UA vaut « contient, sans casse ». */
+function htaccess_touches_protected(string $literal): bool
+{
+    $needle = strtolower($literal);
+    foreach (PROTECTED_UAS as $ua) {
+        if (str_contains(strtolower($ua), $needle)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+/** IP canonique (inet_pton puis inet_ntop), hors IPv4 mappée et hors ::/96. */
+function htaccess_canonical_ip(string $text): ?string
+{
+    if (str_contains($text, ':')) {
+        if (str_contains($text, '.')) {
+            return null;
+        }
+        $bin = @inet_pton($text);
+        if ($bin === false || \strlen($bin) !== 16) {
+            return null;
+        }
+        $mapped = substr($bin, 0, 10) === str_repeat("\0", 10) && substr($bin, 10, 2) === "\xff\xff";
+        if ($mapped || substr($bin, 0, 12) === str_repeat("\0", 12)) {
+            return null;
+        }
+    } else {
+        $bin = @inet_pton($text);
+        if ($bin === false || \strlen($bin) !== 4) {
+            return null;
+        }
+    }
+
+    return inet_ntop($bin) === $text ? $text : null;
+}
+
+/** AAAAMMJJhhmmss → secondes Unix dans $tz, années 2000 à 2999. */
+function htaccess_to_unix(string $digits, \DateTimeZone $tz): ?int
+{
+    if (preg_match('/^[0-9]{14}\z/', $digits) !== 1) {
+        return null;
+    }
+    [$y, $m, $d, $h, $i, $s] = array_map('intval', [substr($digits, 0, 4), substr($digits, 4, 2), substr($digits, 6, 2),
+        substr($digits, 8, 2), substr($digits, 10, 2), substr($digits, 12, 2)]);
+    if ($y < 2000 || $y > 2999 || !checkdate($m, $d, $y) || $h > 23 || $i > 59 || $s > 59) {
+        return null;
+    }
+
+    return (new \DateTimeImmutable(sprintf('%04d-%02d-%02d %02d:%02d:%02d', $y, $m, $d, $h, $i, $s), $tz))->getTimestamp();
+}
+
+/**
+ * Nouveau contenu : le bloc vigie remplacé (lignes exactes, au plus une
+ * paire), ou ajouté en tête. Le reste, dont le bloc sc_alwaysdata du
+ * module, est gardé à l'octet.
+ *
+ * @return array{0: ?string, 1: ?string} contenu, ou raison du refus
+ */
+function htaccess_merge(string $current, string $block): array
+{
+    $begins = [];
+    $ends = [];
+    $offset = 0;
+    foreach (explode("\n", $current) as $line) {
+        $length = \strlen($line);
+        $trimmed = rtrim($line, " \t\r");
+        if ($trimmed === HTACCESS_BEGIN || $trimmed === HTACCESS_END) {
+            if ($line !== $trimmed) {
+                return [null, 'bloc vigie mal délimité (espace ou CR en fin de ligne)'];
+            }
+            if ($line === HTACCESS_BEGIN) {
+                $begins[] = $offset;
+            } else {
+                $ends[] = $offset + $length;
+            }
+        }
+        $offset += $length + 1;
+    }
+    if ($begins === [] && $ends === []) {
+        return [$block . $current, null];
+    }
+    if (\count($begins) !== 1 || \count($ends) !== 1 || $begins[0] > $ends[0]) {
+        return [null, 'bloc vigie mal délimité (plusieurs paires ou ordre inversé)'];
+    }
+    $after = $ends[0] < \strlen($current) ? $ends[0] + 1 : $ends[0];
+
+    return [substr($current, 0, $begins[0]) . $block . substr($current, $after), null];
+}
+
+/** Paramètres exacts d'une commande htaccess-* : clés attendues, chaînes ou empreintes. */
+function htaccess_params(array $params, array $hashes, bool $withBlock): bool
+{
+    $expected = $withBlock ? array_merge(['block'], $hashes) : $hashes;
+    sort($expected);
+    if (sorted_keys($params) !== $expected) {
+        return false;
+    }
+    if ($withBlock && !\is_string($params['block'])) {
+        return false;
+    }
+    foreach ($hashes as $key) {
+        if ($params[$key] !== null && (!\is_string($params[$key]) || preg_match('/^[0-9a-f]{64}\z/', $params[$key]) !== 1)) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+/** État d'une application interrompue. */
+function valid_htaccess_pending(mixed $pending): bool
+{
+    $hash = static fn (mixed $h): bool => $h === null || (\is_string($h) && preg_match('/^[0-9a-f]{64}\z/', $h) === 1);
+
+    return \is_array($pending) && sorted_keys($pending) === ['command_id', 'kind', 'new_sha256', 'prev_sha256', 'statuts_avant']
+        && \is_string($pending['command_id']) && \in_array($pending['kind'], ['apply', 'rollback'], true)
+        && $hash($pending['new_sha256']) && $hash($pending['prev_sha256'])
+        && \is_array($pending['statuts_avant']) && sorted_keys($pending['statuts_avant']) === ['browser', 'googlebot']
+        && \is_int($pending['statuts_avant']['browser']) && \is_int($pending['statuts_avant']['googlebot']);
+}
+
+/**
+ * Le .htaccess de la racine : chemin, existence, octets et empreinte. null
+ * si la racine est introuvable ou si le fichier n'est pas un fichier
+ * ordinaire (lien symbolique, dossier).
+ *
+ * @return ?array{path: string, root: string, exists: bool, bytes: ?string, sha: ?string, mode: int}
+ */
+function read_htaccess(Config $config): ?array
+{
+    $root = realpath($config->root);
+    if ($root === false || !is_dir($root)) {
+        return null;
+    }
+    $path = $root . '/.htaccess';
+    clearstatcache(true, $path);
+    if (is_link($path)) {
+        return null;
+    }
+    if (!file_exists($path)) {
+        return ['path' => $path, 'root' => $root, 'exists' => false, 'bytes' => null, 'sha' => null, 'mode' => 0644];
+    }
+    if (!is_file($path)) {
+        return null;
+    }
+    $bytes = @file_get_contents($path);
+    if ($bytes === false) {
+        return null;
+    }
+
+    return ['path' => $path, 'root' => $root, 'exists' => true, 'bytes' => $bytes, 'sha' => hash('sha256', $bytes),
+        'mode' => fileperms($path) & 0777];
+}
+
+/** Empreinte actuelle du .htaccess (null : absent ou illisible). */
+function current_htaccess_sha(Config $config): ?string
+{
+    return read_htaccess($config)['sha'] ?? null;
+}
+
+/** Écrit le .htaccess par fichier temporaire du même dossier (nom en .ht*, refusé par Apache) et rename ; null : contenu absent, suppression. */
+function write_htaccess(string $root, ?string $bytes, int $mode): bool
+{
+    $path = $root . '/.htaccess';
+    if ($bytes === null) {
+        return !file_exists($path) || @unlink($path);
+    }
+    $tmp = $root . '/.htaccess.vigie-' . bin2hex(random_bytes(6)) . '.tmp';
+    $handle = @fopen($tmp, 'x');
+    if ($handle === false) {
+        return false;
+    }
+    $written = fwrite($handle, $bytes);
+    fclose($handle);
+    @chmod($tmp, $mode);
+    if ($written !== \strlen($bytes) || !@rename($tmp, $path)) {
+        @unlink($tmp);
+
+        return false;
+    }
+
+    return true;
+}
+
+/**
+ * Copie privée d'avant la bascule : ['sha' => …, 'bytes' => …] (sha null :
+ * le fichier n'existait pas), ou null s'il n'y en a pas.
+ */
+function read_private_copy(string $dir): ?array
+{
+    $path = $dir . '/' . HTACCESS_PREV;
+    clearstatcache();
+    if (is_file($path) && !is_link($path)) {
+        $bytes = @file_get_contents($path);
+
+        return $bytes === false ? null : ['sha' => hash('sha256', $bytes), 'bytes' => $bytes];
+    }
+    if (is_file($dir . '/' . HTACCESS_PREV_ABSENT)) {
+        return ['sha' => null, 'bytes' => null];
+    }
+
+    return null;
+}
+
+/**
+ * Écrit la copie privée depuis les octets vérifiés ; l'ancienne copie reste
+ * en .old jusqu'à la réussite de la bascule (commit_private_copy).
+ */
+function write_private_copy(string $dir, ?string $bytes): bool
+{
+    foreach ([HTACCESS_PREV, HTACCESS_PREV_ABSENT] as $name) {
+        @unlink("{$dir}/{$name}.old");
+        if (file_exists("{$dir}/{$name}") && !@rename("{$dir}/{$name}", "{$dir}/{$name}.old")) {
+            return false;
+        }
+    }
+    if ($bytes === null) {
+        $handle = @fopen($dir . '/' . HTACCESS_PREV_ABSENT, 'x');
+        if ($handle === false) {
+            return false;
+        }
+        fclose($handle);
+        @chmod($dir . '/' . HTACCESS_PREV_ABSENT, 0600);
+
+        return true;
+    }
+    $tmp = @tempnam($dir, '.prev-');
+    if ($tmp === false) {
+        return false;
+    }
+    @chmod($tmp, 0600);
+    if (@file_put_contents($tmp, $bytes) !== \strlen($bytes) || !@rename($tmp, $dir . '/' . HTACCESS_PREV)) {
+        @unlink($tmp);
+
+        return false;
+    }
+
+    return true;
+}
+
+/** Bascule réussie : l'ancienne copie part. Échec : elle revient. */
+function settle_private_copy(string $dir, bool $switched): void
+{
+    foreach ([HTACCESS_PREV, HTACCESS_PREV_ABSENT] as $name) {
+        if ($switched) {
+            @unlink("{$dir}/{$name}.old");
+        } elseif (file_exists("{$dir}/{$name}.old")) {
+            @unlink("{$dir}/{$name}");
+            @rename("{$dir}/{$name}.old", "{$dir}/{$name}");
+        }
+    }
+}
+
+/**
+ * GET sans redirection suivie, 5 s au plus et dans le budget. null si le
+ * serveur ne répond pas.
+ *
+ * @return ?array{status: int, body: string}
+ */
+function http_get(string $url, string $ua, int $deadline): ?array
+{
+    $left = ($deadline - hrtime(true)) / 1e9;
+    if ($left <= 0.1) {
+        return null;
+    }
+    $timeout = min((float) HTACCESS_HTTP_TIMEOUT, $left);
+    $context = stream_context_create([
+        'http' => [
+            'method' => 'GET',
+            'header' => implode("\r\n", ['User-Agent: ' . $ua, 'Cache-Control: no-cache', 'Accept: */*']),
+            'timeout' => $timeout,
+            'follow_location' => 0,
+            'max_redirects' => 0,
+            'ignore_errors' => true,
+        ],
+        'ssl' => ['verify_peer' => true, 'verify_peer_name' => true, 'allow_self_signed' => false],
+    ]);
+    $previous = ini_set('default_socket_timeout', (string) (int) ceil($timeout));
+    $stream = @fopen($url, 'r', false, $context);
+    if ($previous !== false) {
+        ini_set('default_socket_timeout', $previous);
+    }
+    if ($stream === false) {
+        return null;
+    }
+    $body = stream_get_contents($stream, 65536);
+    $meta = stream_get_meta_data($stream);
+    fclose($stream);
+    $line = $meta['wrapper_data'][0] ?? '';
+    if (!\is_string($line) || preg_match('#^HTTP/\S+\s+(\d{3})#', $line, $m) !== 1) {
+        return null;
+    }
+
+    return ['status' => (int) $m[1], 'body' => \is_string($body) ? $body : ''];
+}
+
+/**
+ * Smoke-test de l'accueil, anti-cache, UA de navigateur et Googlebot.
+ *
+ * @return ?array{browser: int, googlebot: int}
+ */
+function smoke_test(Config $config, int $deadline): ?array
+{
+    $url = $config->siteUrl . '?vigie-essai=' . bin2hex(random_bytes(6));
+    $out = [];
+    foreach (['browser' => BROWSER_UA, 'googlebot' => GOOGLEBOT_UA] as $name => $ua) {
+        $response = http_get($url, $ua, $deadline);
+        if ($response === null) {
+            return null;
+        }
+        $out[$name] = $response['status'];
+    }
+
+    return $out;
+}
+
+/** Lignes du bloc vigie d'un contenu, sans les bornes (vide s'il n'y en a pas). */
+function vigie_block_lines(string $content): array
+{
+    $lines = explode("\n", $content);
+    $begin = array_search(HTACCESS_BEGIN, $lines, true);
+    $end = array_search(HTACCESS_END, $lines, true);
+
+    return $begin === false || $end === false || $end < $begin ? [] : \array_slice($lines, $begin + 1, $end - $begin - 1);
+}
+
+/**
+ * Bac à sable différentiel : vigie-essai-<hex>-a (ancien contenu) et -b
+ * (nouveau, plus deux sondes d'horloge), chacun avec une page témoin à
+ * nonce. Rend null si tout concorde, sinon la raison du refus. Dossiers
+ * supprimés dans tous les cas.
+ *
+ * @param list<array{kind: string, literals: list<string>}> $groups
+ */
+function sandbox(Config $config, string $root, ?string $old, string $new, array $groups, int $now, int $deadline): ?string
+{
+    $hex = bin2hex(random_bytes(8));
+    $dirs = ['a' => "{$root}/" . HTACCESS_SANDBOX . "{$hex}-a", 'b' => "{$root}/" . HTACCESS_SANDBOX . "{$hex}-b"];
+    $nonces = ['a' => bin2hex(random_bytes(16)), 'b' => bin2hex(random_bytes(16))];
+    $probe = static fn (string $which, int $at): array => [
+        '# sonde d\'horloge', HTACCESS_UA . '"vigie-probe-' . $hex . $which . '" [NC]', HTACCESS_TIME . date('YmdHis', $at), HTACCESS_RULE,
+    ];
+    $lines = explode("\n", $new);
+    $end = array_search(HTACCESS_END, $lines, true);
+    array_splice($lines, (int) $end, 0, [...$probe('a', $now + 1800), ...$probe('b', $now - 1800)]);
+    $contents = ['a' => $old, 'b' => implode("\n", $lines)];
+    try {
+        foreach ($dirs as $side => $path) {
+            if (!@mkdir($path, 0755)) {
+                return 'bac à sable impossible à créer';
+            }
+            if ($contents[$side] !== null && @file_put_contents("{$path}/.htaccess", $contents[$side]) !== \strlen($contents[$side])) {
+                return 'bac à sable impossible à écrire';
+            }
+            if (@file_put_contents("{$path}/temoin.txt", $nonces[$side]) !== \strlen($nonces[$side])) {
+                return 'bac à sable impossible à écrire';
+            }
+        }
+        $get = static function (string $side, string $ua) use ($config, $hex, $nonces, $deadline): array {
+            $response = http_get($config->siteUrl . HTACCESS_SANDBOX . "{$hex}-{$side}/temoin.txt", $ua, $deadline);
+            if ($response === null) {
+                return [null, 'bac à sable injoignable (délai)'];
+            }
+            if ($response['status'] === 200 && !str_contains($response['body'], $nonces[$side])) {
+                return [null, 'bac à sable non représentatif : 200 sans la page témoin'];
+            }
+
+            return [$response['status'], null];
+        };
+        [$status, $error] = $get('a', BROWSER_UA);
+        if ($error !== null || $status !== 200) {
+            return $error ?? "bac à sable non représentatif : statut {$status} pour un navigateur avant le changement";
+        }
+        $uas = [BROWSER_UA, GOOGLEBOT_UA];
+        foreach (SANDBOX_SAMPLE as $index) {
+            $uas[] = PROTECTED_UAS[$index];
+        }
+        foreach ($uas as $ua) {
+            [$a, $error] = $get('a', $ua);
+            [$b, $errorB] = $error === null ? $get('b', $ua) : [null, null];
+            if ($error !== null || $errorB !== null) {
+                return $error ?? $errorB;
+            }
+            if ($a !== $b) {
+                return "bac à sable : statut {$a} puis {$b} pour un UA protégé (" . printable($ua, 60) . ')';
+            }
+        }
+        $oldLines = $old === null ? [] : vigie_block_lines($old);
+        foreach ($groups as $group) {
+            if ($group['kind'] !== 'ua') {
+                continue;
+            }
+            $ua = $group['literals'][0];
+            [$b, $error] = $get('b', $ua);
+            if ($error !== null) {
+                return $error;
+            }
+            if ($b !== 403) {
+                return "bac à sable : la règle d'UA {$ua} rend {$b} au lieu de 403";
+            }
+            // Un groupe repris du bloc en place est déjà actif dans -a.
+            $line = HTACCESS_UA . '"' . str_replace(['.', '+'], ['\\.', '\\+'], $ua) . '"';
+            $kept = array_filter($oldLines, static fn (string $l): bool => str_starts_with($l, $line));
+            if ($kept === []) {
+                [$a, $error] = $get('a', $ua);
+                if ($error !== null || $a === 403) {
+                    return $error ?? "bac à sable : {$ua} déjà refusé avant le changement";
+                }
+            }
+        }
+        [$early, $error] = $get('b', "vigie-probe-{$hex}a");
+        [$late, $errorLate] = $error === null ? $get('b', "vigie-probe-{$hex}b") : [null, null];
+        if ($error !== null || $errorLate !== null) {
+            return $error ?? $errorLate;
+        }
+        if ($early !== 403 || $late !== 200) {
+            return "horloge Apache ≠ horloge agent (sondes : {$early} et {$late}, attendus 403 et 200 ; tz {$config->tz})";
+        }
+
+        return null;
+    } finally {
+        foreach ($dirs as $path) {
+            @unlink("{$path}/.htaccess");
+            @unlink("{$path}/temoin.txt");
+            @rmdir($path);
+        }
+    }
+}
+
+/** htaccess-apply : calcul seul (new_sha256 nul), ou application complète. */
+function htaccess_apply(Config $config, string $dir, array $command, array &$state, callable $result): array
+{
+    $params = $command['params'];
+    if (!htaccess_params($params, ['new_sha256', 'previous_sha256'], true)) {
+        return $result('refused', 'paramètres inattendus');
+    }
+    if ($config->siteUrl === null || $config->tz === null) {
+        return $result('refused', 'configuration htaccess incomplète : url et tz dans config.json');
+    }
+    date_default_timezone_set($config->tz);
+    $tz = new \DateTimeZone($config->tz);
+    $current = read_htaccess($config);
+    if ($current === null) {
+        return $result('refused', 'racine introuvable, ou .htaccess qui n\'est pas un fichier ordinaire');
+    }
+    $data = ['current_sha256' => $current['sha']];
+    if ($current['sha'] !== $params['previous_sha256']) {
+        return $result('refused', 'le .htaccess a changé depuis la proposition (empreinte différente de previous_sha256)', $data);
+    }
+    $now = time();
+    [$verdict, $groups] = htaccess_validate($params['block'], $now, $tz);
+    if ($verdict !== 'valid') {
+        return $result('refused', "bloc refusé par l'agent : {$verdict}, ligne {$groups}", $data);
+    }
+    [$content, $why] = htaccess_merge($current['bytes'] ?? '', $params['block']);
+    if ($content === null) {
+        return $result('refused', $why, $data);
+    }
+    $newSha = hash('sha256', $content);
+    if ($params['new_sha256'] === null) {
+        return $result('ok', 'calcul seul : rien n\'est écrit', $data + ['new_sha256' => $newSha]);
+    }
+    if ($newSha !== $params['new_sha256']) {
+        return $result('refused', 'contenu calculé différent de new_sha256', $data);
+    }
+    $deadline = hrtime(true) + HTACCESS_HTTP_BUDGET * 1_000_000_000;
+    $before = smoke_test($config, $deadline);
+    if ($before === null) {
+        return $result('failed', 'accueil injoignable avant l\'application : rien n\'est écrit', $data);
+    }
+    $refusal = sandbox($config, $current['root'], $current['bytes'], $content, $groups, $now, $deadline);
+    if ($refusal !== null) {
+        return $result('refused', $refusal . ' : rien n\'est écrit', $data);
+    }
+    // Compare-and-swap : relecture juste avant la bascule.
+    $again = read_htaccess($config);
+    if ($again === null || $again['sha'] !== $params['previous_sha256']) {
+        return $result('failed', 'modifié pendant l\'application : rien n\'est écrit', ['current_sha256' => $again['sha'] ?? null]);
+    }
+    if (!write_private_copy($dir, $again['bytes'])) {
+        settle_private_copy($dir, false);
+
+        return $result('failed', 'copie privée impossible dans le dossier de l\'agent : rien n\'est écrit', $data);
+    }
+    $state['htaccess_pending'] = ['command_id' => $command['id'], 'kind' => 'apply', 'prev_sha256' => $params['previous_sha256'],
+        'new_sha256' => $newSha, 'statuts_avant' => $before];
+    save_state($dir, $state);
+    if (!write_htaccess($again['root'], $content, $again['mode'])) {
+        settle_private_copy($dir, false);
+        $state['htaccess_pending'] = null;
+
+        return $result('failed', 'écriture du .htaccess impossible : rien n\'est écrit', $data);
+    }
+    settle_private_copy($dir, true);
+    $outcome = htaccess_check_after($config, $dir, $state['htaccess_pending'], smoke_test($config, max($deadline, hrtime(true) + 2 * HTACCESS_HTTP_TIMEOUT * 1_000_000_000)), 'bloc appliqué');
+    $state['htaccess_pending'] = null;
+
+    return $result(...$outcome);
+}
+
+/**
+ * Après une bascule : statuts d'après identiques à ceux d'avant, sinon
+ * retour à la copie privée seulement si le .htaccess a encore la nouvelle
+ * empreinte (une application, pas un retour arrière).
+ *
+ * @return array{0: string, 1: string, 2: array}
+ */
+function htaccess_check_after(Config $config, string $dir, array $pending, ?array $after, string $done): array
+{
+    $before = $pending['statuts_avant'];
+    if ($after === $before) {
+        return ['ok', $done, ['current_sha256' => $pending['new_sha256']]];
+    }
+    $shown = $after === null ? 'accueil injoignable' : "accueil {$after['browser']}/{$after['googlebot']} au lieu de {$before['browser']}/{$before['googlebot']}";
+    $current = read_htaccess($config);
+    if ($current === null || $current['sha'] !== $pending['new_sha256']) {
+        return ['failed', "{$shown} ; .htaccess modifié pendant l'application : rien n'est écrasé", ['current_sha256' => $current['sha'] ?? null]];
+    }
+    if ($pending['kind'] === 'rollback') {
+        return ['failed', "copie précédente remise, mais {$shown}", ['current_sha256' => $current['sha']]];
+    }
+    $copy = read_private_copy($dir);
+    if ($copy === null || $copy['sha'] !== $pending['prev_sha256'] || !write_htaccess($current['root'], $copy['bytes'], $current['mode'])) {
+        return ['failed', "{$shown} ; copie privée absente ou différente : .htaccess laissé tel quel", ['current_sha256' => $current['sha']]];
+    }
+
+    return ['failed', "{$shown} : .htaccess remis à l'identique", ['current_sha256' => current_htaccess_sha($config)]];
+}
+
+/** htaccess-rollback : la copie privée revient si elle et le .htaccess ont les empreintes attendues. */
+function htaccess_rollback(Config $config, string $dir, array $command, array &$state, callable $result): array
+{
+    $params = $command['params'];
+    if (!htaccess_params($params, ['expected_current_sha256', 'prev_sha256'], false)) {
+        return $result('refused', 'paramètres inattendus');
+    }
+    if ($config->siteUrl === null || $config->tz === null) {
+        return $result('refused', 'configuration htaccess incomplète : url et tz dans config.json');
+    }
+    $current = read_htaccess($config);
+    if ($current === null) {
+        return $result('refused', 'racine introuvable, ou .htaccess qui n\'est pas un fichier ordinaire');
+    }
+    $data = ['current_sha256' => $current['sha']];
+    $copy = read_private_copy($dir);
+    if ($copy === null || $copy['sha'] !== $params['prev_sha256']) {
+        return $result('refused', 'copie précédente absente ou différente de prev_sha256', $data);
+    }
+    if ($current['sha'] !== $params['expected_current_sha256']) {
+        return $result('refused', 'le .htaccess a changé depuis la dernière application', $data);
+    }
+    $deadline = hrtime(true) + HTACCESS_HTTP_BUDGET * 1_000_000_000;
+    $before = smoke_test($config, $deadline);
+    if ($before === null) {
+        return $result('failed', 'accueil injoignable avant le retour arrière : rien n\'est écrit', $data);
+    }
+    $again = read_htaccess($config);
+    if ($again === null || $again['sha'] !== $params['expected_current_sha256']) {
+        return $result('failed', 'modifié pendant le retour arrière : rien n\'est écrit', ['current_sha256' => $again['sha'] ?? null]);
+    }
+    $state['htaccess_pending'] = ['command_id' => $command['id'], 'kind' => 'rollback', 'prev_sha256' => $params['expected_current_sha256'],
+        'new_sha256' => $params['prev_sha256'], 'statuts_avant' => $before];
+    save_state($dir, $state);
+    if (!write_htaccess($again['root'], $copy['bytes'], $again['mode'])) {
+        $state['htaccess_pending'] = null;
+
+        return $result('failed', 'écriture du .htaccess impossible : rien n\'est écrit', $data);
+    }
+    $outcome = htaccess_check_after($config, $dir, $state['htaccess_pending'], smoke_test($config, max($deadline, hrtime(true) + 2 * HTACCESS_HTTP_TIMEOUT * 1_000_000_000)), 'copie précédente remise');
+    $state['htaccess_pending'] = null;
+
+    return $result(...$outcome);
+}
+
+/**
+ * Reprise d'une bascule interrompue (htaccess_pending trouvé en tête du
+ * passage), d'après l'empreinte actuelle : nouvelle → smoke-test contre les
+ * statuts d'avant, puis ok ou retour arrière ; ancienne → bascule non
+ * faite ; autre → modifié pendant l'application. Le résultat remplace celui
+ * de la commande interrompue.
+ */
+function resume_htaccess(Config $config, string $dir, array &$state): void
+{
+    $pending = $state['htaccess_pending'];
+    $id = $pending['command_id'];
+    $make = static fn (string $status, string $detail, array $data): array => [
+        'command_id' => $id, 'status' => $status, 'detail' => printable('reprise : ' . $detail, MAX_DETAIL), 'data' => $data,
+    ];
+    $current = read_htaccess($config);
+    $sha = $current['sha'] ?? null;
+    if ($current !== null && $sha === $pending['new_sha256']) {
+        $after = $config->siteUrl === null ? null : smoke_test($config, hrtime(true) + HTACCESS_HTTP_BUDGET * 1_000_000_000);
+        $state['result'] = $make(...htaccess_check_after($config, $dir, $pending, $after, 'bascule faite et contrôlée'));
+    } elseif ($current !== null && $sha === $pending['prev_sha256']) {
+        $state['result'] = $make('failed', 'bascule non faite : rien n\'est écrit', ['current_sha256' => $sha]);
+    } else {
+        $state['result'] = $make('failed', 'modifié pendant l\'application : rien n\'est écrit', ['current_sha256' => $sha]);
+    }
+    if ($state['running'] !== null && $state['running']['id'] === $id) {
+        $state['last_command_seq'] = max($state['last_command_seq'], $state['running']['seq']);
+        $state['running'] = null;
+    }
+    $state['htaccess_pending'] = null;
+    save_state($dir, $state);
 }
 
 // --- Logs (vigie/docs/logs.md) -----------------------------------------

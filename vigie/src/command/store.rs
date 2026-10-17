@@ -159,6 +159,26 @@ fn cancel_open(
     Ok(open.into_iter().map(|c| c.id).collect())
 }
 
+/// Empreintes du `.htaccess` admises par l'intégrité : celles qu'une
+/// commande `htaccess-*` servie ou d'issue inconnue peut laisser
+/// ([`super::htaccess_expected`]).
+pub(crate) fn htaccess_admitted(
+    conn: &rusqlite::Connection,
+    site: &str,
+) -> rusqlite::Result<Vec<String>> {
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {COLUMNS} FROM commands WHERE site = ?1 AND state IN ('served', 'unknown')
+           AND name IN ('htaccess-apply', 'htaccess-rollback') ORDER BY seq"
+    ))?;
+    let commands: Vec<Command> = stmt
+        .query_map([site], from_row)?
+        .collect::<rusqlite::Result<_>>()?;
+    Ok(commands
+        .iter()
+        .flat_map(|c| super::htaccess_expected(c.kind, &c.params))
+        .collect())
+}
+
 fn open_commands(conn: &rusqlite::Connection, site: &str) -> rusqlite::Result<Vec<Command>> {
     let mut stmt = conn.prepare(&format!(
         "SELECT {COLUMNS} FROM commands WHERE site = ?1 AND state IN ('pending', 'served') ORDER BY seq"

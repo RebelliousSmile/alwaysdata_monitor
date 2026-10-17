@@ -210,10 +210,9 @@ l'agent retire après chaque rapport la commande de son site
   fichier temporaire puis `rename`, sous `flock` de `state.lock`) : séquences,
   commande en cours, résultat en attente d'accusé. Un passage concurrent saute
   les commandes. Un état illisible ou ouvert arrête le canal, pas le rapport.
-- Ce que l'agent exécute : `ping` (rien, répond `pong`) et `rotate-key` (voir
-  ci-dessous). `htaccess-apply` et `htaccess-rollback` répondent `refused` tant
-  que #13 n'est pas livré. Tout autre nom fait rejeter la réponse. Aucun
-  `eval`, aucun appel shell.
+- Ce que l'agent exécute : `ping` (rien, répond `pong`), `rotate-key` (voir
+  ci-dessous), `htaccess-apply` et `htaccess-rollback` (voir plus bas). Tout
+  autre nom fait rejeter la réponse. Aucun `eval`, aucun appel shell.
 - Une commande n'est exécutée qu'une fois ; son résultat est renvoyé à chaque
   passage jusqu'à l'accusé du veilleur. Une exécution interrompue revient
   `failed` (« exécution interrompue »).
@@ -224,6 +223,36 @@ l'agent retire après chaque rapport la commande de son site
   nouvelle clé. Un 204 de rapport, non signé, ne fait jamais basculer.
 - Activer côté veilleur : `vigie site commands site-a enable`. Un site PHP
   déclaré `generic` dans `config.toml` doit y porter `runtime = "php"`.
+
+### `.htaccess` (agent 0.4.0, issue #13)
+
+`htaccess-apply` remplace le bloc `# BEGIN vigie` du `.htaccess` de `root`,
+`htaccess-rollback` remet la copie précédente ; procédure complète dans
+[`htaccess.md`](./htaccess.md). Deux clés de `config.json` les activent :
+
+```json
+"url": "https://site-a.example.org/",
+"tz": "Europe/Paris"
+```
+
+- `url` : adresse https de la racine servie par `root` (http seulement vers
+  la boucle locale, pour les tests). Le bac à sable et le smoke-test y
+  envoient des requêtes : 5 s chacune, 30 s en tout, aucune redirection
+  suivie.
+- `tz` : fuseau du serveur web, celui de `%{TIME}` ; appliqué par
+  `date_default_timezone_set`, jamais celui de `php.ini`. Les sondes
+  d'horloge du bac à sable refusent tout écart avec l'horloge réelle
+  d'Apache.
+- Sans l'une d'elles, `htaccess-*` répond `refused`.
+- L'agent revalide le bloc par sa propre grammaire fermée et son propre
+  corpus d'UA protégés (`PROTECTED_UAS`) avant toute écriture, puis bac à
+  sable (`vigie-essai-<hex>-a` et `-b`, supprimés dans tous les cas),
+  compare-and-swap, copie privée `htaccess.prev` (0600) dans **son** dossier,
+  bascule par `rename`, smoke-test et retour automatique.
+- `state.json` porte `htaccess_pending` pendant une bascule : un passage
+  interrompu est repris en tête du passage suivant, avant tout retrait. Un
+  `state.json` d'agent 0.2.0 ou 0.3.0 est migré sans perte.
+- Retour arrière à la main : `cp ~/.vigie-agent/htaccess.prev ~/www/.htaccess`.
 
 ## Logs HTTP
 
@@ -282,6 +311,11 @@ retrait, les lignes nouvelles du log HTTP d'Alwaysdata à `/r/v1/logs`
 ```powershell
 php -d extension=sodium vigie/agent/php/tests/run.php
 ```
+
+Les tests `htaccess` servent un site par `php -S` (routeur
+`tests/site-router.php`, qui applique le bloc vigie et simule les pannes).
+Avec `VIGIE_APACHE=/usr/sbin/apache2` (Linux, `mod_rewrite`), un test de plus
+fait le même parcours sur un Apache réel.
 
 Les tests travaillent sur des copies temporaires des arborescences de
 `agent/php/tests/fixtures/` et vérifient qu'aucun fichier n'est modifié. Sous

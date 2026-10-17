@@ -1,0 +1,10 @@
+# BEGIN vigie
+# Gere par Vigie (vigie site recommend) : ne pas modifier a la main.
+RewriteEngine On
+# ua jusqu'au 2026-07-15 12:00:00
+RewriteCond %{HTTP_USER_AGENT} "Bytespider" [NC,OR]
+RewriteCond %{HTTP_USER_AGENT} "SEOkicks" [NC,OR]
+RewriteCond %{HTTP_USER_AGENT} "Screaming Frog" [NC]
+RewriteCond %{TIME} <20260715120000
+RewriteRule ^ - [F,L]
+# END vigie

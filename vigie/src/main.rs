@@ -24,9 +24,10 @@ use vigie::device::{self, PAIRING_TTL};
 use vigie::finding::Severity;
 use vigie::store::{
     AckOutcome, Agent, KeyOutcome, META_TYPOLOGY_SERVE, META_TYPOLOGY_TICK, RevokeOutcome,
-    SCHEMA_AGENTS, SCHEMA_COMMANDS, SCHEMA_DEVICES, SCHEMA_INCIDENTS, SCHEMA_META, Store,
+    SCHEMA_AGENT_SOURCES, SCHEMA_AGENTS, SCHEMA_COMMANDS, SCHEMA_DEVICES, SCHEMA_FINDINGS,
+    SCHEMA_INCIDENTS, SCHEMA_META, Store,
 };
-use vigie::{human_age, iso_utc, serve, tick};
+use vigie::{human_age, iso_utc, recommend, serve, tick};
 
 /// Code de retour d'une configuration invalide ou introuvable.
 const EXIT_CONFIG: u8 = 2;
@@ -160,13 +161,34 @@ enum SiteAction {
     Command {
         /// Identifiant du site
         id: String,
-        /// ping ou rotate-key (htaccess-* attendent #13)
+        /// ping, rotate-key ou htaccess-rollback (htaccess-apply passe par
+        /// `site recommend`)
         name: String,
         /// Met la commande en file
         #[arg(long)]
         apply: bool,
         /// Rejoue une commande non idempotente dont la précédente a une issue
         /// inconnue
+        #[arg(long)]
+        force: bool,
+    },
+    /// Propositions tirées de la dernière analyse de logs : robots.txt à
+    /// poser à la main, bloc `# BEGIN vigie` du .htaccess ; aperçu sans rien
+    /// écrire, puis --apply (calcul par l'agent, puis application)
+    Recommend {
+        /// Identifiant du site
+        id: String,
+        /// Met en file htaccess-apply : d'abord le calcul de l'empreinte par
+        /// l'agent, puis, relancé après son résultat, l'application
+        #[arg(long)]
+        apply: bool,
+        /// Remplace un bloc dont les règles en place sont inconnues
+        #[arg(long)]
+        replace: bool,
+        /// Ignore un calcul déjà préparé et en demande un nouveau
+        #[arg(long)]
+        recompute: bool,
+        /// Rejoue une commande dont la précédente a une issue inconnue
         #[arg(long)]
         force: bool,
     },
@@ -397,6 +419,23 @@ fn site(config: &config::Config, action: SiteAction, now: i64) -> anyhow::Result
             apply,
             force,
         } => command(config, &id, &name, apply, force, now)?,
+        SiteAction::Recommend {
+            id,
+            apply,
+            replace,
+            recompute,
+            force,
+        } => recommend(
+            config,
+            &id,
+            RecommendFlags {
+                apply,
+                replace,
+                recompute,
+                force,
+            },
+            now,
+        )?,
         SiteAction::CommandCancel { id } => {
             require_site(config, &id)?;
             let key = audit_key(config)?.context("[commands] absent de la configuration")?;
@@ -730,22 +769,47 @@ fn command(
     if let Err(refusal) = capability::permit(kind, site) {
         bail!("{id} : {kind} refusée : {refusal}");
     }
+    let params = match kind {
+        capability::CommandKind::HtaccessApply => bail!(
+            "{id} : htaccess-apply se prépare par `vigie site recommend {id}`, qui construit et valide le bloc"
+        ),
+        capability::CommandKind::HtaccessRollback => rollback_params(config, id)?,
+        _ => command::params_json(kind).context("paramètres indisponibles")?,
+    };
+    let effect = match kind {
+        capability::CommandKind::Ping => "aucun ; prouve que le canal fonctionne",
+        capability::CommandKind::RotateKey => {
+            "l'agent crée une nouvelle paire de clés de rapport et la prouve ; ce n'est pas un remède à une compromission"
+        }
+        capability::CommandKind::HtaccessRollback => {
+            "l'agent remet sa copie privée du .htaccess d'avant la dernière application, si le fichier n'a pas changé depuis, puis contrôle l'accueil"
+        }
+        capability::CommandKind::HtaccessApply => "remplace le bloc # BEGIN vigie",
+    };
+    enqueue(config, site, kind, &params, effect, apply, force, now)
+}
+
+/// Aperçu d'une commande aux paramètres validés, puis mise en file avec
+/// --apply.
+#[allow(clippy::too_many_arguments)]
+fn enqueue(
+    config: &config::Config,
+    site: &config::Site,
+    kind: capability::CommandKind,
+    params: &str,
+    effect: &str,
+    apply: bool,
+    force: bool,
+    now: i64,
+) -> anyhow::Result<()> {
+    let id = site.id.as_str();
     let runtime = site.effective_runtime().context("runtime absent")?;
-    let params = command::params_json(kind).context("paramètres indisponibles")?;
     let typology = config::typology_fingerprint(config);
     println!("site : {id} ({})", site.url);
     println!("runtime : {}", runtime.as_str());
     println!("commande : {kind}");
     println!("paramètres : {params}");
-    println!(
-        "effet : {}",
-        match kind {
-            capability::CommandKind::Ping => "aucun ; prouve que le canal fonctionne",
-            capability::CommandKind::RotateKey =>
-                "l'agent crée une nouvelle paire de clés de rapport et la prouve ; ce n'est pas un remède à une compromission",
-            _ => "indisponible",
-        }
-    );
+    println!("effet : {effect}");
     println!("typologie : {}", &typology[..12]);
     if !apply {
         println!("aperçu seulement : rien n'est écrit ; relancer avec --apply");
@@ -758,7 +822,7 @@ fn command(
         id,
         kind,
         runtime,
-        &params,
+        params,
         &typology,
         &command_id,
         now,
@@ -774,6 +838,204 @@ fn command(
         Err(refusal) => bail!("{id} : {refusal}"),
     }
     Ok(())
+}
+
+/// Paramètres de `htaccess-rollback` : empreinte du dernier rapport et
+/// empreinte d'avant le dernier `htaccess-apply` en place.
+fn rollback_params(config: &config::Config, id: &str) -> anyhow::Result<String> {
+    let store = Store::open_read(&config.database)?
+        .filter(|s| s.schema_version().is_ok_and(|v| v >= SCHEMA_COMMANDS))
+        .context("aucune commande (base absente ou trop ancienne)")?;
+    let reported = recommend::history::reported_htaccess(&store, id)?
+        .context("aucune empreinte de .htaccess dans le dernier rapport (agent sans rapport, ou .htaccess hors de critical)")?
+        .context("le .htaccess est absent du dernier rapport : rien à défaire")?;
+    let params = recommend::history::rollback_params(&store, id, &reported)?.context(
+        "aucune application de Vigie en place (le .htaccess n'a l'empreinte d'aucun htaccess-apply réussi) : rien à défaire",
+    )?;
+    Ok(serde_json::to_string(&params)?)
+}
+
+#[derive(Debug, Clone, Copy)]
+struct RecommendFlags {
+    apply: bool,
+    replace: bool,
+    recompute: bool,
+    force: bool,
+}
+
+/// `site recommend` : propositions, bloc cumulatif et diff, puis --apply.
+fn recommend(
+    config: &config::Config,
+    id: &str,
+    flags: RecommendFlags,
+    now: i64,
+) -> anyhow::Result<()> {
+    use recommend::htaccess;
+    let site = config
+        .sites
+        .iter()
+        .find(|s| s.id == id)
+        .with_context(|| format!("aucun site « {id} » dans la configuration"))?;
+    let store = Store::open_read(&config.database)?
+        .filter(|s| s.schema_version().is_ok_and(|v| v >= SCHEMA_FINDINGS))
+        .context("aucune analyse de logs (base absente ou antérieure à l'analyse)")?;
+    let analysis = vigie::analysis::findings::latest(&store, id)?.with_context(|| {
+        format!("aucune analyse de logs pour {id} : [sites.logs] et un passage de tick")
+    })?;
+    let logs = site.logs.clone().unwrap_or_default();
+    let tz = logs.time_zone();
+    let mut protected: std::collections::BTreeSet<IpAddr> = config
+        .logs
+        .protect_ips
+        .iter()
+        .chain(&logs.protect_ips)
+        .copied()
+        .collect();
+    if store.schema_version()? >= SCHEMA_AGENT_SOURCES {
+        protected.extend(store.agent_sources(id, now)?);
+    }
+    let inputs = recommend::Inputs {
+        analysis: &analysis,
+        tz: tz.as_ref(),
+        behind_proxy: logs.behind_proxy,
+        protected_ips: &protected,
+    };
+    let proposals = recommend::recommend(&inputs, &mut |ips| recommend::rdns::reverse(ips));
+    println!(
+        "site : {id} ({}), analyse du {}",
+        site.url,
+        iso_utc(analysis.generated_at)
+    );
+    let robots = recommend::robots_txt(&proposals);
+    if robots.is_empty() {
+        println!("robots.txt : rien à proposer");
+    } else {
+        println!("robots.txt, à poser à la main :\n\n{robots}");
+    }
+    for p in &proposals {
+        match p {
+            recommend::Proposal::UserAgent { bot, .. } => {
+                println!("règle d'UA : {bot} (ne respecte pas robots.txt), 30 jours")
+            }
+            recommend::Proposal::Ip {
+                ip,
+                rdns,
+                own_score,
+            } => println!("règle d'IP : {ip} ({rdns}, hébergeur, score propre {own_score}), 24 h"),
+            recommend::Proposal::Robots { .. } => {}
+        }
+    }
+    let Some(tz) = tz else {
+        println!(
+            "[sites.logs] tz absent : aucune règle d'UA ni d'IP (%{{TIME}} s'écrit dans le fuseau du site)"
+        );
+        return Ok(());
+    };
+    let reported = recommend::history::reported_htaccess(&store, id)?.context(
+        "aucune empreinte de .htaccess dans le dernier rapport : agent sans rapport, ou .htaccess hors de critical",
+    )?;
+    let in_place = match &reported {
+        Some(hash) => recommend::history::block_in_place(&store, id, hash)?,
+        None => None,
+    };
+    let current = match &in_place {
+        Some(applied) => htaccess::parse(applied.params.block.as_bytes(), &tz)
+            .map_err(|r| anyhow::anyhow!("bloc en place illisible : {r}"))?,
+        None => Vec::new(),
+    };
+    let plan =
+        recommend::plan(&current, &proposals, now, &tz).context("heure hors du fuseau du site")?;
+    let block = plan.block();
+    if let Err(refusal) = htaccess::validate(block.as_bytes(), now, &tz) {
+        bail!("bloc généré refusé par la validation : {refusal}");
+    }
+    println!();
+    match &in_place {
+        Some(applied) => println!(
+            "bloc en place : celui de la commande {} (empreinte du dernier rapport)",
+            applied.command_id
+        ),
+        None => println!(
+            "règles en place inconnues : fichier modifié hors de Vigie, retour arrière ou première application"
+        ),
+    }
+    for g in &plan.kept {
+        println!("  = reprise   {}", recommend::describe(g));
+    }
+    for g in &plan.expired {
+        println!("  - retirée   {} (expirée)", recommend::describe(g));
+    }
+    for g in &plan.added {
+        println!("  + nouvelle  {}", recommend::describe(g));
+    }
+    println!("\nbloc :\n{block}");
+    println!(
+        "previous_sha256 : {} (dernier rapport)",
+        reported.as_deref().unwrap_or("null, .htaccess absent")
+    );
+    if in_place.is_some() && !plan.changes() {
+        println!("rien à appliquer : le bloc en place est à jour");
+        return Ok(());
+    }
+    let prepared = if flags.recompute {
+        None
+    } else {
+        recommend::history::prepared(&store, id, reported.as_deref())?
+            .filter(|p| htaccess::validate(p.params.block.as_bytes(), now, &tz).is_ok())
+    };
+    drop(store);
+    let params = match &prepared {
+        Some(p) => {
+            println!(
+                "new_sha256 : {} (calculé par l'agent, commande {} du {})",
+                p.params.new_sha256.as_deref().unwrap_or("?"),
+                p.command_id,
+                iso_utc(p.created_at)
+            );
+            if p.params.block != block {
+                println!(
+                    "attention : le bloc préparé diffère du bloc ci-dessus ; c'est lui qui sera appliqué (--recompute pour en préparer un nouveau) :\n{}",
+                    p.params.block
+                );
+            }
+            p.params.clone()
+        }
+        None => {
+            println!(
+                "new_sha256 : à calculer par l'agent (premier --apply), puis appliquer (second --apply)"
+            );
+            command::HtaccessApply {
+                block,
+                previous_sha256: reported.clone(),
+                new_sha256: None,
+            }
+        }
+    };
+    if flags.apply && in_place.is_none() && !flags.replace {
+        bail!(
+            "{id} : règles en place inconnues : --replace pour remplacer le bloc vigie du .htaccess"
+        );
+    }
+    let effect = if params.new_sha256.is_some() {
+        "l'agent revalide le bloc, l'essaie en bac à sable, bascule le .htaccess avec copie privée et contrôle l'accueil ; retour automatique en cas d'échec"
+    } else {
+        "calcul seul : l'agent revalide le bloc et rend l'empreinte du nouveau .htaccess, sans rien écrire ; relancer --apply après son résultat"
+    };
+    let kind = capability::CommandKind::HtaccessApply;
+    if let Err(refusal) = capability::permit(kind, site) {
+        bail!("{id} : {kind} refusée : {refusal}");
+    }
+    println!();
+    enqueue(
+        config,
+        site,
+        kind,
+        &serde_json::to_string(&params)?,
+        effect,
+        flags.apply,
+        flags.force,
+        now,
+    )
 }
 
 fn audit(
