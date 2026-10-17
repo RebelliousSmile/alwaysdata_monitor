@@ -171,7 +171,7 @@ fn report(seq: u64, sent_at: i64, findings: Value) -> Value {
 
 fn display_errors() -> Value {
     json!([{
-        "check": "php",
+        "check": "critical-file",
         "severity": "critical",
         "key": "display_errors",
         "detail": "display_errors activé en production"
@@ -192,7 +192,7 @@ async fn an_accepted_report_opens_incidents_that_only_tick_announces() {
     let (status, body) = h.send(&key, &report(1, T0 + 60, display_errors())).await;
     assert_eq!(status, StatusCode::NO_CONTENT);
     assert!(body.is_empty());
-    assert_eq!(h.open_keys(), ["site-a/agent:php/display_errors"]);
+    assert_eq!(h.open_keys(), ["site-a/agent:critical-file/display_errors"]);
     // `serve` n'envoie rien : l'ouverture attend `tick`.
     let store = h.store();
     assert_eq!(store.pending_notifications(h.now()).expect("attente"), 1);
@@ -311,7 +311,7 @@ async fn every_refusal_is_the_same_silent_404_and_stores_nothing() {
     big["findings"] = (0..report::MAX_FINDINGS)
         .map(|i| {
             json!({
-                "check": "php",
+                "check": "critical-file",
                 "severity": "info",
                 "key": format!("{i:0>200}"),
                 "detail": "d".repeat(300)
@@ -361,7 +361,7 @@ async fn every_refusal_is_the_same_silent_404_and_stores_nothing() {
 
     assert_eq!(h.agent(), before);
     assert_eq!(h.store().last_facts("site-a").expect("facts"), facts_before);
-    assert_eq!(h.open_keys(), ["site-a/agent:php/display_errors"]);
+    assert_eq!(h.open_keys(), ["site-a/agent:critical-file/display_errors"]);
 }
 
 #[tokio::test]
@@ -448,13 +448,13 @@ fn a_refusal_never_quotes_the_body() {
     let mut value = report(1, T0, json!([]));
     value[secret] = json!(secret);
     value["findings"] = json!([{
-        "check": "php", "severity": secret, "key": secret, "detail": secret
+        "check": "critical-file", "severity": secret, "key": secret, "detail": secret
     }]);
     let body = serde_json::to_vec(&value).expect("json");
     let signature = STANDARD.encode(key.sign(&body).to_bytes());
     let refusal = ingest::ingest(
         &mut h.store(),
-        &["site-a".into()],
+        &h.config.sites,
         Some("site-a"),
         Some(&signature),
         &body,
@@ -471,15 +471,8 @@ fn a_refusal_never_quotes_the_body() {
 fn a_site_without_a_key_is_unknown() {
     let dir = tempfile::tempdir().expect("tempdir");
     let mut store = Store::open(&dir.path().join("vigie.db")).expect("base");
-    let refusal = ingest::ingest(
-        &mut store,
-        &["site-a".into()],
-        Some("site-a"),
-        None,
-        b"{}",
-        T0,
-    )
-    .expect_err("refusé");
+    let refusal =
+        ingest::ingest(&mut store, &[site()], Some("site-a"), None, b"{}", T0).expect_err("refusé");
     assert_eq!(refusal.reason, Reason::UnknownSite);
 }
 

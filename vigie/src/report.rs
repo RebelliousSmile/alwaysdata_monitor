@@ -50,7 +50,9 @@ pub struct Valid {
     pub seq: i64,
     pub sent_at: i64,
     pub agent: String,
-    /// Contrôles préfixés par `agent:`.
+    /// Contrôles préfixés par `agent:`, de toute famille bien formée :
+    /// l'ingestion écarte et compte ensuite celles que le registre des
+    /// capacités n'admet pas pour le site (`ingest::screen`).
     pub findings: Vec<Finding>,
     /// Relevé, réencodé en JSON compact.
     pub facts: String,
@@ -162,6 +164,9 @@ impl Report {
             if !is_check_name(&f.check) {
                 return Err(err(format!("constat n° {n} : check invalide")));
             }
+            // Nom réservé au veilleur (`capability::Control::Integrity`) : tout
+            // le rapport est refusé. Une famille inconnue, elle, n'est
+            // qu'écartée à l'ingestion (`docs/decisions.md`, issue #4).
             if f.check == crate::facts::INTEGRITY {
                 return Err(err(format!("constat n° {n} : check réservé au veilleur")));
             }

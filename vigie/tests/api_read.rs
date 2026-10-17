@@ -22,7 +22,7 @@ mod veilleur;
 use vigie::alert::MemoryNotifier;
 use vigie::checks::CheckKind;
 use vigie::clock::{Clock, FakeClock};
-use vigie::config::{Api, Config, LogSourceKind, Site, SiteKind, SiteLogs};
+use vigie::config::{Api, Config, LogSourceKind, Runtime, Site, SiteKind, SiteLogs};
 use vigie::device::{self, PAIRING_TTL};
 use vigie::finding::{Finding, Severity};
 use vigie::logs::Entry;
@@ -387,14 +387,16 @@ async fn a_site_on_first_read_shows_its_checks_without_any_value() {
 
 #[tokio::test]
 async fn a_site_with_an_agent_shows_its_report_and_agent_checks() {
-    let v = Veilleur::new();
+    // Site A en PHP : sans runtime php, l'agent n'ouvre aucun contrôle
+    // (registre des capacités, #4).
+    let v = Veilleur::with(|config| config.sites[0].runtime = Some(Runtime::Php));
     let pubkey = [7u8; 32];
     v.store()
         .add_key("site-a", &pubkey, T0 - DAY)
         .expect("add_key");
     let findings = [Finding::new(
         "site-a",
-        "agent:core",
+        "agent:must-contain",
         Severity::Warning,
         "maj",
         "mise à jour disponible",
@@ -410,8 +412,10 @@ async fn a_site_with_an_agent_shows_its_report_and_agent_checks() {
                 facts: "{\"php\":\"8.3\"}",
                 files: "{}",
                 findings: &findings,
+                dropped: 0,
             },
             T0 - 120,
+            &|_, _| true,
         )
         .expect("accept_report");
     assert_eq!(outcome, ReportOutcome::Accepted);
@@ -424,7 +428,7 @@ async fn a_site_with_an_agent_shows_its_report_and_agent_checks() {
     assert_eq!(json["agent"]["last_report_at"], T0 - 120);
     assert_eq!(json["agent"]["agent"], "vigie-agent 1.0.0");
     assert_eq!(json["agent"]["facts"]["php"], "8.3");
-    assert_eq!(json["open_incidents"][0]["check"], "agent:core");
+    assert_eq!(json["open_incidents"][0]["check"], "agent:must-contain");
 
     let checks = json["checks"].as_array().expect("checks");
     let heartbeat = checks
@@ -432,15 +436,15 @@ async fn a_site_with_an_agent_shows_its_report_and_agent_checks() {
         .find(|c| c["name"] == "heartbeat")
         .expect("heartbeat");
     assert_eq!(heartbeat["interval"], 900);
-    let core = checks
+    let family = checks
         .iter()
-        .find(|c| c["name"] == "agent:core")
-        .expect("agent:core");
-    assert_eq!(core["interval"], Value::Null);
-    assert_eq!(core["last_run"], T0 - 120);
-    assert_eq!(core["result"], "finding");
-    assert_eq!(core["severity"], "warning");
-    assert_eq!(core["detail"], "mise à jour disponible");
+        .find(|c| c["name"] == "agent:must-contain")
+        .expect("agent:must-contain");
+    assert_eq!(family["interval"], Value::Null);
+    assert_eq!(family["last_run"], T0 - 120);
+    assert_eq!(family["result"], "finding");
+    assert_eq!(family["severity"], "warning");
+    assert_eq!(family["detail"], "mise à jour disponible");
 }
 
 #[tokio::test]

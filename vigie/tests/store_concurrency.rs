@@ -123,8 +123,10 @@ fn four_connections_write_in_parallel_without_sqlite_busy() {
                         facts: "{}",
                         files: "{}",
                         findings: if round % 2 == 0 { &findings } else { &[] },
+                        dropped: 0,
                     },
                     round * (REPORT_MIN_GAP + 1),
+                    &|_, _| true,
                 )?;
                 ensure!(outcome == ReportOutcome::Accepted, "rapport {outcome:?}");
                 Ok(())

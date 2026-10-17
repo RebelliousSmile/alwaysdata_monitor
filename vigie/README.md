@@ -26,7 +26,7 @@ Sur le veilleur, toujours appeler le binaire par son chemin complet.
 | `~/vigie/bin/vigie site commands <site> enable\|disable` | Kill-switch du canal de commandes d'un site, coupé par défaut |
 | `~/vigie/bin/vigie site command <site> <commande> [--apply] [--force]` | Aperçu d'une commande, puis mise en file avec `--apply` |
 | `~/vigie/bin/vigie site audit <site> [--verify --head <hash>]` | Journal d'audit des commandes, en JSONL, ou vérification de sa chaîne contre la tête reçue par e-mail |
-| `~/vigie/bin/vigie site add <site> --pubkey <base64>` | Enregistre la clé publique Ed25519 (32 octets) de l'agent d'un site de la configuration ; refusé si le site a déjà une clé |
+| `~/vigie/bin/vigie site add <site> --pubkey <base64>` | Enregistre la clé publique Ed25519 (32 octets) de l'agent d'un site de la configuration ; refusé si le site a déjà une clé ou n'a pas le runtime effectif `php` |
 | `~/vigie/bin/vigie site rotate-key <site> --pubkey <base64>` | Remplace la clé : un rapport signé par l'ancienne est refusé dès maintenant |
 | `~/vigie/bin/vigie site accept <site>` | Prend les empreintes du dernier rapport comme référence et clôt les incidents d'intégrité : à lancer après une modification voulue d'un fichier critique |
 | `~/vigie/bin/vigie site remove <site> [--yes]` | Retire la clé, l'état des rapports et la référence des empreintes ; sans `--yes`, demande de retaper l'identifiant |

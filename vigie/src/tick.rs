@@ -4,15 +4,17 @@
 //!    reçus de plus de 30 jours (`docs/logs.md`) ;
 //! 2. lance les contrôles dus, les sites les plus en retard d'abord, sans
 //!    commencer de requête après 40 s ;
-//! 3. ouvre ou clôt le silence de chaque agent déclaré ;
+//! 3. ouvre ou clôt le silence de chaque agent déclaré, et l'avertissement
+//!    `typology` d'une clé d'agent sur un site sans runtime `php` ;
 //! 4. replie les logs nouveaux des sites qui ont une source, à tour de rôle,
 //!    par lots de 500, sous un budget global de 10 s vérifié entre deux lots
 //!    (`analysis/`, issue #8), puis réconcilie les constats `logs` de chacun
 //!    sur ses agrégats ;
-//! 5. réconcilie les incidents, puis envoie les e-mails en attente (ouvertures,
-//!    clôtures, rappels) jusqu'à 50 s, y compris ceux des rapports d'agent
-//!    acceptés par `serve`. Ce qui n'a pas pu partir reste en attente pour le
-//!    passage suivant.
+//! 5. clôt « plus surveillé » les incidents des contrôles que le registre des
+//!    capacités ne surveille plus pour leur site (`capability::watched`), puis
+//!    envoie les e-mails en attente (ouvertures, clôtures, rappels) jusqu'à
+//!    50 s, y compris ceux des rapports d'agent acceptés par `serve`. Ce qui
+//!    n'a pas pu partir reste en attente pour le passage suivant.
 
 use std::time::{Duration, Instant};
 
@@ -23,13 +25,14 @@ use crate::analysis::findings::{self as log_findings, CHECK as LOGS_CHECK};
 use crate::analysis::fold::{BATCH_SIZE, SiteState, secs_to_ms};
 use crate::analysis::rules::{self as log_rules, RuleSet};
 use crate::analysis::{shared, store as agg};
+use crate::capability::{self, Control, TYPOLOGY};
 use crate::checks::{self, CheckError, CheckKind, Ctx, heartbeat};
 use crate::config::{Config, LogSourceKind, Site, TypologyRecord};
 use crate::finding::Finding;
 use crate::http::{Http, REQUEST_TIMEOUT, Trust};
 use crate::logs::alwaysdata::AlwaysdataSource;
 use crate::logs::source::{Cursor, LogSource, SourceError};
-use crate::store::{AGENT_PREFIX, META_TYPOLOGY_TICK, RunRecord, Store};
+use crate::store::{Agent, META_TYPOLOGY_TICK, RunRecord, Store};
 
 #[derive(Debug, Clone)]
 pub struct Options {
@@ -86,10 +89,30 @@ pub fn default_source(config: &Config, site: &Site) -> Option<Box<dyn LogSource>
     }
 }
 
-/// Le site a une source de logs : son contrôle `logs` est surveillé.
-/// Provisoire : #4 reprendra ce prédicat dans le registre des contrôles.
-fn has_log_source(site: &Site) -> bool {
-    site.logs.as_ref().is_some_and(|l| l.source.is_some())
+/// Verdict « surveillé » de `close_unwatched` : celui du registre
+/// (`capability::watched`) pour le site de la configuration, avec ses clé
+/// d'agent et référence d'empreintes en base. Un site absent de la
+/// configuration n'a plus rien de surveillé.
+pub fn watched_by_tick<'a>(
+    config: &'a Config,
+    agents: &'a [Agent],
+    baselines: &'a [String],
+) -> impl Fn(&str, &str) -> bool + 'a {
+    move |site_id, check| {
+        config
+            .sites
+            .iter()
+            .find(|s| s.id == site_id)
+            .is_some_and(|site| capability::watched(site, check, &context(site, agents, baselines)))
+    }
+}
+
+/// Contexte du registre d'un site : clé d'agent et référence en base.
+fn context(site: &Site, agents: &[Agent], baselines: &[String]) -> capability::Ctx {
+    capability::Ctx {
+        agent: agents.iter().any(|a| a.site == site.id),
+        baseline: baselines.contains(&site.id),
+    }
 }
 
 pub fn run(config: &Config, now: i64) -> Result<()> {
@@ -266,10 +289,19 @@ pub fn run_with_sources(
         }
     }
 
-    // Silence des agents : seuls les sites de la configuration qui ont une clé.
+    // Silence des agents et typologie : seuls les sites de la configuration
+    // qui ont une clé. Sans runtime `php`, l'agent n'est pas surveillé :
+    // l'avertissement `typology` le dit, au lieu de clore en silence. Avec
+    // `php`, `typology` est réconcilié vide (clos « rétabli ») ; sans clé, il
+    // est laissé à `close_unwatched` (clos « plus surveillé »).
     let agents = store.agents()?;
+    let baselines = store.baseline_sites()?;
     for site in &config.sites {
-        if let Some(agent) = agents.iter().find(|a| a.site == site.id) {
+        let Some(agent) = agents.iter().find(|a| a.site == site.id) else {
+            continue;
+        };
+        let ctx = context(site, &agents, &baselines);
+        if Control::Heartbeat.watched(site, &ctx) {
             let findings = heartbeat::evaluate(site, agent, now);
             store.record_result(
                 &site.id,
@@ -279,6 +311,11 @@ pub fn run_with_sources(
             )?;
             store.reconcile(&site.id, heartbeat::NAME, &findings, now)?;
         }
+        let findings = capability::typology_findings(site, &ctx);
+        if Control::Typology.watched(site, &ctx) {
+            store.record_result(&site.id, TYPOLOGY, now, &RunRecord::concluded(&findings))?;
+        }
+        store.reconcile(&site.id, TYPOLOGY, &findings, now)?;
     }
 
     let analysis_deadline =
@@ -292,25 +329,13 @@ pub fn run_with_sources(
         options.analysis_max_batches,
     );
 
-    let closed = store.close_unwatched(
-        |site_id, check| {
-            let Some(site) = config.sites.iter().find(|s| s.id == site_id) else {
-                return false;
-            };
-            if check == heartbeat::NAME || check.starts_with(AGENT_PREFIX) {
-                return agents.iter().any(|a| a.site == site_id);
-            }
-            if check == LOGS_CHECK {
-                return has_log_source(site);
-            }
-            CheckKind::ALL
-                .into_iter()
-                .any(|kind| kind.applies(site) && kind.name() == check)
-        },
-        now,
-    )?;
+    // La référence a pu naître d'un rapport pendant le passage : relue.
+    let baselines = store.baseline_sites()?;
+    let closed = store.close_unwatched(watched_by_tick(config, &agents, &baselines), now)?;
     if closed > 0 {
-        log::info!("{closed} incident(s) clos : contrôle ou agent retiré de la configuration");
+        log::info!(
+            "{closed} incident(s) clos « plus surveillé » : contrôle hors du registre des capacités pour son site"
+        );
     }
 
     summary.emails_sent = notify(

@@ -11,6 +11,7 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result};
 use rusqlite::{Connection, ErrorCode, OpenFlags, OptionalExtension, TransactionBehavior, params};
 
+use crate::capability;
 use crate::device::{self, Hash};
 use crate::facts;
 use crate::finding::{Finding, Severity};
@@ -66,6 +67,9 @@ const MIGRATIONS: &[&str] = &[
     // 13 : recommandations htaccess (#13) : adresses source des retraits
     // signés de l'agent, protégées des règles d'IP, 30 jours.
     include_str!("../migrations/0013.sql"),
+    // 14 : registre des capacités (#4) : constats écartés du dernier rapport
+    // d'agent, et raison de la clôture d'un incident (« plus surveillé »).
+    include_str!("../migrations/0014.sql"),
 ];
 
 /// Version de schéma à partir de laquelle les incidents existent.
@@ -96,6 +100,9 @@ pub const SCHEMA_CLOSED_INDEX: usize = 12;
 /// Version de schéma à partir de laquelle les adresses source des retraits
 /// existent.
 pub const SCHEMA_AGENT_SOURCES: usize = 13;
+/// Version de schéma à partir de laquelle les constats écartés d'un rapport
+/// et la raison de clôture d'un incident existent (registre, #4).
+pub const SCHEMA_REGISTRY: usize = 14;
 /// Une adresse source de retrait est oubliée 30 jours après le dernier.
 pub const AGENT_SOURCE_RETENTION: i64 = 30 * 86_400;
 
@@ -130,6 +137,33 @@ pub struct Incident {
     pub open_notified_at: Option<i64>,
     pub close_notified_at: Option<i64>,
     pub last_reminder_at: Option<i64>,
+    /// `None` tant que l'incident est ouvert.
+    pub close_reason: Option<CloseReason>,
+}
+
+/// Pourquoi un incident a été clos : l'e-mail de clôture part plus tard
+/// (`pending_closes`), la raison est donc en base.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CloseReason {
+    /// Le contrôle ne voit plus le constat.
+    Resolved,
+    /// Le contrôle n'est plus surveillé (`close_unwatched`) : site retiré,
+    /// typologie changée, clé d'agent retirée. Jamais « rétabli ».
+    Unwatched,
+}
+
+impl CloseReason {
+    const UNWATCHED: &'static str = "unwatched";
+
+    fn parse(closed_at: Option<i64>, raw: Option<&str>) -> Option<Self> {
+        closed_at?;
+        Some(match raw {
+            Some(Self::UNWATCHED) => Self::Unwatched,
+            // NULL, ou une valeur d'un binaire plus récent : la clôture
+            // ordinaire.
+            _ => Self::Resolved,
+        })
+    }
 }
 
 /// Issue du dernier passage d'un contrôle.
@@ -312,8 +346,11 @@ pub struct AcceptedReport<'a> {
     pub facts: &'a str,
     /// Empreintes des fichiers critiques, en JSON (`{}` si l'agent n'en envoie pas).
     pub files: &'a str,
-    /// Contrôles déjà préfixés par `agent:`.
+    /// Contrôles déjà préfixés par `agent:`, déjà filtrés par le registre.
     pub findings: &'a [Finding],
+    /// Constats écartés par l'appelant : famille inconnue ou non admise pour
+    /// le CMS du site (`capability::admits_agent_finding`).
+    pub dropped: usize,
 }
 
 /// Issue de l'enregistrement d'un rapport déjà authentifié.
@@ -403,7 +440,12 @@ fn agent_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Agent> {
 }
 
 const INCIDENT_COLUMNS: &str = "id, key, site, check_name, severity, detail, opened_at, closed_at,
-     acked_at, open_notified_at, close_notified_at, last_reminder_at";
+     acked_at, open_notified_at, close_notified_at, last_reminder_at, close_reason";
+/// Avant le schéma 14, la raison de clôture n'existe pas : un lecteur
+/// (`status` pendant un déploiement) la lit NULL.
+const INCIDENT_COLUMNS_V13: &str =
+    "id, key, site, check_name, severity, detail, opened_at, closed_at,
+     acked_at, open_notified_at, close_notified_at, last_reminder_at, NULL";
 
 fn incident_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Incident> {
     let severity: String = row.get(4)?;
@@ -422,6 +464,7 @@ fn incident_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Incident> {
         open_notified_at: row.get(9)?,
         close_notified_at: row.get(10)?,
         last_reminder_at: row.get(11)?,
+        close_reason: CloseReason::parse(row.get(7)?, row.get::<_, Option<String>>(12)?.as_deref()),
     })
 }
 
@@ -723,8 +766,9 @@ impl Store {
     }
 
     /// Clôt les incidents ouverts dont le couple (site, contrôle) n'est plus
-    /// surveillé : site retiré de la configuration, type de site changé, ou
-    /// clé d'agent retirée.
+    /// surveillé : site retiré de la configuration, typologie changée, ou
+    /// clé d'agent retirée. La raison `unwatched` choisit l'e-mail « plus
+    /// surveillé », jamais « rétabli ».
     pub fn close_unwatched(
         &mut self,
         is_watched: impl Fn(&str, &str) -> bool,
@@ -741,7 +785,7 @@ impl Store {
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
         for id in &stale {
             tx.execute(
-                "UPDATE incidents SET closed_at = ?2 WHERE id = ?1",
+                "UPDATE incidents SET closed_at = ?2, close_reason = 'unwatched' WHERE id = ?1",
                 params![id, now],
             )?;
         }
@@ -749,12 +793,22 @@ impl Store {
         Ok(stale.len())
     }
 
+    /// Colonnes d'un incident selon le schéma de la base.
+    fn incident_columns(&self) -> Result<&'static str> {
+        Ok(if self.schema_version()? >= SCHEMA_REGISTRY {
+            INCIDENT_COLUMNS
+        } else {
+            INCIDENT_COLUMNS_V13
+        })
+    }
+
     fn incidents_where(
         &self,
         clause: &str,
         args: &[&dyn rusqlite::ToSql],
     ) -> Result<Vec<Incident>> {
-        let sql = format!("SELECT {INCIDENT_COLUMNS} FROM incidents WHERE {clause} ORDER BY id");
+        let columns = self.incident_columns()?;
+        let sql = format!("SELECT {columns} FROM incidents WHERE {clause} ORDER BY id");
         let mut stmt = self.conn.prepare(&sql)?;
         let rows = stmt.query_map(args, incident_from_row)?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
@@ -797,8 +851,9 @@ impl Store {
             Some((closed_at, id)) => ("AND (closed_at, id) < (?3, ?4)", Some(closed_at), Some(id)),
             None => ("", None, None),
         };
+        let columns = self.incident_columns()?;
         let mut stmt = self.conn.prepare_cached(&format!(
-            "SELECT {INCIDENT_COLUMNS} FROM incidents
+            "SELECT {columns} FROM incidents
              WHERE site = ?1 AND closed_at >= ?2 {after_clause}
              ORDER BY closed_at DESC, id DESC
              LIMIT ?5"
@@ -1017,6 +1072,28 @@ impl Store {
             .optional()?)
     }
 
+    /// Sites qui ont une référence d'empreintes (contexte du registre).
+    pub fn baseline_sites(&self) -> Result<Vec<String>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT site FROM baselines ORDER BY site")?;
+        let rows = stmt.query_map([], |row| row.get(0))?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// Constats écartés du dernier rapport accepté de chaque site qui en a
+    /// écarté (registre, #4). Vide avant le schéma 14.
+    pub fn report_drops(&self) -> Result<Vec<(String, i64)>> {
+        if self.schema_version()? < SCHEMA_REGISTRY {
+            return Ok(Vec::new());
+        }
+        let mut stmt = self
+            .conn
+            .prepare("SELECT site, dropped FROM reports WHERE dropped > 0 ORDER BY site")?;
+        let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
     /// Enregistre un rapport authentifié et à l'heure : vérifie la séquence
     /// puis le débit, et, s'il est accepté, fait passer ses constats dans le
     /// cycle des incidents et clôt le silence de l'agent. Tout ou rien, sous
@@ -1027,10 +1104,19 @@ impl Store {
     ///
     /// `findings` décrit l'état complet vu par l'agent : un contrôle `agent:`
     /// ouvert et absent du rapport est clos.
+    ///
+    /// `watched` est le verdict du registre pour ce site
+    /// (`capability::watched`) : seuls les contrôles surveillés sont
+    /// réconciliés et reçoivent un passage. Un incident d'un contrôle qui ne
+    /// l'est plus n'est donc ni clos « rétabli » ni noté « ok » ici :
+    /// `close_unwatched` le clôt « plus surveillé ». Le contexte porte la
+    /// référence d'empreintes lue dans la transaction, où le premier rapport
+    /// la crée.
     pub fn accept_report(
         &mut self,
         report: &AcceptedReport<'_>,
         now: i64,
+        watched: &dyn Fn(&str, &capability::Ctx) -> bool,
     ) -> Result<ReportOutcome> {
         let AcceptedReport {
             site,
@@ -1040,6 +1126,7 @@ impl Store {
             facts,
             files,
             findings,
+            dropped,
         } = *report;
         let reported: facts::Files =
             serde_json::from_str(files).context("empreintes du rapport illisibles")?;
@@ -1072,12 +1159,20 @@ impl Store {
             }
         }
         tx.execute(
-            "INSERT INTO reports (site, last_seq, last_valid_at, agent, facts, files)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            "INSERT INTO reports (site, last_seq, last_valid_at, agent, facts, files, dropped)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
              ON CONFLICT (site) DO UPDATE SET last_seq = excluded.last_seq,
                last_valid_at = excluded.last_valid_at, agent = excluded.agent,
-               facts = excluded.facts, files = excluded.files",
-            params![site, seq, now, agent, facts, files],
+               facts = excluded.facts, files = excluded.files, dropped = excluded.dropped",
+            params![
+                site,
+                seq,
+                now,
+                agent,
+                facts,
+                files,
+                i64::try_from(dropped).unwrap_or(i64::MAX)
+            ],
         )?;
         let mut findings = findings.to_vec();
         let baseline: Option<String> = tx
@@ -1139,6 +1234,11 @@ impl Store {
         if has_baseline {
             checks.push(facts::check_name());
         }
+        let ctx = capability::Ctx {
+            agent: true,
+            baseline: has_baseline,
+        };
+        checks.retain(|check| watched(check, &ctx));
         checks.sort();
         checks.dedup();
         for check in &checks {
@@ -1150,7 +1250,9 @@ impl Store {
             reconcile_in(&tx, site, check, &of_check, now)?;
             record_result_in(&tx, site, check, now, &RunRecord::concluded(&of_check))?;
         }
-        reconcile_in(&tx, site, crate::checks::heartbeat::NAME, &[], now)?;
+        if watched(crate::checks::heartbeat::NAME, &ctx) {
+            reconcile_in(&tx, site, crate::checks::heartbeat::NAME, &[], now)?;
+        }
         tx.commit()?;
         Ok(ReportOutcome::Accepted)
     }
@@ -1678,6 +1780,84 @@ mod tests {
     }
 
     #[test]
+    fn upgrades_a_filled_v13_database_to_the_registry_without_loss() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("vigie.db");
+        {
+            let conn = Connection::open(&path).expect("raw");
+            for migration in &MIGRATIONS[..SCHEMA_AGENT_SOURCES] {
+                conn.execute_batch(migration).expect("migration");
+            }
+            conn.pragma_update(None, "user_version", SCHEMA_AGENT_SOURCES as i64)
+                .expect("v13");
+            conn.execute_batch(
+                "INSERT INTO incidents (key, site, check_name, severity, detail, opened_at)
+                   VALUES ('site-a/agent:php/x', 'site-a', 'agent:php', 'critical', 'ouvert', 900);
+                 INSERT INTO incidents (key, site, check_name, severity, detail, opened_at, closed_at)
+                   VALUES ('site-a/content/k', 'site-a', 'content', 'warning', 'clos', 800, 850);
+                 INSERT INTO site_keys (site, pubkey, added_at) VALUES ('site-a', zeroblob(32), 800);
+                 INSERT INTO reports (site, last_seq, last_valid_at, agent, facts, files)
+                   VALUES ('site-a', 7, 950, 'php/1', '{}', '{}');",
+            )
+            .expect("données v13");
+        }
+        // Lecteur d'une base encore en v13 (`status` pendant un déploiement).
+        let reader = Store::open_read(&path).expect("lecteur").expect("base");
+        let open = reader.open_incidents().expect("incidents v13");
+        assert_eq!(open.len(), 1);
+        assert_eq!(open[0].close_reason, None);
+        assert!(reader.report_drops().expect("drops v13").is_empty());
+        drop(reader);
+
+        let mut store = Store::open(&path).expect("open");
+        assert_eq!(store.schema_version().expect("version"), SCHEMA_REGISTRY);
+        let closed = store.closed_incidents("site-a", 0).expect("clos");
+        assert_eq!(closed.len(), 1);
+        assert_eq!(closed[0].close_reason, Some(CloseReason::Resolved));
+        let dropped: i64 = store
+            .conn
+            .query_row(
+                "SELECT dropped FROM reports WHERE site = 'site-a'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("dropped");
+        assert_eq!(dropped, 0);
+        assert_eq!(
+            store.agent("site-a").expect("agent").expect("clé").last_seq,
+            7
+        );
+
+        // L'incident d'une famille retirée est clos « plus surveillé ».
+        assert_eq!(
+            store.close_unwatched(|_, _| false, 1_000).expect("close"),
+            1
+        );
+        let closed = store.incident(open[0].id).expect("lu").expect("présent");
+        assert_eq!(closed.closed_at, Some(1_000));
+        assert_eq!(closed.close_reason, Some(CloseReason::Unwatched));
+        let raw: Option<String> = store
+            .conn
+            .query_row(
+                "SELECT close_reason FROM incidents WHERE id = ?1",
+                [closed.id],
+                |r| r.get(0),
+            )
+            .expect("raison");
+        assert_eq!(raw.as_deref(), Some("unwatched"));
+        assert!(
+            store
+                .conn
+                .execute(
+                    "UPDATE incidents SET close_reason = 'autre' WHERE id = ?1",
+                    [closed.id]
+                )
+                .is_err(),
+            "raison hors liste refusée par la base"
+        );
+    }
+
+    #[test]
     fn records_the_result_of_a_run() {
         let (_dir, mut store) = temp_store();
         let findings = [
@@ -2053,8 +2233,11 @@ mod tests {
             facts,
             files: "{}",
             findings,
+            dropped: 0,
         };
-        store.accept_report(&report, now).expect("accept_report")
+        store
+            .accept_report(&report, now, &|_, _| true)
+            .expect("accept_report")
     }
 
     /// Rapport sans constat de l'agent, avec ces empreintes.
@@ -2067,8 +2250,11 @@ mod tests {
             facts: "{}",
             files,
             findings: &[],
+            dropped: 0,
         };
-        store.accept_report(&report, now).expect("accept_report")
+        store
+            .accept_report(&report, now, &|_, _| true)
+            .expect("accept_report")
     }
 
     const H1: &str = "33bf0cf98fa40b5f4c44e053816b75487245c5fc01e66dd65470e2e70cbee0d8";
@@ -2362,10 +2548,7 @@ mod tests {
             assert!(!migration.contains('\r'), "migration {} en CRLF", i + 1);
         }
         let (_dir, store) = temp_store();
-        assert_eq!(
-            store.schema_version().expect("version"),
-            SCHEMA_AGENT_SOURCES
-        );
+        assert_eq!(store.schema_version().expect("version"), SCHEMA_REGISTRY);
         let mut stmt = store
             .conn
             .prepare("SELECT type, name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name")
@@ -2442,7 +2625,15 @@ mod tests {
             columns("check_runs")[3..],
             ["result", "severity", "detail", "duration_ms", "observed"]
         );
-        assert_eq!(columns("reports").last().map(String::as_str), Some("files"));
+        // Migration 14 : constats écartés, raison de clôture.
+        assert_eq!(
+            columns("reports").last().map(String::as_str),
+            Some("dropped")
+        );
+        assert_eq!(
+            columns("incidents").last().map(String::as_str),
+            Some("close_reason")
+        );
         // Migration 9 : `seq` des lots de logs, à côté de la clé.
         assert_eq!(
             columns("site_keys").last().map(String::as_str),
