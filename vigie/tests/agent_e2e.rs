@@ -654,3 +654,191 @@ fn htaccess_compute_apply_then_rollback_go_end_to_end() {
     vigie::command::audit::verify("site-a", &records, &audit_key.verifying_key(), None).unwrap();
     let _ = std::fs::remove_dir_all(&base);
 }
+
+/// `SEND_TIMEOUT` de `vigie-agent.php`, lu dans la source : le test suit la
+/// constante au lieu de la recopier.
+fn send_timeout() -> std::time::Duration {
+    let source = std::fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("agent/php/vigie-agent.php"),
+    )
+    .unwrap();
+    let seconds = source
+        .lines()
+        .find_map(|l| l.strip_prefix("const SEND_TIMEOUT = "))
+        .and_then(|rest| rest.trim_end_matches(';').parse().ok())
+        .expect("const SEND_TIMEOUT");
+    std::time::Duration::from_secs(seconds)
+}
+
+/// Agent initialisé dans `agent_dir`, configuré par `config` (complété de
+/// `site`, `root`, `kind` et `critical`) ; rend l'agent et sa clé publique.
+fn init_agent(
+    php: Vec<String>,
+    agent_dir: &Path,
+    mut config: serde_json::Value,
+) -> (Agent, [u8; 32]) {
+    let site_root =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("agent/php/tests/fixtures/wp-healthy");
+    config["site"] = "site-a".into();
+    config["root"] = serde_json::json!(site_root);
+    config["kind"] = "wordpress".into();
+    config["critical"] = serde_json::json!(["wp-config.php"]);
+    let agent_config = agent_dir.join("config.json");
+    private_file(&agent_config, &config.to_string());
+    let agent = Agent {
+        php,
+        script: Path::new(env!("CARGO_MANIFEST_DIR")).join("agent/php/vigie-agent.php"),
+        config: agent_config,
+    };
+    let init = agent.run(&["--init"]);
+    assert!(init.status.success(), "{init:?}");
+    let public = String::from_utf8_lossy(&init.stdout)
+        .lines()
+        .find(|l| l.len() == 44 && l.ends_with('='))
+        .expect("clé publique")
+        .to_owned();
+    let public: [u8; 32] = STANDARD.decode(&public).unwrap().try_into().unwrap();
+    (agent, public)
+}
+
+/// Délais de l'agent (audit du chemin critique, issue #4) : un veilleur qui
+/// accepte la connexion sans jamais répondre ne retient pas l'agent au-delà
+/// de `SEND_TIMEOUT` ; l'envoi échoue proprement, en code 1.
+#[test]
+#[ignore = "lancé avec VIGIE_E2E_PHP (voir l'en-tête)"]
+fn a_mute_veilleur_releases_the_agent_after_send_timeout() {
+    let php = php_command();
+    let base = std::env::temp_dir().join(format!("vigie-e2e-mute-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    let agent_dir = base.join("agent");
+    private_dir(&base);
+    private_dir(&agent_dir);
+    // Veilleur muet : la connexion est acceptée et gardée, rien n'est lu
+    // ni écrit.
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    std::thread::spawn(move || {
+        let mut held = Vec::new();
+        for stream in listener.incoming() {
+            held.push(stream);
+        }
+    });
+    let (agent, _) = init_agent(
+        php,
+        &agent_dir,
+        serde_json::json!({ "endpoint": format!("http://127.0.0.1:{port}/r/v1/report") }),
+    );
+
+    let timeout = send_timeout();
+    let started = std::time::Instant::now();
+    let out = agent.run(&[]);
+    let elapsed = started.elapsed();
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("Envoi échoué"),
+        "{out:?}"
+    );
+    // Au moins le délai (l'agent a bien attendu la réponse), au plus le délai
+    // et une marge pour le lancement de PHP (conteneur en CI).
+    assert!(
+        elapsed >= timeout - std::time::Duration::from_secs(1),
+        "rendu en {elapsed:?}, avant {timeout:?}"
+    );
+    assert!(
+        elapsed <= timeout + std::time::Duration::from_secs(15),
+        "rendu en {elapsed:?}, au-delà de {timeout:?}"
+    );
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+/// Verrous de l'agent déjà pris (un passage précédent encore en cours) :
+/// l'agent n'attend pas, envoie son rapport, saute commandes et logs en le
+/// disant, et sort en code 1 bien avant `SEND_TIMEOUT`.
+#[test]
+#[ignore = "lancé avec VIGIE_E2E_PHP (voir l'en-tête)"]
+fn a_held_lock_makes_the_agent_skip_without_waiting() {
+    let php = php_command();
+    let base = std::env::temp_dir().join(format!("vigie-e2e-lock-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    let veilleur = base.join("veilleur");
+    let agent_dir = base.join("agent");
+    let logs = base.join("logs");
+    for dir in [&base, &veilleur, &agent_dir, &logs] {
+        private_dir(dir);
+    }
+    let config_path = veilleur.join("config.toml");
+    std::fs::write(
+        &config_path,
+        format!(
+            "database = '{db}'\n[alerts]\nto = \"alertes@example.org\"\nfrom = \"vigie@example.org\"\nsmtp_host = \"smtp.example.org\"\npassword_file = '{p}'\n[[sites]]\nid = \"site-a\"\nurl = \"https://site-a.example.org/\"\nkind = \"wordpress\"\n",
+            db = veilleur.join("vigie.db").display(),
+            p = veilleur.join("smtp-password").display(),
+        ),
+    )
+    .unwrap();
+    let config = config::load(&config_path).unwrap();
+    let mut store = Store::open(&config.database).unwrap();
+    let clock = Arc::new(FakeClock::new(SystemClock.unix()));
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let router = serve::router_with(
+        config.clone(),
+        Arc::clone(&clock) as Arc<dyn Clock>,
+        Some(config_path.clone()),
+    );
+    std::thread::spawn(move || {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.block_on(async move {
+            let listener = tokio::net::TcpListener::from_std(listener).unwrap();
+            axum::serve(listener, router).await
+        })
+    });
+    let (agent, public) = init_agent(
+        php,
+        &agent_dir,
+        serde_json::json!({
+            "endpoint": format!("http://127.0.0.1:{port}/r/v1/report"),
+            "commands": {
+                "endpoint": format!("http://127.0.0.1:{port}/r/v1/commands"),
+                "pubkey": STANDARD.encode([3u8; 32]),
+            },
+            "logs": { "dir": logs, "hosts": ["site-a.example.org"] },
+        }),
+    );
+    store.add_key("site-a", &public, clock.unix()).unwrap();
+
+    // Un autre passage tient les deux verrous.
+    let mut held = Vec::new();
+    for name in ["state.lock", "logs.lock"] {
+        let path = agent_dir.join(name);
+        private_file(&path, "");
+        let file = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
+        file.lock().unwrap();
+        held.push(file);
+    }
+
+    let started = std::time::Instant::now();
+    let out = agent.run(&[]);
+    let elapsed = started.elapsed();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    assert!(
+        stderr.contains("un autre passage de l'agent tient le verrou"),
+        "{out:?}"
+    );
+    assert!(stderr.contains("un autre passage lit les logs"), "{out:?}");
+    assert!(
+        !stderr.contains("Envoi échoué"),
+        "le rapport part : {out:?}"
+    );
+    assert!(elapsed < send_timeout(), "rendu en {elapsed:?}");
+    let agent_state = store.agent("site-a").unwrap().unwrap();
+    assert!(agent_state.last_valid_at.is_some(), "rapport accepté");
+    assert!(!agent_dir.join("logs.json").exists(), "logs non lus");
+    drop(held);
+    let _ = std::fs::remove_dir_all(&base);
+}

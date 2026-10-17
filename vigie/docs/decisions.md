@@ -201,3 +201,18 @@ relu en quatre tours ; fonctionnement : [`htaccess.md`](./htaccess.md).
 | Un groupe d'UA repris du bloc en place n'est pas exigé « pas 403 » dans `-a` du bac à sable | Il y est déjà actif : le contrôle vise les groupes neufs |
 | Smoke-test d'après la bascule : au moins 10 s, même budget de 30 s épuisé | Ne jamais laisser une bascule sans contrôle faute de budget |
 | L'écriture passe par le canal de commandes, pas par FTP | Le canal de #10 ne stocke aucun accès (décision du 2026-10-16) |
+
+## Registre de capacités final (issue #4)
+
+Plan : `aidd_docs/tasks/2026_10/2026_10_16_registre-capacites/plan.md`,
+relu en quatre tours ; audit : [`audit-chemin-critique.md`](./audit-chemin-critique.md).
+
+| Décision du 2026-10-17 | Raison |
+| --- | --- |
+| `capability.rs` est la seule déclaration : `Control { Check, Heartbeat, Integrity, Agent(AgentFamily), Logs, Typology }` et `CommandKind`, CMS admis et condition d'existence par des `match` sans joker (agent enregistré et runtime effectif `php` pour `heartbeat`, `agent:integrity` et les familles, référence d'empreintes en plus pour l'intégrité, source de logs pour `logs`) ; `CheckKind::cms` y est déplacé, le prédicat provisoire de `tick` pour `logs` (#8) aussi | Une seule déclaration ; une variante nouvelle oblige à décider ; une clé d'agent sur un site `static` n'ouvre rien |
+| Familles fermées, celles qu'émet l'agent PHP : `root`, `critical-file`, `must-contain`, `uploads-php` (WordPress seul). **Nom réservé → refus du rapport, famille inconnue → écart** : `integrity` fait refuser tout le rapport (règle de `report.rs`, gardée) ; une famille bien formée mais inconnue ou non admise pour le site est écartée, comptée dans `reports.dropped` (dernier rapport), journalisée par `serve` et montrée par `status`, le rapport restant accepté | Fail-closed sans casser un agent plus récent ; un agent ne fabrique ni intégrité ni incident hors typologie |
+| Un seul verdict `capability::watched(site, contrôle, contexte)` pour `tick` (`close_unwatched`), l'ingestion (`ingest` reçoit la configuration typée de `serve`, `accept_report` ne réconcilie que les contrôles surveillés) et l'API ; un nom inconnu du registre n'est jamais surveillé | Le même verdict partout, vérifié sur toute la matrice par les trois chemins réels (`tests/capability.rs`) |
+| Un incident dont le contrôle n'est plus surveillé est clos par `tick` avec la raison `unwatched` (migration 14, `incidents.close_reason`), et son e-mail dit « plus surveillé », jamais « rétabli » ; son constat étant désormais écarté, il ne se rouvre pas | L'e-mail de clôture part plus tard : la raison est en base. Pas de faux « rétabli » ni de cycle clos/rouvert |
+| Clé d'agent sur un site sans runtime `php` : `site add` et `site rotate-key` la refusent ; déjà en base, elle ouvre l'avertissement `typology` (« agent enregistré sur un site sans runtime php : déclarer runtime = "php" »), clos « rétabli » quand `php` est déclaré, « plus surveillé » quand la clé est retirée | Pas de perte silencieuse de surveillance à la mise à jour : un `generic` sans runtime avec agent était surveillé avant #4 |
+| **Écart au plan** : l'appel d'`ingest` du rejeu du 2026-09-07 (`tests/replay_2026_09_07.rs`) passe la configuration typée (`&config.sites`) au lieu des identifiants ; ses assertions et sa promesse de 10 min ne changent pas | `ingest` reçoit `&Site` (décision du plan) : la liste d'identifiants ne dit pas le CMS, l'appel ne pouvait pas rester identique |
+| Le job `musl` affiche l'empreinte SHA-256 du binaire et le publie en artefact (`vigie-musl`, 14 jours) | Le relevé de la cible compare le binaire de la CI à ce qui tourne sur le VPS ; un binaire compilé n'est pas un binaire qui tourne sur la cible |
