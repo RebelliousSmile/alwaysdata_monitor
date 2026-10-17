@@ -254,3 +254,38 @@ fn vulns_sources_are_a_closed_list_without_duplicates() {
     );
     assert!(load("").expect("sans section").vulns.is_none());
 }
+
+#[test]
+fn the_wordfence_section_goes_with_the_source() {
+    // `wordfence` déclarée sans sa section, ou l'inverse : refusé.
+    refused("[vulns]\nsources = [\"wordfence\"]\n", "[vulns.wordfence]");
+    let section = "[vulns.wordfence]\ntoken_file = \"/home/vigie/vigie/keys/wordfence-token\"\nterms_reviewed = \"2099-01-01\"\n";
+    refused(&format!("[vulns]\nsources = []\n{section}"), "sans effet");
+    // Chemin relatif, date invalide, clé inconnue.
+    refused(
+        "[vulns]\nsources = [\"wordfence\"]\n[vulns.wordfence]\ntoken_file = \"keys/token\"\nterms_reviewed = \"2099-01-01\"\n",
+        "chemin absolu",
+    );
+    refused(
+        "[vulns]\nsources = [\"wordfence\"]\n[vulns.wordfence]\ntoken_file = \"/k/t\"\nterms_reviewed = \"2099-13-45\"\n",
+        "AAAA-MM-JJ",
+    );
+    refused(
+        "[vulns]\nsources = [\"wordfence\"]\n[vulns.wordfence]\ntoken_file = \"/k/t\"\nterms_reviewed = \"2099-01-01\"\nurl = \"x\"\n",
+        "url",
+    );
+    // Section admise même si le binaire n'a pas consigné la relecture : le
+    // refus vient de la source, la configuration reste valide.
+    let config = load(&format!(
+        "[vulns]\nsources = [\"wordfence\", \"friends-of-presta\"]\n{section}"
+    ))
+    .expect("admise");
+    assert_eq!(
+        vigie::vulns::sync::registry::declared(&config),
+        ["friends-of-presta", "wordfence"]
+    );
+    assert_eq!(
+        config.vulns.unwrap().wordfence.unwrap().terms_reviewed,
+        "2099-01-01"
+    );
+}

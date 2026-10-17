@@ -5,8 +5,8 @@
 //!
 //! Fichier : la graine de 32 octets en base64 standard, sur une ligne. Lu
 //! seulement s'il est en 0600 au propriétaire du processus, dans un dossier en
-//! 0700 au même propriétaire, sans suivre de lien symbolique. Créé en création
-//! exclusive : une clé n'est jamais écrasée.
+//! 0700 au même propriétaire, sans suivre de lien symbolique (règles de
+//! `secret.rs`). Créé en création exclusive : une clé n'est jamais écrasée.
 //!
 //! Chaque signature porte un préfixe de domaine : une signature faite pour un
 //! usage ne vaut jamais pour un autre.
@@ -17,6 +17,8 @@ use std::path::Path;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
+
+use crate::secret::{SecretError, check_parent, open_safely};
 
 /// Retrait de l'agent, signé par sa clé de rapport.
 pub const DOMAIN_PULL: &[u8] = b"vigie-pull-v1\n";
@@ -45,6 +47,17 @@ pub enum KeyError {
     Malformed { path: String },
     #[error("{path} existe déjà : une clé n'est jamais écrasée")]
     Exists { path: String },
+}
+
+/// Droits et lecture : règles communes de `secret.rs`.
+impl From<SecretError> for KeyError {
+    fn from(err: SecretError) -> Self {
+        match err {
+            SecretError::Unsafe { path, reason } => Self::Unsafe { path, reason },
+            SecretError::Io { path, source } => Self::Io { path, source },
+            SecretError::Malformed { path, .. } => Self::Malformed { path },
+        }
+    }
 }
 
 /// Message signé : préfixe de domaine puis les parties, sans séparateur
@@ -138,94 +151,6 @@ pub fn create(path: &Path) -> Result<VerifyingKey, KeyError> {
         });
     }
     Ok(key.verifying_key())
-}
-
-fn open_safely(path: &Path) -> Result<std::fs::File, KeyError> {
-    let shown = path.display().to_string();
-    check_parent(path)?;
-    let mut options = std::fs::OpenOptions::new();
-    options.read(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.custom_flags(libc::O_NOFOLLOW);
-    }
-    let file = options.open(path).map_err(|source| KeyError::Io {
-        path: shown.clone(),
-        source,
-    })?;
-    let meta = file.metadata().map_err(|source| KeyError::Io {
-        path: shown.clone(),
-        source,
-    })?;
-    if !meta.is_file() {
-        return Err(KeyError::Unsafe {
-            path: shown,
-            reason: "pas un fichier".into(),
-        });
-    }
-    check_mode(&shown, &meta, 0o077, "600")?;
-    Ok(file)
-}
-
-fn check_parent(path: &Path) -> Result<(), KeyError> {
-    let parent = path
-        .parent()
-        .filter(|p| !p.as_os_str().is_empty())
-        .unwrap_or(Path::new("."));
-    let shown = parent.display().to_string();
-    let meta = std::fs::symlink_metadata(parent).map_err(|source| KeyError::Io {
-        path: shown.clone(),
-        source,
-    })?;
-    if !meta.is_dir() {
-        return Err(KeyError::Unsafe {
-            path: shown,
-            reason: "le dossier de la clé n'est pas un dossier (lien symbolique ?)".into(),
-        });
-    }
-    check_mode(&shown, &meta, 0o077, "700")
-}
-
-#[cfg(unix)]
-fn check_mode(
-    shown: &str,
-    meta: &std::fs::Metadata,
-    forbidden: u32,
-    expected: &str,
-) -> Result<(), KeyError> {
-    use std::os::unix::fs::MetadataExt;
-    let mode = meta.mode() & 0o777;
-    if mode & forbidden != 0 {
-        return Err(KeyError::Unsafe {
-            path: shown.to_owned(),
-            reason: format!("mode {mode:o} : {expected} attendu (chmod {expected})"),
-        });
-    }
-    // SAFETY: geteuid n'a ni argument ni effet de bord, et ne peut échouer.
-    let euid = unsafe { libc::geteuid() };
-    if meta.uid() != euid {
-        return Err(KeyError::Unsafe {
-            path: shown.to_owned(),
-            reason: format!(
-                "appartient à l'uid {}, pas à l'uid {euid} du veilleur",
-                meta.uid()
-            ),
-        });
-    }
-    Ok(())
-}
-
-/// Hors Unix (tests et reprise locale sous Windows), les droits ne se lisent
-/// pas : rien n'est vérifié.
-#[cfg(not(unix))]
-fn check_mode(
-    _shown: &str,
-    _meta: &std::fs::Metadata,
-    _forbidden: u32,
-    _expected: &str,
-) -> Result<(), KeyError> {
-    Ok(())
 }
 
 #[cfg(test)]

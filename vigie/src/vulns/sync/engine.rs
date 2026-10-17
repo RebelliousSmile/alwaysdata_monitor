@@ -334,6 +334,7 @@ pub fn sync_source(
                 duration_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
                 loader_version: meta.loader_version,
                 accept_shrink,
+                revision: dump.revision.clone(),
             };
             match load.commit(&tally, &meta) {
                 Ok(done) => report(
