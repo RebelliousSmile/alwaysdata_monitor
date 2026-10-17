@@ -1,0 +1,53 @@
+# Synchronisation des bases de failles (issue #16), lancée chaque jour par
+# vigie-vulns-sync.timer, distincte de tick : le passage d'une minute ne
+# télécharge jamais de dump. Sans [vulns] sources, elle ne fait rien et sort
+# en code 0 ; une source en échec la fait sortir en code 1 (unité failed,
+# visible par journalctl -u vigie-vulns-sync). docs/failles.md.
+[Unit]
+Description=vigie vulns sync (bases de failles connues)
+After=network-online.target
+Wants=network-online.target
+# Avant le premier déploiement, la synchronisation est ignorée au lieu d'échouer.
+ConditionFileIsExecutable=/home/vigie/vigie/bin/vigie
+ConditionPathExists=/home/vigie/vigie/config.toml
+
+[Service]
+Type=oneshot
+User=vigie
+Group=vigie
+ExecStart=/home/vigie/vigie/bin/vigie vulns sync
+# Garde-fou ultime : chaque source a sa propre échéance (90 min pour npm).
+TimeoutStartSec=3h
+# Basse priorité : jamais au détriment de serve et tick. best-effort plutôt
+# qu'idle, qui pourrait affamer la synchronisation sur un disque occupé.
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+# En manque de mémoire, tuée avant serve et tick (-500).
+OOMScoreAdjust=500
+# Provisoire, confirmé par le relevé réel (docs/hebergement.md).
+MemoryMax=512M
+
+# Durcissement de tick : seule la base (et vulns-work/ à côté d'elle) est
+# accessible en écriture, pas le binaire.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/vigie/vigie/data
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+UMask=0077

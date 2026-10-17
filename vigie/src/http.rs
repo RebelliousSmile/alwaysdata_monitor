@@ -98,28 +98,35 @@ pub struct Http {
     max_body: u64,
 }
 
+/// Agent `ureq` commun aux contrôles et aux téléchargements de failles :
+/// https seulement, aucune redirection suivie par `ureq` (chaque appelant les
+/// suit à la main et les revérifie), statut HTTP jamais converti en erreur,
+/// User-Agent du veilleur. Le délai global se pose par appel.
+pub fn agent(trust: &Trust, connect_timeout: Duration) -> Agent {
+    let roots = match trust {
+        Trust::WebPki => RootCerts::WebPki,
+        Trust::Custom(certs) => RootCerts::Specific(Arc::new(
+            certs
+                .iter()
+                .map(|c| Certificate::from_der(c.as_ref()).to_owned())
+                .collect(),
+        )),
+    };
+    Agent::config_builder()
+        .https_only(true)
+        .max_redirects(0)
+        .http_status_as_error(false)
+        .user_agent(USER_AGENT)
+        .timeout_connect(Some(connect_timeout))
+        .tls_config(TlsConfig::builder().root_certs(roots).build())
+        .build()
+        .new_agent()
+}
+
 impl Http {
     pub fn new(trust: &Trust, request_timeout: Duration) -> Self {
-        let roots = match trust {
-            Trust::WebPki => RootCerts::WebPki,
-            Trust::Custom(certs) => RootCerts::Specific(Arc::new(
-                certs
-                    .iter()
-                    .map(|c| Certificate::from_der(c.as_ref()).to_owned())
-                    .collect(),
-            )),
-        };
-        let agent = Agent::config_builder()
-            .https_only(true)
-            .max_redirects(0)
-            .http_status_as_error(false)
-            .user_agent(USER_AGENT)
-            .timeout_connect(Some(request_timeout))
-            .tls_config(TlsConfig::builder().root_certs(roots).build())
-            .build()
-            .new_agent();
         Self {
-            agent,
+            agent: agent(trust, request_timeout),
             request_timeout,
             max_body: MAX_BODY,
         }
@@ -184,7 +191,8 @@ impl Http {
     }
 }
 
-fn describe(err: &ureq::Error) -> String {
+/// Cause d'une erreur `ureq`, en français.
+pub fn describe(err: &ureq::Error) -> String {
     match err {
         ureq::Error::Timeout(_) => "délai dépassé".into(),
         ureq::Error::HostNotFound => "nom d'hôte introuvable".into(),

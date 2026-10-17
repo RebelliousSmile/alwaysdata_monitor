@@ -760,6 +760,7 @@ mod tests {
             api: None,
             commands: None,
             logs: Default::default(),
+            vulns: None,
             sites: vec![Site {
                 id: "site-a".into(),
                 url: "https://site-a.example.org/".into(),
