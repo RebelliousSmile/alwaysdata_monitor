@@ -18,8 +18,12 @@ pub mod wordfence;
 
 /// Ce qu'une faille d'une source permet de transmettre à un tiers
 /// (`docs/failles.md`, « Redistribution, affichage et fixtures »). L'ordre
-/// des variantes va du plus restrictif au plus libre.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+/// des variantes va du plus restrictif au plus libre. Sérialisé en
+/// `internal`, `facts_only`, `free` (résultats de F7, API).
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
+#[serde(rename_all = "snake_case")]
 pub enum Redistribution {
     /// Usage interne à l'exploitant : rien ne sort du VPS ni de la console
     /// (Wordfence, tant que ses conditions n'ont pas tranché l'affichage aux
