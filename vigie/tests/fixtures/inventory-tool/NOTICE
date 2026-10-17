@@ -1,0 +1,85 @@
+Fixtures de vigie-inventory (issue #20) : lockfiles produits par les vrais
+outils sur de petits projets fictifs « exemple-app », avec des paquets publics.
+Fichiers suffixés .fixture : copiés sous leur vrai nom par les tests, pour que ni
+Dependabot ni le graphe de dépendances de GitHub ne les prennent pour des
+dépendances du dépôt. Aucun lockfile de client. Produits le 2026-10-17.
+
+Dépendances git et archives : servies pendant la production par un serveur
+local (dépôt git nu en HTTP « dumb », archive `npm pack`), puis l'adresse locale
+remplacée dans le texte, et seulement elle : `https://git.example.org/exemple/lib.git`
+(npm, pnpm 9, yarn 1, yarn berry), `https://git.example.org/exemple/lib-rs.git`
+(Cargo, dépôt git local), `https://files.example.org/lib-tarball-1.0.0.tgz`
+(npm, pnpm 8 ; clé pnpm `@files.example.org/lib-tarball-1.0.0.tgz`).
+
+composer/composer.lock.fixture
+  Composer 2.8.12, `composer update --no-install` ; paquets Packagist publics
+  (psr/log, psr/container en dev-master, psr/clock en dev, symfony/polyfill-ctype,
+  prestashop/blockreassurance de type prestashop-module) et un dépôt `path`
+  local (exemple/lib-locale, tel que Composer l'écrit).
+  Retirés des paquets Packagist : authors, support, funding, homepage,
+  description, source, dist, et extra.thanks (URL d'un dépôt de code) ;
+  notification-url gardé (il décide du registre).
+  Ajouté à la main : exemple/lib-git (dépôt vcs, git.example.org), au format de
+  Composer pour un dépôt git (source sans dist ni notification-url).
+  Paquets WPackagist (wpackagist-plugin/wp-native-php-sessions,
+  wpackagist-theme/twentynineteen) : WPackagist injoignable depuis
+  l'environnement de production des fixtures, entrées recopiées telles quelles
+  du composer.lock public de pantheon-systems/example-wordpress-composer
+  (branche master, GitHub), sans aucun champ ajouté ni retiré.
+  Autres dépôts Composer publics (asset-packagist, packages.drupal.org) :
+  injoignables, non vérifiés (decisions.md).
+
+npm-v3/package-lock.json.fixture, npm-v2/package-lock.json.fixture
+  npm 10.9.4 (Node 22), `npm install --package-lock-only --lockfile-version 3`
+  puis `2` ; paquets publics (@types/ms, JSONStream, alias
+  string-width-cjs → string-width, ansi-regex imbriqué, is-number devOptional,
+  ms et to-regex-range en dev), workspace packages/espace, dépendance git et
+  archive hors registre.
+  Retiré : funding (URL d'un dépôt de code).
+  Ajouté à la main : node_modules/left-pad marqué extraneous (npm ne l'écrit
+  pas avec --package-lock-only), métadonnées réelles du registre (version,
+  resolved, integrity, deprecated, license), dans `packages` et, pour la v2,
+  dans `dependencies`.
+
+pnpm-v6/pnpm-lock.yaml.fixture
+  pnpm 8.15.9, `pnpm install --lockfile-only` (lockfileVersion '6.0') :
+  dev true/false, suffixe de pairs (use-sync-external-store avec react),
+  engines et os en ligne (fsevents), lien link:, archive hors registre.
+
+pnpm-v9/pnpm-lock.yaml.fixture
+  pnpm 9.15.9, `pnpm install --lockfile-only` (lockfileVersion '9.0') :
+  importers, packages et snapshots, workspace:, dépendance git.
+  pnpm 10.28.0 écrit aussi lockfileVersion '9.0' (vérifié, même contenu à
+  l'ordre des sections d'un importer près).
+
+yarn-v1/yarn.lock.fixture
+  yarn 1.22.22, `yarn install --ignore-scripts` : deux lignes de commentaire
+  avant l'en-tête, plages multiples (strip-ansi), plage
+  ">=2.0.0 <2.1.0 || >=2.1.2", scope, alias npm:, file:, link:, git.
+
+yarn-berry/yarn.lock.fixture
+  yarn 4.5.3 (@yarnpkg/cli-dist), `yarn install --mode=update-lockfile`
+  (__metadata.version 8) : npm:, patch:…#optional!builtin<compat/resolve>,
+  conditions: os=darwin & cpu=arm64 (@esbuild/darwin-arm64), workspace:,
+  link:, file:, git.
+
+yarn-berry-6/yarn.lock.fixture
+  yarn 3.8.7, même projet (__metadata.version 6, patch #~builtin<…>).
+
+yarn-berry-10/yarn.lock.fixture
+  yarn 4.18.1, même projet (__metadata.version 10 : yarn 4 récent).
+
+cargo/Cargo.lock.fixture
+  cargo 1.93.0, `cargo generate-lockfile` (version = 4) : crates.io (cc,
+  itoa, openssl-src en 300.5.0+3.5.0, shlex, find-msvc-tools), membre du
+  workspace, dépendance de chemin, dépendance git.
+  Ajouté à la main : exemple-prive, d'un registre tiers
+  (sparse+https://registry.example.org/index/), au format de Cargo, empreinte
+  nulle.
+
+two-lockfiles/, npm-and-yarn/
+  Copies des fixtures composer, npm-v3 et yarn-v1 ci-dessus.
+
+expected.json
+  Écrit à la main d'après les fichiers ci-dessus, jamais régénéré par le code
+  testé.

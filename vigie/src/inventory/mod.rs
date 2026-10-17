@@ -16,6 +16,8 @@
 //! composant (règle de F7, #21).
 
 pub mod bom;
+pub mod build;
+pub mod lockfile;
 pub mod receive;
 
 use std::time::Duration;
@@ -24,6 +26,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::config::InventorySource;
 use crate::vulns::purl::{Purl, PurlType};
+
+/// Version de `vigie-inventory`, indépendante de celle du veilleur : affichée
+/// par `--version` et portée dans `agent` (`vigie-inventory/<version>`).
+pub const TOOL_VERSION: &str = "0.1.0";
 
 /// Composants au plus dans un inventaire.
 pub const MAX_COMPONENTS: usize = 2000;

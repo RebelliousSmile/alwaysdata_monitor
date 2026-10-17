@@ -48,66 +48,70 @@ pub const PROPERTY_CONFIG_VERSION: &str = "vigie:config-version";
 #[error("{0}")]
 pub struct SchemaError(pub &'static str);
 
-#[derive(Debug, Deserialize)]
+/// Enveloppe Vigie. Lue à la réception ; écrite par `vigie-inventory`
+/// (`build.rs`) avec les mêmes noms de champs, puis relue par [`parse`].
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
-struct Envelope {
-    v: u8,
+pub struct Envelope {
+    pub v: u8,
     #[serde(rename = "type")]
-    kind: String,
-    site: String,
+    pub kind: String,
+    pub site: String,
     /// `agent` ou `ci` (#20) ; absent = `agent` (agents 0.5.0).
-    #[serde(default)]
-    source: Option<Source>,
-    seq: i64,
-    sent_at: i64,
-    agent: String,
-    complete: bool,
-    skipped: i64,
-    bom: Bom,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<Source>,
+    pub seq: i64,
+    pub sent_at: i64,
+    pub agent: String,
+    pub complete: bool,
+    pub skipped: i64,
+    pub bom: Bom,
 }
 
-#[derive(Debug, Deserialize)]
+/// BOM CycloneDX de la liste blanche.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
-struct Bom {
-    bom_format: String,
-    spec_version: String,
-    serial_number: String,
-    metadata: Metadata,
-    components: Vec<RawComponent>,
+pub struct Bom {
+    pub bom_format: String,
+    pub spec_version: String,
+    pub serial_number: String,
+    pub metadata: Metadata,
+    pub components: Vec<RawComponent>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
-struct Metadata {
-    timestamp: String,
-    component: MetaComponent,
+pub struct Metadata {
+    pub timestamp: String,
+    pub component: MetaComponent,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
-struct MetaComponent {
+pub struct MetaComponent {
     #[serde(rename = "type")]
-    kind: String,
-    name: String,
+    pub kind: String,
+    pub name: String,
 }
 
-#[derive(Debug, Deserialize)]
+/// Composant tel qu'écrit dans le document, avant validation.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
-struct RawComponent {
+pub struct RawComponent {
     #[serde(rename = "type")]
-    kind: String,
-    name: String,
-    version: String,
-    purl: String,
-    scope: String,
-    properties: Vec<Property>,
+    pub kind: String,
+    pub name: String,
+    pub version: String,
+    pub purl: String,
+    pub scope: String,
+    pub properties: Vec<Property>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
-struct Property {
-    name: String,
-    value: String,
+pub struct Property {
+    pub name: String,
+    pub value: String,
 }
 
 /// Raison fixe d'une erreur de désérialisation : le texte de serde recopie
