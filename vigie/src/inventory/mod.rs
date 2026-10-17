@@ -1,10 +1,13 @@
 //! Inventaire des composants d'un site (issue #19, F5) : document
-//! CycloneDX relevé par l'agent PHP et poussé à `POST /r/v1/inventory`.
+//! CycloneDX relevé par l'agent PHP, ou lu dans les lockfiles d'un projet par
+//! `vigie-inventory` au déploiement (issue #20, F6), et poussé à
+//! `POST /r/v1/inventory`.
 //!
 //! - [`bom`] : liste blanche CycloneDX 1.6/1.7, validation bornée, liste
 //!   canonique et digest ;
-//! - [`receive`] : porte avant le corps, vérifications hors du writer, puis
-//!   écriture par `Store::accept_inventory`.
+//! - [`receive`] : porte avant le corps, vérifications hors du writer (la clé
+//!   qui vérifie la signature fixe la [`Source`]), puis écriture par
+//!   `Store::accept_inventory`.
 //!
 //! Le corps reçu n'est jamais stocké : seuls des [`Component`] validés vont en
 //! base, et aucun nom, version ou purl reçu ne va au journal. Un inventaire
@@ -15,6 +18,11 @@
 pub mod bom;
 pub mod receive;
 
+use std::time::Duration;
+
+use serde::{Deserialize, Serialize};
+
+use crate::config::InventorySource;
 use crate::vulns::purl::{Purl, PurlType};
 
 /// Composants au plus dans un inventaire.
@@ -26,15 +34,66 @@ pub const MAX_SKIPPED: i64 = 100_000;
 /// Conservation des inventaires précédents (et du dernier d'un site qui n'en
 /// déclare plus), à compter de leur `seen_at`.
 pub const RETENTION: i64 = 30 * 86_400;
-/// Au plus un inventaire accepté (nouveau ou inchangé) par site pendant cette
-/// durée, en secondes.
+/// Au plus un inventaire accepté par (site, source) pendant cette durée, en
+/// secondes : tout envoi pour la source `agent`, le seul renvoi inchangé pour
+/// la source `ci` (deux déploiements rapprochés décrivent deux états réels).
 pub const MIN_INTERVAL: i64 = 240;
-/// Inventaires nouveaux (contenu différent) par site et par jour UTC, au plus.
+/// Inventaires nouveaux (contenu différent) par (site, source) et par jour
+/// UTC, au plus.
 pub const MAX_NEW_PER_DAY: i64 = 24;
 /// Longueur maximale de `vigie:path`.
 pub const MAX_PATH_CHARS: usize = 200;
 /// Longueur maximale du `name` CycloneDX d'un composant.
 pub const MAX_NAME_CHARS: usize = 214;
+
+/// Source d'un inventaire reçu, fixée par la clé qui a vérifié sa signature
+/// et répétée dans l'enveloppe (`source`, absent = `agent`) : valeur stockée
+/// dans `site_inventory.source`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Source {
+    /// Agent PHP du site, clé de rapport (`site_keys`).
+    Agent,
+    /// `vigie-inventory` en CI, clé d'inventaire (`site_inventory_keys`).
+    Ci,
+}
+
+impl Source {
+    pub const ALL: [Self; 2] = [Self::Agent, Self::Ci];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Agent => "agent",
+            Self::Ci => "ci",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|source| source.as_str() == name)
+    }
+}
+
+impl From<InventorySource> for Source {
+    fn from(source: InventorySource) -> Self {
+        match source {
+            InventorySource::AgentPhp => Self::Agent,
+            InventorySource::Ci => Self::Ci,
+        }
+    }
+}
+
+/// Péremption d'un inventaire, par source (règle de F7, `docs/failles.md`) :
+/// au-delà sans inventaire reçu, « inventaire périmé ». 7 jours pour l'agent,
+/// qui envoie chaque jour ; 35 jours pour la CI, dont le job planifié renvoie
+/// chaque semaine l'inventaire du dernier déploiement (quatre envois manqués
+/// de marge). Seule définition des deux seuils.
+pub fn stale_after(source: Source) -> Duration {
+    const DAY: u64 = 86_400;
+    match source {
+        Source::Agent => Duration::from_secs(7 * DAY),
+        Source::Ci => Duration::from_secs(35 * DAY),
+    }
+}
 
 /// Scope Vigie d'un composant (propriété `vigie:scope`), distinct du `scope`
 /// CycloneDX (`required` ou `excluded`).
@@ -131,6 +190,9 @@ impl Component {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Inventory {
     pub site: String,
+    /// `source` de l'enveloppe (absent = `agent`), comparée par l'appelant à
+    /// la source fixée par la clé.
+    pub source: Source,
     pub seq: i64,
     pub sent_at: i64,
     pub agent: String,

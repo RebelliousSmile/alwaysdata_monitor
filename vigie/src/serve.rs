@@ -540,8 +540,8 @@ async fn logs_handler(State(state): State<Arc<AppState>>, request: Request) -> S
 }
 
 /// 204 si l'inventaire est accepté (nouveau ou inchangé), 404 sans corps
-/// sinon. La porte (site, `[sites.inventory]`, clé) passe avant toute lecture
-/// du corps ; signature et liste blanche hors du writer ; seule l'écriture le
+/// sinon. La porte (site, `[sites.inventory]`, clés des sources déclarées,
+/// lues par la connexion de lecture) passe avant toute lecture du corps ; signature et liste blanche hors du writer ; seule l'écriture le
 /// tient. La configuration est celle du démarrage, comme pour les rapports.
 async fn inventory_handler(State(state): State<Arc<AppState>>, request: Request) -> StatusCode {
     use crate::inventory::{MAX_INVENTORY_BYTES, receive};
@@ -612,8 +612,9 @@ async fn inventory_handler(State(state): State<Arc<AppState>>, request: Request)
             let rid = crate::request_id::current();
             let dropped: usize = received.dropped.values().sum();
             log::info!(
-                "[{rid}] inventaire accepté (site {}, seq {}) : {} composant(s), {} écarté(s) à la réception, {} écarté(s) par l'agent, {}, {}",
+                "[{rid}] inventaire accepté (site {}, source {}, seq {}) : {} composant(s), {} écarté(s) à la réception, {} écarté(s) par l'émetteur, {}, {}",
                 received.site,
+                received.source.as_str(),
                 received.seq,
                 received.components,
                 dropped,

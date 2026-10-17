@@ -81,3 +81,14 @@ interval = 300
 # (wordpress et prestashop l'impliquent).
 # [sites.inventory]
 # source = "agent-php"
+# Un site sans agent PHP (node, static, projet déployé par CI) reçoit son
+# inventaire de vigie-inventory (issue #20, docs/inventaire.md), signé par une
+# clé d'inventaire dédiée : `vigie site inventory-key <site> add --pubkey …`.
+# ci est admis quel que soit le runtime. Un site peut déclarer les deux :
+# sources = ["agent-php", "ci"] (pas de source et sources ensemble).
+# [[sites]]
+# id = "site-a"
+# url = "https://site-a.example.org/"
+# runtime = "static"
+# [sites.inventory]
+# sources = ["ci"]

@@ -53,7 +53,7 @@ fn tick_then_status_succeeds_and_migrations_rerun_cleanly() {
     let after = vigie(&config, &["status"]);
     assert!(after.status.success(), "{after:?}");
     let stdout = String::from_utf8_lossy(&after.stdout);
-    assert!(stdout.contains("schéma v16"), "{stdout}");
+    assert!(stdout.contains("schéma v17"), "{stdout}");
     assert!(stdout.contains("→ ok"), "{stdout}");
     assert!(stdout.contains("incidents ouverts : aucun"), "{stdout}");
     assert!(stdout.contains("notifications en attente : 0"), "{stdout}");
@@ -514,4 +514,173 @@ fn site_command_previews_then_applies_with_every_guard() {
     );
     let out = vigie(&config, &["site", "command", "site-a", "ping", "--apply"]);
     assert!(stderr(&out).contains("désactivé"), "{out:?}");
+}
+
+// --- Clés d'inventaire (#20) ---------------------------------------------
+
+/// Site A en PHP aux deux sources, site B `static` à la source `ci`, site C
+/// `static` sans `ci`, site D en PHP sans clé, site E `static` à `ci` sans clé.
+const SITES_INVENTORY: &str = "[[sites]]\nid = \"site-a\"\nurl = \"https://site-a.example.org/\"\nruntime = \"php\"\n[sites.inventory]\nsources = [\"agent-php\", \"ci\"]\n\
+[[sites]]\nid = \"site-b\"\nurl = \"https://site-b.example.org/\"\nruntime = \"static\"\n[sites.inventory]\nsources = [\"ci\"]\n\
+[[sites]]\nid = \"site-c\"\nurl = \"https://site-c.example.org/\"\nruntime = \"static\"\n\
+[[sites]]\nid = \"site-d\"\nurl = \"https://site-d.example.org/\"\nruntime = \"php\"\n\
+[[sites]]\nid = \"site-e\"\nurl = \"https://site-e.example.org/\"\n[sites.inventory]\nsources = [\"ci\"]\n";
+
+/// Clé publique Ed25519 d'une graine fixe, en base64.
+fn pubkey(seed: u8) -> String {
+    use base64::Engine;
+    base64::engine::general_purpose::STANDARD.encode(
+        ed25519_dalek::SigningKey::from_bytes(&[seed; 32])
+            .verifying_key()
+            .to_bytes(),
+    )
+}
+
+fn count(dir: &Path, sql: &str) -> i64 {
+    rusqlite::Connection::open(dir.join("vigie.db"))
+        .expect("sqlite")
+        .query_row(sql, [], |row| row.get(0))
+        .expect(sql)
+}
+
+#[test]
+fn a_public_key_is_registered_once_whatever_the_command() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let config = write_config(dir.path(), SITES_INVENTORY);
+    let (agent_a, inventory_a, inventory_b) = (pubkey(1), pubkey(2), pubkey(3));
+    for args in [
+        ["site", "add", "site-a", "--pubkey", &agent_a].as_slice(),
+        &[
+            "site",
+            "inventory-key",
+            "site-a",
+            "add",
+            "--pubkey",
+            &inventory_a,
+        ],
+        &[
+            "site",
+            "inventory-key",
+            "site-b",
+            "add",
+            "--pubkey",
+            &inventory_b,
+        ],
+    ] {
+        let out = vigie(&config, args);
+        assert!(out.status.success(), "{args:?} : {out:?}");
+    }
+    // Chaque commande d'écriture, avec la clé d'agent ou d'inventaire du même
+    // site ou d'un autre : refusée, code 2, sans dire laquelle.
+    let used = [&agent_a, &inventory_a, &inventory_b];
+    let commands: [(&[&str], &str); 4] = [
+        (&["site", "add", "site-d"], ""),
+        (&["site", "rotate-key", "site-a"], "site-a agent"),
+        (&["site", "inventory-key", "site-e", "add"], ""),
+        (&["site", "inventory-key", "site-b", "rotate"], "site-b ci"),
+    ];
+    for (command, own) in commands {
+        for key in used {
+            // Sa propre clé : « inchangée », pas « déjà enregistrée ».
+            let mine = (own == "site-a agent" && key == &agent_a)
+                || (own == "site-b ci" && key == &inventory_b);
+            let mut args = command.to_vec();
+            args.extend(["--pubkey", key.as_str()]);
+            let out = vigie(&config, &args);
+            if mine {
+                assert_eq!(out.status.code(), Some(1), "{args:?} : {out:?}");
+                assert!(stderr(&out).contains("déjà la clé"), "{args:?} : {out:?}");
+            } else {
+                assert_eq!(out.status.code(), Some(2), "{args:?} : {out:?}");
+                assert!(
+                    stderr(&out).contains("clé déjà enregistrée (agent ou inventaire d'un site)"),
+                    "{args:?} : {out:?}"
+                );
+                assert!(!stderr(&out).contains("site-a site-"), "{out:?}");
+            }
+        }
+    }
+    assert_eq!(count(dir.path(), "SELECT count(*) FROM site_keys"), 1);
+    assert_eq!(
+        count(dir.path(), "SELECT count(*) FROM site_inventory_keys"),
+        2
+    );
+
+    // Site sans `ci` déclaré, ou absent de la configuration : code 2.
+    for site in ["site-c", "site-d", "site-z"] {
+        let out = vigie(
+            &config,
+            &["site", "inventory-key", site, "add", "--pubkey", &pubkey(9)],
+        );
+        assert_eq!(out.status.code(), Some(2), "{site} : {out:?}");
+    }
+    let out = vigie(&config, &["site", "list"]);
+    assert!(out.status.success(), "{out:?}");
+    let list = stdout(&out);
+    let line = |id: &str| {
+        list.lines()
+            .find(|l| l.starts_with(&format!("{id}\t")))
+            .unwrap_or_default()
+            .to_owned()
+    };
+    assert!(line("site-a").contains("inventaire : agent+ci"), "{list}");
+    assert!(line("site-b").contains("inventaire : ci"), "{list}");
+    assert!(line("site-b").contains("sans agent"), "{list}");
+    assert!(line("site-c").contains("inventaire : —"), "{list}");
+    assert!(line("site-b").ends_with("\tstatic"), "{list}");
+
+    // Rotation : l'ancienne clé d'inventaire redevient libre.
+    let out = vigie(
+        &config,
+        &[
+            "site",
+            "inventory-key",
+            "site-b",
+            "rotate",
+            "--pubkey",
+            &pubkey(4),
+        ],
+    );
+    assert!(out.status.success(), "{out:?}");
+    let out = vigie(
+        &config,
+        &["site", "add", "site-d", "--pubkey", &inventory_b],
+    );
+    assert!(out.status.success(), "{out:?}");
+
+    // `site remove` d'un site static sans clé d'agent : tout part.
+    let out = vigie(&config, &["site", "remove", "site-b", "--yes"]);
+    assert!(out.status.success(), "{out:?}");
+    assert!(
+        stdout(&out).contains("clés et inventaires de site-b retirés"),
+        "{out:?}"
+    );
+    assert_eq!(
+        count(
+            dir.path(),
+            "SELECT count(*) FROM site_inventory_keys WHERE site = 'site-b'"
+        ),
+        0
+    );
+    let out = vigie(&config, &["site", "remove", "site-b", "--yes"]);
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+
+    // `inventory-key remove` : la clé part, la clé d'agent reste.
+    let out = vigie(
+        &config,
+        &["site", "inventory-key", "site-a", "remove", "--yes"],
+    );
+    assert!(out.status.success(), "{out:?}");
+    let out = vigie(
+        &config,
+        &["site", "inventory-key", "site-a", "remove", "--yes"],
+    );
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    assert_eq!(
+        count(
+            dir.path(),
+            "SELECT count(*) FROM site_keys WHERE site = 'site-a'"
+        ),
+        1
+    );
 }

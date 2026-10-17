@@ -320,7 +320,11 @@ fn the_inventory_goes_end_to_end_resent_unchanged_then_replaced() {
             "horloge du veilleur à {gap} s de l'heure réelle"
         );
     };
-    let heads = |store: &Store| store.inventory_history("site-a").unwrap();
+    let heads = |store: &Store| {
+        store
+            .inventory_history("site-a", vigie::inventory::Source::Agent)
+            .unwrap()
+    };
 
     // P1 : rapport et premier inventaire.
     near_real_time(&clock);
