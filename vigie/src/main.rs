@@ -125,6 +125,35 @@ enum VulnsAction {
         /// en « version inconnue »
         purl: String,
     },
+    /// Corrige la plage inconnue d'une faille Friends-Of-Presta (ou retire
+    /// la correction), pour tous les sites ; inscrit dans l'audit de
+    /// _veilleur (exige [commands])
+    Correct {
+        /// Identifiant de la faille (FOP-…)
+        advisory_id: String,
+        /// purl sans version (pkg:prestashop/module/<nom>)
+        purl: String,
+        /// Plage machine : « <= V », « < V », « >= A, < B », « A - B »…
+        #[arg(long, required_unless_present = "clear", conflicts_with = "clear")]
+        range: Option<String>,
+        /// Retire la correction en vigueur
+        #[arg(long)]
+        clear: bool,
+        /// Motif, obligatoire (500 caractères au plus)
+        #[arg(long)]
+        reason: String,
+    },
+    /// Corrections de plage et leur état (active, sans objet, orpheline,
+    /// illisible, retirée)
+    Corrections {
+        /// Exporte la chaîne d'audit de _veilleur en JSONL
+        #[arg(long)]
+        audit: bool,
+        /// Vérifie la chaîne et la correspondance avec les corrections (code
+        /// 1 sinon)
+        #[arg(long, requires = "audit")]
+        verify: bool,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -1298,6 +1327,113 @@ fn vulns_cli(config: &config::Config, action: VulnsAction, now: i64) -> anyhow::
                     println!();
                 }
                 print_advisory(s);
+                for line in &s.advisory.affected {
+                    if let Some(reason) = vulns::corrections::reason_for(
+                        &store,
+                        &s.source,
+                        &s.advisory.id,
+                        &line.purl,
+                    )? {
+                        println!("  plage corrigée pour {} ({})", line.purl, clean(&reason));
+                    }
+                }
+            }
+            Ok(())
+        }
+        VulnsAction::Correct {
+            advisory_id,
+            purl,
+            range,
+            clear,
+            reason,
+        } => {
+            let purl = vulns::Purl::parse(&purl).map_err(|e| vulns::UsageError(format!("{e}")))?;
+            if purl.version().is_some() {
+                return Err(vulns::UsageError("purl sans version attendu".into()).into());
+            }
+            if config.commands.is_none() {
+                return Err(vulns::UsageError(
+                    "[commands] absent de la configuration : sans clé d'audit, aucune correction de plage".into(),
+                )
+                .into());
+            }
+            let key = audit_key(config)?.context("clé d'audit")?;
+            let mut store = Store::open(&config.database)?;
+            let id = match range {
+                Some(expr) if !clear => vulns::corrections::add(
+                    &mut store,
+                    &key,
+                    &advisory_id,
+                    &purl,
+                    &expr,
+                    &reason,
+                    now,
+                )?,
+                _ => {
+                    vulns::corrections::clear(&mut store, &key, &advisory_id, &purl, &reason, now)?
+                }
+            };
+            println!(
+                "correction {id} {} pour {} {purl}, inscrite dans l'audit de {}",
+                if clear { "retirée" } else { "enregistrée" },
+                clean(&advisory_id),
+                vigie::capability::WATCHER_SITE
+            );
+            Ok(())
+        }
+        VulnsAction::Corrections { audit, verify } => {
+            let Some(store) = Store::open_read(&config.database)? else {
+                println!("aucune correction de plage");
+                return Ok(());
+            };
+            if audit {
+                if verify {
+                    if config.commands.is_none() {
+                        return Err(vulns::UsageError(
+                            "[commands] absent de la configuration : aucune clé d'audit".into(),
+                        )
+                        .into());
+                    }
+                    let key = audit_key(config)?.context("clé d'audit")?;
+                    match vulns::corrections::verify(&store, &key.verifying_key())? {
+                        Ok((rows, entries)) => {
+                            println!(
+                                "corrections de plage intactes : {rows} ligne(s), {entries} entrée(s) d'audit de {}",
+                                vigie::capability::WATCHER_SITE
+                            );
+                            return Ok(());
+                        }
+                        Err(broken) => bail!("corrections de plage altérées : {broken}"),
+                    }
+                }
+                if store.schema_version()? >= SCHEMA_COMMANDS {
+                    for record in store.audit_records(vigie::capability::WATCHER_SITE)? {
+                        println!("{}", serde_json::to_string(&record)?);
+                    }
+                }
+                return Ok(());
+            }
+            let list = vulns::corrections::list(&store)?;
+            if list.is_empty() {
+                println!("aucune correction de plage");
+            }
+            for (row, state) in list {
+                println!(
+                    "{}  {}  {}  {}  {}",
+                    row.id,
+                    clean(&row.advisory_id),
+                    clean(&row.purl),
+                    state.as_str(),
+                    row.ranges
+                        .as_deref()
+                        .map_or("-".to_owned(), vulns::corrections::describe)
+                );
+                println!(
+                    "  motif : {}  opérateur : {}  le {}",
+                    clean(&row.reason),
+                    clean(&row.operator),
+                    iso_utc(row.at)
+                );
             }
             Ok(())
         }
@@ -1348,6 +1484,19 @@ fn vulns_cli(config: &config::Config, action: VulnsAction, now: i64) -> anyhow::
                 }
                 if a.informational {
                     line.push_str("  [informational]");
+                }
+                if c.corrected {
+                    let reasons: Vec<String> = c
+                        .lines
+                        .iter()
+                        .filter_map(|l| {
+                            vulns::corrections::reason_for(&store, &c.source, &a.id, &l.purl)
+                                .ok()
+                                .flatten()
+                                .map(|r| clean(&r))
+                        })
+                        .collect();
+                    line.push_str(&format!("  [plage corrigée : {}]", reasons.join(" ; ")));
                 }
                 line.push_str(&format!("  source {}", clean(&c.source)));
                 let level = vulns::sync::registry::redistribution(&c.source)

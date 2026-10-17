@@ -366,6 +366,69 @@ seuil de 30 min qui rouvrirait la mise à jour incrémentale.
 | entrées lues, retenues, écartées | à relever | à relever | à relever |
 | croissance de `data/`, mémoire maximale | à relever | | |
 
+## Sources CMS : Wordfence et Friends-Of-Presta (issue #17)
+
+Règles : [`failles.md`](./failles.md#import-wordfence-17). Gestes de
+l'exploitant, à faire après le déploiement du binaire qui connaît les deux
+sources ; aucune valeur réelle n'est consignée ici (jeton, compte, nom de
+site).
+
+> **Avertissement.** Déclarer `wordfence` dans `[vulns] sources` (et sa
+> section `[vulns.wordfence]`) avec un binaire dont
+> `WORDFENCE_TERMS_REVIEWED` vaut encore `None` fait sortir
+> `vigie vulns sync` en **code 1** à chaque passage (source refusée, unité
+> `vigie-vulns-sync` en `failed`) et ouvre `_veilleur/vulns-sync/wordfence`
+> au bout de 3 jours. Ne déclarer la source qu'avec un binaire dont la
+> relecture est consignée.
+
+1. **Hôtes** : depuis le VPS, vérifier la joignabilité de `www.wordfence.com`,
+   `github.com` et `codeload.github.com` en HTTPS (`curl -sSI`).
+2. **Friends-Of-Presta** (sans attendre Wordfence) : ajouter
+   `friends-of-presta` à `[vulns] sources`, puis **premier passage à la
+   main** : `/usr/bin/time -v ~/vigie/bin/vigie vulns sync --source
+   friends-of-presta`, puis `vigie vulns sources` ; consigner le relevé
+   ci-dessous ; seulement ensuite laisser le timer la prendre en charge.
+3. **Wordfence, relecture** : relire depuis le VPS les conditions et la page
+   v3 (liste « À vérifier depuis le VPS » de `failles.md`, point 2) : forme
+   de l'en-tête, conditions du jeton « Integrations », ETag ou
+   Last-Modified, gzip, format v3, texte réel de `copyrights`, affichage aux
+   clients d'un prestataire. Consigner dans `failles.md` (date, URL relues,
+   réponses) et, **dans le même commit**,
+   `WORDFENCE_TERMS_REVIEWED = Some("<date>")` (et l'en-tête corrigé s'il
+   diffère). Si les conditions excluent l'usage prévu : la constante reste
+   `None`, la décision va dans `decisions.md`, l'issue est mise à jour.
+4. **Wordfence, jeton** : créer le compte et le jeton dans la section
+   « Integrations » de Wordfence, puis, sans l'écrire dans l'historique du
+   shell : `install -d -m 700 ~/vigie/keys` (déjà fait pour le canal de
+   commandes) et `install -m 600 /dev/stdin ~/vigie/keys/wordfence-token`
+   (coller le jeton, Ctrl-D). Déployer le binaire de l'étape 3, ajouter
+   `[vulns.wordfence]` (`token_file`, `terms_reviewed` à la date consignée)
+   et `wordfence` à `[vulns] sources` ; premier passage à la main
+   `vigie vulns sync --source wordfence` (pas deux en moins de 30 min : la
+   source le refuse), relevé, puis timer.
+5. **Corrections de plage** : `vigie vulns sources` compte les lignes
+   `unevaluable` de Friends-Of-Presta ; pour chacune relue sur le dépôt de
+   l'éditeur, `vigie vulns correct <FOP-…> pkg:prestashop/module/<nom>
+   --range "<= 1.2.3" --reason "<motif>"` (exige `[commands]`), puis
+   `vigie vulns corrections --audit --verify`.
+6. **Ajuster** plafonds et seuils provisoires (taux d'écart compris) sur le
+   relevé, facteur ≥ 4, dans un commit séparé ; si `attribution_overflow`
+   n'est pas nul, relever la borne avant tout affichage.
+
+### Relevé des sources CMS
+
+Valeurs masquées, sans jeton ni identifiant de compte :
+
+| Mesure | friends-of-presta | wordfence |
+| --- | --- | --- |
+| durée, taille téléchargée | à relever | à relever |
+| entrées lues, retenues | à relever | à relever |
+| écartées par raison, `out_of_scope`, lignes `unevaluable` | à relever | à relever |
+| longueur maximale d'attribution | — | à relever |
+| plages au plus par ligne | — | à relever |
+| longueur maximale des noms `_posts/` (part des `FOPH-…`) | à relever | — |
+| mémoire de pointe (`/usr/bin/time -v`) | à relever | à relever |
+
 ## Secrets
 
 Inventaire tenu par le socle (issue #9). Aucun secret ne passe par une variable
@@ -382,6 +445,7 @@ sont `VIGIE_CONFIG` (chemin de la configuration), `IP`, `PORT` et `RUST_LOG`.
 | Clés publiques des agents | base `vigie.db` | publiques, pas secrètes ; changées par `site rotate-key` |
 | Clé de commandes du veilleur | `[commands] key_file`, par exemple `~vigie/vigie/keys/commands.key` | 0600 dans un dossier 0700, au propriétaire de `vigie`, **vérifié par le code** à chaque lecture, sans suivre de lien ; lue par `serve` seul |
 | Clé d'audit du veilleur | `[commands] audit_key_file`, même dossier | mêmes règles ; lue par `serve`, `tick` et la CLI |
+| Jeton Wordfence Intelligence (#17) | `[vulns.wordfence] token_file`, par exemple `~vigie/vigie/keys/wordfence-token` | 0600 dans un dossier 0700, au propriétaire de `vigie`, **vérifié par le code** (`secret.rs`) à chaque synchronisation, fichier ordinaire exigé, 1 Kio lu au plus ; jamais copié en base ni en journal, envoyé au seul hôte `www.wordfence.com` |
 | Accès FTP ou API d'un hébergeur | nulle part | demandé au moment d'agir, jamais stocké (`decisions.md`) |
 
 La CI lance gitleaks sur tout l'historique à chaque push

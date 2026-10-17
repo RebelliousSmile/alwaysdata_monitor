@@ -990,13 +990,16 @@ pub struct Candidate {
     pub advisory: Advisory,
     /// Lignes `affected` de ce purl.
     pub lines: Vec<Affected>,
-    /// Une correction de plage auditée s'applique (F3) ; toujours `false`
-    /// en F1.
+    /// Une ligne de `lines` vient d'une correction de plage active (F3,
+    /// `vulns/corrections.rs`) : affichée « plage corrigée ».
     pub corrected: bool,
 }
 
 /// Failles actives qui visent le purl (sans version), en une requête jointe
-/// sur la génération active, dans une seule lecture.
+/// sur la génération active, dans une seule lecture. Une ligne
+/// `unevaluable` de Friends-Of-Presta prend la plage de sa correction active
+/// (F3), lue dans la même lecture ; une correction illisible la laisse en
+/// « plage inconnue ».
 pub fn candidates(store: &Store, purl: &Purl) -> anyhow::Result<Vec<Candidate>> {
     let tx = store.conn.unchecked_transaction()?;
     let mut out: Vec<Candidate> = Vec::new();
@@ -1030,6 +1033,24 @@ pub fn candidates(store: &Store, purl: &Purl) -> anyhow::Result<Vec<Candidate>> 
                     lines: vec![line],
                     corrected: false,
                 }),
+            }
+        }
+        for c in &mut out {
+            if c.source != crate::vulns::sources::friends_of_presta::SOURCE_ID {
+                continue;
+            }
+            for line in c.lines.iter_mut().filter(|l| l.unevaluable) {
+                let correction = crate::vulns::corrections::active(
+                    &tx,
+                    &c.source,
+                    &c.advisory.id,
+                    &line.purl.canonical(),
+                )?;
+                if let Some(crate::vulns::corrections::Active::Ranges { ranges, .. }) = correction {
+                    line.ranges = ranges;
+                    line.unevaluable = false;
+                    c.corrected = true;
+                }
             }
         }
     }

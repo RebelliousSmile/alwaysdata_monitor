@@ -315,6 +315,34 @@ détaillées dans [`failles.md`](./failles.md#synchronisation-f2).
 | Constat `vulns-sync` évalué par `tick` (3 jours sans réussite), pseudo-site réservé `_veilleur` déclaré au registre (`Needs::Watcher`), `close_unwatched` reçoit l'incident entier, e-mails propres au veilleur ; lecture de l'état en échec : aucune réconciliation | Un timer cassé se voit ; tout incident porte un contrôle déclaré ; retirer une source ne l'annonce pas « rétablie » |
 | Timer quotidien à 03:40 décalé de 45 min, `Persistent=true`, basse priorité CPU et E/S, tué avant `serve` et `tick` en manque de mémoire | Heure creuse ; un VPS éteint rattrape ; la synchronisation ne prive jamais le service |
 
+### Sources CMS (issue #17)
+
+Plan : `aidd_docs/tasks/2026_10/2026_10_17_sources-cms/plan.md` ; règles
+détaillées dans [`failles.md`](./failles.md#import-wordfence-17) et
+[`failles.md`](./failles.md#import-friends-of-presta-17).
+
+| Décision du 2026-10-17 | Raison |
+| --- | --- |
+| **Verrou de relecture à deux clés** : constante `WORDFENCE_TERMS_REVIEWED` (`None` jusqu'au commit qui consigne la relecture dans `failles.md`, cohérence vérifiée par un test) et `[vulns.wordfence] terms_reviewed` égale ; refus explicite sans requête, revérifié par `fetch` ; configuration toujours valide | La réserve de F0 tient au code, pas à la mémoire ; une relecture consignée n'active rien sans geste sur le VPS ; une configuration refusée arrêterait tout le veilleur |
+| Pas d'expiration de la relecture | Conditions « *perpetual … irrevocable* » [S] ; une nouvelle relecture se consigne en changeant constante, `failles.md` et configuration |
+| `Redistribution { Internal, FactsOnly, Free }` dans `SourceMeta`, `registry::redistribution(id)` avec un bras par source de `KNOWN` (F4 comprises) et `None` pour un inconnu (traité `Internal`) ; fusion par CVE au plus restrictif | F7 n'a qu'une question à poser avant de transmettre une faille ; un identifiant inconnu ne vaut jamais `Free` |
+| Jeton dans un fichier 0600 vérifié par `secret.rs` (règles extraites de `command/key.rs`), fichier ordinaire exigé avant l'ouverture, 1 Kio lu au plus, grammaire fermée, `Token` sans `Debug` en clair, en-tête marqué sensible | Une seule règle de droits pour les secrets lus par le code ; une FIFO ne bloque pas ; aucune injection d'en-tête ni fuite par une trace |
+| `Authorization: Bearer <jeton>` [NV], seul hôte `www.wordfence.com`, 401 et 403 « jeton refusé » sans corps | La forme se confirme depuis le VPS ; le jeton ne part vers aucun autre hôte |
+| Débit Wordfence (30 min) par le seul mécanisme de F2 | La limite est par requête ; un lancement à la main juste après le timer ne la dépasse pas |
+| Flux `production` lu en flux (`Box<RawValue>` par entrée, compteur externe de 4 Mio) ; `id` et `software[]` stricts, tout autre champ retiré seul | ≈ 123 Mo de JSON ; une anomalie reste au plus petit périmètre sans masquer un flux corrompu |
+| Bornes Wordfence → événements OSV (borne basse exclusive traduite en inclusive), `patched_versions` → `fixed`, score lu comme texte en dixièmes | Signalement de trop plutôt qu'en moins ; aucun flottant |
+| Attribution `copyrights` : `message` puis clés triées, URL de licence en texte ; vide, absente ou trop longue : mention fixe comptée, faille gardée | Mention stable et complète ; une faille ne disparaît pas pour une raison administrative |
+| Archive Friends-Of-Presta et **lecteur tar maison** borné (gzip mono-membre, pax et GNU `L` pour le nom, base 256 et pax `size` refusés), révision du commit gardée | Une archive par jour sans clone git ; une crate `tar` ajouterait une surface pour peu |
+| En-tête YAML lu par un analyseur ligne à ligne fermé (pas de crate YAML) | Trois clés utiles ; ni ancre ni alias possibles |
+| Identifiants `FOP-<nom>` / `FOPH-<47>-<8 hex>` | Le nom de fichier est la seule clé stable ; un nom long reste sous la borne de 64 caractères sans collision |
+| Grammaire **fermée** de « Impacted release », remarques reconnues sous trois formes, tout le reste « plage inconnue » | Une grammaire testée ne devine jamais ; une contradiction rend la plage douteuse |
+| **Corrections de plage** en ajout seul, auditées dans la chaîne `_veilleur`, appliquées à la lecture à une ligne `unevaluable` seulement, états « sans objet » et « orpheline », `latest_range_correction_id()` pour F7 ; opérateur par `getpwuid(geteuid())` | Correction visible et vérifiable dans les deux sens ; ne masque jamais une plage publiée ; `$USER` est choisi par l'appelant |
+| Seuil d'écart de 1 % (provisoire) par `Reason::is_drop` ; mentions et membres ignorés hors seuil | Un écart massif signale un changement de format ; une note n'est pas une perte |
+| `LOADER_VERSION = 1` pour les deux sources | Un changement de conversion recharge le même dump |
+| Migration `0018.sql` (F4 : 0019, F6 : 0020), `SCHEMA_RANGE_CORRECTIONS` calculé par sa place | Numéros pris d'avance, version juste quel que soit l'ordre de fusion |
+| Aucune crate nouvelle : `serde_json` gagne `raw_value`, `Cargo.lock` inchangé | Rien de nouveau pour F8 ni pour musl |
+| Fixtures Wordfence et Friends-Of-Presta fictives (UUID `0000…NN`, titulaire « Exemple Intelligence SARL », `CVE-2099-…`, `example.org`), archive construite par le test | Dépôt public ; une mention réelle copiée serait une reproduction |
+
 ## Dépendances (issue #22)
 
 Plan : `aidd_docs/tasks/2026_10/2026_10_17_osv-scanner/plan.md`. Job `deps`

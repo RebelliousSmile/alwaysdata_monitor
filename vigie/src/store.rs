@@ -85,6 +85,11 @@ const MIGRATIONS: &[&str] = &[
     // Le numéro 16 revient à l'inventaire (#19), fusionné en parallèle : la
     // version réelle est la place dans cette liste ([`SCHEMA_VULNS_SYNC`]).
     include_str!("../migrations/0017.sql"),
+    // 18 : corrections de plage auditées (`vulns/corrections.rs`, issue #17),
+    // en ajout seul, hors des générations. Numéro de fichier pris d'avance
+    // (F4 prend 0019, F6 0020) : la version réelle est la place dans cette
+    // liste ([`SCHEMA_RANGE_CORRECTIONS`]).
+    include_str!("../migrations/0018.sql"),
 ];
 
 /// Version d'une migration : sa place dans [`MIGRATIONS`], plus un.
@@ -148,6 +153,9 @@ pub const SCHEMA_INVENTORY: usize = 16;
 /// Version de schéma à partir de laquelle l'état de synchronisation des
 /// sources de failles existe (issue #16, fichier `0017.sql`).
 pub const SCHEMA_VULNS_SYNC: usize = version_of(include_str!("../migrations/0017.sql"));
+/// Version de schéma à partir de laquelle les corrections de plage existent
+/// (issue #17, fichier `0018.sql`).
+pub const SCHEMA_RANGE_CORRECTIONS: usize = version_of(include_str!("../migrations/0018.sql"));
 /// Une adresse source de retrait est oubliée 30 jours après le dernier.
 pub const AGENT_SOURCE_RETENTION: i64 = 30 * 86_400;
 
@@ -2986,6 +2994,7 @@ mod tests {
             ("index", "vuln_affected_purl"),
             ("index", "vuln_aliases_advisory"),
             ("index", "vuln_aliases_alias"),
+            ("index", "vuln_range_corrections_key"),
             ("table", "agent_sources"),
             ("table", "audit_notified"),
             ("table", "baselines"),
@@ -3016,9 +3025,12 @@ mod tests {
             ("table", "vuln_advisories"),
             ("table", "vuln_affected"),
             ("table", "vuln_aliases"),
+            ("table", "vuln_range_corrections"),
             ("table", "vuln_sources"),
             ("trigger", "command_audit_no_delete"),
             ("trigger", "command_audit_no_update"),
+            ("trigger", "vuln_range_corrections_no_delete"),
+            ("trigger", "vuln_range_corrections_no_update"),
         ];
         let objects: Vec<(&str, &str)> = objects
             .iter()
@@ -3128,6 +3140,37 @@ mod tests {
     }
 
     #[test]
+    fn migrates_a_vulns_sync_database_to_range_corrections() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("vigie.db");
+        {
+            let conn = Connection::open(&path).expect("open");
+            for migration in &MIGRATIONS[..SCHEMA_VULNS_SYNC] {
+                conn.execute_batch(migration).expect("migration");
+            }
+            conn.pragma_update(None, "user_version", SCHEMA_VULNS_SYNC as i64)
+                .expect("user_version");
+            conn.execute(
+                "INSERT INTO vuln_sources (id, revision) VALUES ('friends-of-presta', 'abc')",
+                [],
+            )
+            .expect("source");
+        }
+        let store = Store::open(&path).expect("open");
+        assert_eq!(store.schema_version().expect("version"), MIGRATIONS.len());
+        const { assert!(SCHEMA_RANGE_CORRECTIONS > SCHEMA_VULNS_SYNC) };
+        let (corrections, revision): (i64, String) = store
+            .conn
+            .query_row(
+                "SELECT (SELECT count(*) FROM vuln_range_corrections), revision FROM vuln_sources",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("tables");
+        assert_eq!((corrections, revision.as_str()), (0, "abc"));
+    }
+
+    #[test]
     fn migrates_a_filled_vulns_database_to_inventory() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("vigie.db");
@@ -3216,8 +3259,8 @@ mod tests {
             .expect("source v15");
         }
         let store = Store::open(&path).expect("open");
-        assert_eq!(store.schema_version().expect("version"), SCHEMA_VULNS_SYNC);
-        assert_eq!(SCHEMA_VULNS_SYNC, MIGRATIONS.len());
+        // Migré jusqu'au bout (0018 et suivantes comprises).
+        assert_eq!(store.schema_version().expect("version"), MIGRATIONS.len());
         let row: (i64, i64, String, Option<String>, Option<String>) = store
             .conn
             .query_row(
@@ -3235,7 +3278,7 @@ mod tests {
         assert!(refused.is_err(), "issue hors liste refusée");
         drop(store);
         let store = Store::open(&path).expect("réouverture");
-        assert_eq!(store.schema_version().expect("version"), SCHEMA_VULNS_SYNC);
+        assert_eq!(store.schema_version().expect("version"), MIGRATIONS.len());
     }
 
     #[test]

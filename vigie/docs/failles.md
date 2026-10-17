@@ -224,6 +224,86 @@ n'étant pas joignable du conteneur [NV] :
   "copyrights": {"message": "…", "defiant": {"notice": "…", "license": "…", "license_url": "…"}}}}
 ```
 
+#### Import Wordfence (#17)
+
+Code : `src/vulns/sources/wordfence.rs`. Plan :
+`aidd_docs/tasks/2026_10/2026_10_17_sources-cms/`.
+
+- **Verrou à deux clés.** Constante du binaire `WORDFENCE_TERMS_REVIEWED`
+  (`None` aujourd'hui) et `[vulns.wordfence] terms_reviewed = "AAAA-MM-JJ"`,
+  qui doivent être égales ; `wordfence` dans `[vulns] sources` exige la
+  section, et réciproquement. Constante `None` ou dates différentes : refus
+  explicite à chaque synchronisation (« source wordfence désactivée :
+  relecture des conditions non consignée dans docs/failles.md »), sans
+  aucune requête, visible dans `vulns sources`, `vulns sync` en code 1 ; au
+  bout de 3 jours, le constat `vulns-sync/wordfence` s'ouvre. `fetch`
+  revérifie le verrou juste avant la requête. La configuration reste valide :
+  ni `serve` ni `tick` ne s'arrêtent. Un test lit la ligne de relecture
+  ci-dessus et exige qu'elle dise la même chose que la constante
+  (`non faite` ↔ `None`, `faite le AAAA-MM-JJ` ↔ `Some`). **Consigner une
+  relecture** : dans un même commit, remplir cette ligne (« faite le
+  AAAA-MM-JJ », URL relues, réponses), poser
+  `WORDFENCE_TERMS_REVIEWED = Some("AAAA-MM-JJ")`, corriger l'en-tête si
+  besoin ; puis, sur le VPS, `terms_reviewed` à la même date. Pas
+  d'expiration : les conditions sont « *irrevocable* » [S].
+- **Jeton** : fichier 0600 dans un dossier 0700 au propriétaire du veilleur
+  (`secret.rs`, mêmes règles que les clés du canal de commandes), fichier
+  ordinaire exigé avant l'ouverture (une FIFO ne bloque pas), 1 Kio lu au
+  plus, `[A-Za-z0-9._~+/=-]{16,512}`, lu à chaque synchronisation, jamais
+  copié en base ni en journal ; `Authorization: Bearer <jeton>` [NV] en
+  valeur d'en-tête marquée sensible. Seul hôte `www.wordfence.com` : une
+  redirection vers un autre hôte est refusée, le jeton ne part nulle part
+  ailleurs. 401 et 403 : « jeton refusé », sans le corps.
+- **Débit** : intervalle minimal de 30 min déclaré dans `SourceMeta`, tenu
+  par le débit de F2 (`last_request_at`, `retry_after_until`) ; un refus de
+  `fetch` consomme aussi la fenêtre.
+- **Lecture en flux** : corps écrit par `Download` (512 Mio au plus), relu
+  par `serde_json` entrée par entrée en `Box<RawValue>` (4 Mio par valeur,
+  compteur d'octets en couche externe, remis à zéro à chaque clé ; 200 000
+  entrées au plus ; 15 min). Syntaxe JSON, valeur trop grosse, trop
+  d'entrées : erreur de flux, chargement abandonné. `id` et
+  `software[].type` / `slug` seuls sont stricts (`bad_record`, faille
+  écartée) ; tout autre champ est décodé à part, `null`, `[]` et `{}` valent
+  « vide », un échec retire ce seul champ (`bad_severity`, `bad_cwe`,
+  `bad_reference`, `bad_alias`, `bad_published`).
+- **Conversion** : id `WF-<uuid>` (UUID validé, en minuscules, clé et `id`
+  égales sinon `bad_id`) ; `cve` en alias ; un `software[]` par ligne
+  (`plugin` → `pkg:wordpress/plugin/<slug>`, `theme` →
+  `pkg:wordpress/theme/<slug>`, `core` → `pkg:wordpress/core/core`, autre
+  type `out_of_scope`, slug hors grammaire `bad_purl`), comparateur PHP ; un
+  libellé de `affected_versions` par plage :
+
+  | Wordfence | Événement |
+  | --- | --- |
+  | `from_version: "*"` | plancher |
+  | `from_version: A` (inclusive ou non) | `introduced A` (borne exclusive traduite en inclusive) |
+  | `to_version: "*"` | plage ouverte |
+  | `to_version: B`, `to_inclusive: true` | `last_affected B` |
+  | `to_version: B`, `to_inclusive: false` | `fixed B` |
+  | `patched: true` | `fixed` = plus petit `patched_versions[]` strictement au-dessus de `last_affected` |
+  | borne illisible, `A` > `B`, libellé incomplet, `affected_versions` vide ou illisible | ligne `unevaluable` |
+
+  `title` → résumé (assaini, 500 caractères) ; `cvss.score` lu **comme
+  texte** et converti en dixièmes exacts (`6.1` → 61 ; `10.1`, `6.15`,
+  `6e0` ou `"6.1"` : `bad_severity`) ; `cvss.vector` gardé ; `cwe.id` →
+  `CWE-<id>` ; `references[]` (`WEB`) ; `informational` ; `published` ;
+  `modified` = `updated`, sinon `published` (RFC 3339 ou `AAAA-MM-JJ
+  hh:mm:ss` lu en UTC [NV]), sinon `bad_date`. `description`,
+  `remediation`, `researchers` ne sont pas stockés. Licence
+  `Wordfence-Intelligence`. Borne unique de F1 : 256 plages par ligne (le
+  noyau en a une par branche).
+- **Attribution** : `copyrights.message`, puis les autres clés **triées**,
+  chacune `notice`, `licence <license>`, `license_url` (en texte, jamais en
+  lien actif), séparées par « ; », puis « — » et le lien de
+  l'enregistrement. `{}` (ou `[]`, `null`) : mention fixe « Wordfence
+  Intelligence, © Defiant Inc. — <lien> », comptée `empty_copyrights` ;
+  absente ou illisible : même mention, `no_copyrights` ; au-delà de
+  2 000 caractères : même mention, `attribution_overflow`. La faille est
+  toujours gardée ; ces trois comptes ne sont pas des pertes.
+- **Redistribution** : `Internal` (usage interne à l'exploitant).
+- `LOADER_VERSION = 1`, taux d'écart 1 % (provisoire, à confirmer par le
+  relevé du VPS).
+
 ### Friends-Of-Presta : modules PrestaShop
 
 | Élément | Valeur |
@@ -233,7 +313,7 @@ n'étant pas joignable du conteneur [NV] :
 | Authentification | aucune |
 | Licence | avis : **CC BY-SA 4.0**, d'après `_layouts/post.html` et `search.json` (« *This advisory and patch is licensed under https://creativecommons.org/licenses/by-sa/4.0/* ») [V]. Ambiguïté : `LICENSE.txt` à la racine est la licence MIT du thème minima, déclarée pour tout le dépôt [V]. Vigie retient CC BY-SA 4.0 pour les avis |
 | Usage | interne, affiché avec attribution ; texte des avis jamais redistribué au sens de [Redistribution, affichage et fixtures](#redistribution-affichage-et-fixtures) : un document destiné à un client ne reprend que des faits, jamais le texte de l'avis |
-| Attribution | « Friends-Of-Presta, CC BY-SA 4.0 », avec un lien vers l'avis sur https://security.friendsofpresta.org |
+| Attribution | « Friends-Of-Presta, CC BY-SA 4.0 — <lien> », lien GitHub de l'avis `https://github.com/friends-of-presta/security-advisories/blob/main/_posts/<fichier>` (le permalien du site Jekyll n'est pas vérifié [NV]) |
 | Format | Markdown avec en-tête YAML, un fichier `_posts/AAAA-MM-JJ-<module>.md` par avis [V] |
 | Taille | non mesurée [NV] |
 | Fréquence | au fil des contributions ; nombre de fichiers et date du dernier commit non vérifiés [NV] |
@@ -255,6 +335,70 @@ faille « plage inconnue » ([Modèle interne et versions](#modèle-interne-et-v
 Les avis de catégorie `dependancies` sont écartés
 ([Correspondance source → purl](#correspondance-source--purl)). `search.json` et `feed.xml` ne
 contiennent pas les versions [V] : ils ne servent pas.
+
+#### Import Friends-Of-Presta (#17)
+
+Code : `src/vulns/sources/friends_of_presta.rs`, `tar.rs`, `release.rs`,
+`src/vulns/corrections.rs`.
+
+- **Archive** : `main.tar.gz` par `github.com`, redirigée vers
+  `codeload.github.com` (deux seules origines), conditionnelle et comparée
+  par SHA-256 (F2). Plafonds provisoires : 64 Mio compressés, 512 Mio
+  décompressés, 50 000 membres, 1 Mio par avis (`too_large`), 10 min.
+- **Lecteur tar maison** (pas de crate `tar`) : gzip mono-membre (un second
+  membre est une erreur) ; blocs de 512 octets, somme de contrôle vérifiée,
+  tailles octales seulement (base 256 refusée) ; en-têtes pax de 64 Kio au
+  plus, enregistrements validés, `path` et `comment` lus, `size` refusée ;
+  GNU `L` pour le nom (4 096 octets) ; données des membres sautés et
+  bourrage comptés dans le plafond décompressé ; fin : deux blocs nuls puis
+  10 240 octets de bourrage nul au plus. Racine unique exigée ; seuls les
+  fichiers ordinaires `<racine>/_posts/*.md` sont lus ; chemin absolu,
+  `..`, lien, périphérique ou nom trop long : ignoré et compté
+  `bad_archive_member`. Rien n'est écrit sur le disque hors du dump. Le
+  commentaire pax global (commit, 40 hexadécimaux) devient la **révision**
+  de la source (`vigie vulns sources`).
+- **En-tête YAML** lu par un analyseur ligne à ligne fermé : clés `title`,
+  `categories`, `severity`, scalaires nus ou entre guillemets, `categories`
+  en scalaire, `[a, b]` ou puces ; 64 lignes et 8 Kio au plus ; ancre,
+  alias, bloc `|` ou `>`, indentation inattendue sur une clé retenue :
+  `bad_front_matter` (faille perdue).
+- **Corps** : puces `**Clé**: valeur` de `## Summary` (`CVE ID`, `Published
+  at`, `Product`, `Impacted release`, `Weakness`, `Severity`), liens réduits
+  à leur texte ; ligne `**Vector string**` cherchée dans tout le corps.
+- **Identifiant** : nom du fichier sans `.md` (`[A-Za-z0-9._-]`, sinon
+  `bad_id`) ; `FOP-<nom>` jusqu'à 60 caractères, sinon `FOPH-<47 premiers
+  caractères>-<8 hexadécimaux du SHA-256 du nom>` (61 caractères, stable,
+  préfixe distinct). Dates `AAAA-MM-JJ` → minuit UTC ; `published` =
+  `Published at`, sinon date du nom de fichier (`bad_published` si
+  `Published at` est illisible), sinon `bad_date` ; `modified` =
+  `published`.
+- **Catégories** : `modules` → `pkg:prestashop/module/<Product>`, `Product`
+  découpé sur `,` et `/` (16 noms au plus), une ligne par module, nom hors
+  grammaire `bad_purl` ; `core` → `pkg:prestashop/core/prestashop` ;
+  `dependancies` → `out_of_scope` ; absente ou inconnue →
+  `unknown_category` (faille perdue).
+- **Score** : nombre entre parenthèses de `severity` de l'en-tête, sinon de
+  la puce, en dixièmes exacts (`critical (9.8)` → 98 ; `(12)`, `(9.85)`,
+  `(9,8)` : `bad_severity`) ; vecteur `CVSS:3.x` gardé.
+- **Grammaire fermée de « Impacted release »** (mots-clés sans casse, `v`
+  initial retiré, versions PHP) :
+
+  | Forme | Plage |
+  | --- | --- |
+  | `<= 1.5.0` | plancher, `last_affected 1.5.0` |
+  | `< 2.0.0` | plancher, `fixed 2.0.0` |
+  | `1.0.0`, `= 1.0.0`, `v1.0.0` | `introduced 1.0.0`, `last_affected 1.0.0` |
+  | `>= 1.0 <= 2.0`, `>= 1.0, <= 2.0`, `1.0 - 2.0`, `1.0 to 2.0`, `from 1.0 to 2.0`, `between 1.0 and 2.0` | `introduced 1.0`, `last_affected 2.0` |
+  | `>= 1.0 < 2.0`, `>= 1.0, < 2.0` | `introduced 1.0`, `fixed 2.0` |
+  | `>= 3.0` | `introduced 3.0`, ouverte |
+  | `<= 1.5.0 (1.5.1 fixed the vulnerability)`, `(fixed in V)`, `(V fixes …)` | `fixed V` ajouté si V dépasse la borne `last_affected` ; égal à une borne `fixed` : rien ; sinon, ou sur une plage ouverte : « plage inconnue » |
+  | autre remarque entre parenthèses (`(WARNING NO PATCH)`) | ignorée |
+  | tout le reste (`1.0-2.0`, `all versions`, `1.x`, plusieurs plages, bornes inversées ou plage vide) | « plage inconnue » pour toute version |
+
+  Vecteurs : `tests/fixtures/vulns/friends-of-presta/release.json`.
+- **Corrections de plage** : voir [Dérogations](#dérogations).
+- **Redistribution** : `FactsOnly`. Aucun texte de l'avis n'est stocké hors
+  du titre assaini. `LOADER_VERSION = 1`, taux d'écart 1 % (provisoire).
 
 ### CISA KEV
 
@@ -555,7 +699,9 @@ Aucune faille d'un paquet identifié n'est supprimée en silence. Chaque
 | `affected` écarté seul | `bad_purl` (nom hors grammaire), `out_of_scope` (autre écosystème, dont `Packagist:https://packages.drupal.org/8`) |
 | ligne gardée `unevaluable` (« plage inconnue ») | événement à zéro ou plusieurs clés, borne vide, hors grammaire ou illisible, type de plage inconnu, plus de 128 événements, plus de 256 plages, ni plage ni version : `unevaluable` |
 | faille gardée | `unknown_license` (licence « inconnue », visible dans `vulns sources` et `show`) |
-| entrée ignorée seule | `bad_version_entry`, `bad_reference`, `bad_severity`, `bad_last_known`, `bad_alias`, `bad_cwe` ; `purl_mismatch` (`package.purl` d'OSV différent du purl calculé, qui l'emporte) |
+| entrée ignorée seule | `bad_version_entry`, `bad_reference`, `bad_severity`, `bad_last_known`, `bad_alias`, `bad_cwe` ; `purl_mismatch` (`package.purl` d'OSV différent du purl calculé, qui l'emporte) ; `bad_published` (F3 : date de publication illisible, repli sur une autre date) |
+| faille perdue, sources de F3 | `bad_record` (Wordfence : `id` ou `software[]` de forme inattendue), `bad_front_matter`, `unknown_category` (Friends-Of-Presta) |
+| note, sources de F3 | `empty_copyrights`, `no_copyrights`, `attribution_overflow` (mention Wordfence remplacée par la mention fixe), `bad_archive_member` (membre de l'archive ignoré) |
 
 ### Licences et attribution
 
@@ -582,8 +728,9 @@ de `active_generation` est un compare-and-swap (génération active attendue
 et bail détenu, sinon échec et génération orpheline) ; la purge retire par
 lots tout sauf l'active et celle sous bail, puis `PRAGMA
 wal_checkpoint(PASSIVE)`. Un lecteur ne voit que l'ancien jeu complet ou le
-nouveau. Les corrections de plage de Friends-Of-Presta (F3) seront clées
-`(source, advisory_id, purl)`, hors des générations.
+nouveau. Les corrections de plage de Friends-Of-Presta (F3, migration
+`0018.sql`) sont clées `(source, advisory_id, purl)`, hors des générations
+([Dérogations](#dérogations)).
 
 ### CLI
 
@@ -598,7 +745,11 @@ répond « aucune base de failles ».
 `tests/fixtures/vulns/osv/` : trois enregistrements réels intacts (GHSA
 Composer, GHSA npm à scope, RUSTSEC), avec `NOTICE` (source, licence, lien,
 modifications). `fictif/` et `hostile/` : cas inventés (`example.org`) ;
-Wordfence et Friends-Of-Presta toujours fictifs, imités par `Draft`.
+Wordfence et Friends-Of-Presta toujours fictifs : `wordfence/` (flux
+`production` fictif, UUID `00000000-0000-4000-8000-0000000000NN`, titulaire
+inventé « Exemple Intelligence SARL », `CVE-2099-…`) et `friends-of-presta/`
+(avis `_posts/` fictifs, `release.json`), chacun avec son `README` ;
+l'archive `.tar.gz` est construite par le test, jamais commitée.
 `purl.json` (format `[{"in", "out", "why"}]`) est rejoué par l'agent PHP
 (F5) ; `osv-purl.json` et `cvss.json` (exemples de la spécification 3.1 de
 FIRST) sont propres au Rust.
@@ -612,6 +763,13 @@ FIRST) sont propres au Rust.
 - La borne basse exclusive de Wordfence (`from_inclusive: false`) est
   traduite en `introduced` inclusif par F3 : un signalement de trop plutôt
   qu'en moins.
+- Wordfence : les extensions premium hors wordpress.org (type autre que
+  `plugin`, `theme`, `core`) sont hors périmètre ; un slug homonyme d'une
+  extension sans rapport donne un faux positif ; l'en-tête `Bearer` reste
+  [NV] jusqu'à la relecture depuis le VPS.
+- Friends-Of-Presta : une formulation de « Impacted release » hors de la
+  grammaire fermée donne « plage inconnue » jusqu'à une correction de plage ;
+  le permalien du site Jekyll n'est pas utilisé (lien GitHub de l'avis).
 - `last_known_affected_version_range` n'est qu'une information : il ne
   réduit jamais le verdict.
 - Les contraintes Composer d'origine (`database_specific.constraint` des
@@ -655,8 +813,13 @@ constat `vulns-sync` le signale à 3 jours.
 ### Sources et ordre
 
 `[vulns] sources` est une liste fermée (`vulns::sync::registry::KNOWN`) :
-`osv-crates-io`, `osv-packagist`, `osv-npm`, synchronisées dans cet ordre
-(petites d'abord), une échéance par source. Identifiant inconnu, doublon ou
+`osv-crates-io`, `osv-packagist`, `friends-of-presta`, `wordfence`
+(avec `[vulns.wordfence]`, #17), `osv-npm`, synchronisées dans cet ordre
+(petites d'abord), une échéance par source. `registry::redistribution(id)`
+donne le niveau de redistribution de chaque identifiant (`wordfence` →
+`Internal`, `friends-of-presta` → `FactsOnly`, OSV, `kev`, `epss` → `Free`) ;
+un identifiant inconnu du binaire rend `None`, traité comme `Internal` par
+F7. Identifiant inconnu, doublon ou
 clé inconnue : erreur de configuration (code 2). Aucune URL n'est
 configurable : l'origine `https://osv-vulnerabilities.storage.googleapis.com`
 (port 443) est codée en dur, chaque redirection revérifiée (3 au plus).
@@ -846,6 +1009,36 @@ classe en information qu'une faille qu'aucune autre règle ne retient.
   machine équivalente. Cette correction est auditée et vaut pour tous les
   sites, mais ne masque rien : elle remplace « plage inconnue » par une plage
   évaluée.
+
+**Corrections de plage (#17).** `vigie vulns correct <id> <purl> --range
+<expr> --reason <motif>` (ou `--clear`) ; `vigie vulns corrections
+[--audit [--verify]]`.
+
+- Table `vuln_range_corrections` (migration `0018.sql`) **en ajout seul**
+  (déclencheurs) ; la ligne la plus récente d'une clé `(source, advisory_id,
+  purl)` fait foi, `ranges` NULL vaut retrait ; motif de 1 à 500 caractères,
+  assaini ; opérateur = nom du compte (`getpwuid(geteuid())`, jamais
+  `$USER`) ; date.
+- Source `friends-of-presta` seulement, ligne existante et `unevaluable` ;
+  expression dans la grammaire fermée ci-dessus, **sans** remarque entre
+  parenthèses ; refusée sans `[commands]` (pas de clé d'audit). Tout refus
+  sort en code 2. Une correction orpheline peut être retirée.
+- Chaque saisie et chaque retrait sont inscrits, dans la même transaction,
+  dans la chaîne d'audit signée du pseudo-site réservé `_veilleur`
+  (évènements `range-corrected`, `range-correction-cleared`) ; `tick` en
+  envoie la tête par e-mail comme pour un site. `--verify` contrôle la
+  chaîne et la correspondance dans les deux sens (chaque ligne a son entrée
+  au contenu égal, chaque entrée `range-*` a sa ligne) : tout écart, code 1.
+- Appliquée **à la lecture** (`candidates`) : seule une ligne `unevaluable`
+  de Friends-Of-Presta prend la plage corrigée, sans attendre la
+  synchronisation, et survit aux nouvelles générations ; `Candidate.corrected`
+  le dit, `match` et `show` affichent « plage corrigée » et le motif. États :
+  `active` ; `sans objet` (la source est devenue lisible : sa plage prime) ;
+  `orpheline` (faille ou purl disparu : sans effet) ; `illisible` (`ranges`
+  cassé en base : la ligne reste « plage inconnue ») ; `retirée`.
+- `corrections::latest_range_correction_id()` rend le plus grand `id`
+  (`None` si la table est vide), en lecture seule sur `Store::open_read` :
+  l'« époque » des corrections pour F7 (#21).
 
 ## Contrôle `vulns`
 
