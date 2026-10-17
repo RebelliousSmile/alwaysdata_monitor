@@ -10,11 +10,18 @@
 //!    par lots de 500, sous un budget global de 10 s vérifié entre deux lots
 //!    (`analysis/`, issue #8), puis réconcilie les constats `logs` de chacun
 //!    sur ses agrégats ;
-//! 5. clôt « plus surveillé » les incidents des contrôles que le registre des
+//! 5. rapproche les inventaires des sites des failles connues (#21,
+//!    `vulns/matching/pass.rs`) : ce qui a changé seulement, par lots de 500,
+//!    sous un budget de 10 s qui réserve le temps des envois (aucun lot après
+//!    `start + send_budget − send_reserve`, sauf le premier, et pas même lui
+//!    après `start + send_budget − send_reserve / 2`) ; une erreur d'un site
+//!    n'arrête jamais le passage ;
+//! 6. clôt « plus surveillé » les incidents des contrôles que le registre des
 //!    capacités ne surveille plus pour leur site (`capability::watched`), puis
 //!    envoie les e-mails en attente (ouvertures, clôtures, rappels) jusqu'à
-//!    50 s, y compris ceux des rapports d'agent acceptés par `serve`. Ce qui
-//!    n'a pas pu partir reste en attente pour le passage suivant.
+//!    50 s, y compris ceux des rapports d'agent acceptés par `serve`, groupés
+//!    par site au-delà de cinq pour le contrôle `vulns`. Ce qui n'a pas pu
+//!    partir reste en attente pour le passage suivant.
 
 use std::time::{Duration, Instant};
 
@@ -32,7 +39,10 @@ use crate::finding::Finding;
 use crate::http::{Http, REQUEST_TIMEOUT, Trust};
 use crate::logs::alwaysdata::AlwaysdataSource;
 use crate::logs::source::{Cursor, LogSource, SourceError};
-use crate::store::{Agent, Incident, META_TYPOLOGY_TICK, RunRecord, Store};
+use crate::store::{Agent, Incident, META_TYPOLOGY_TICK, Notified, RunRecord, Store};
+use crate::vulns::enrich_store::StoreTables;
+use crate::vulns::matching::pass::{self as matching_pass, Budget, PassReport};
+use crate::vulns::matching::store as matching_store;
 use crate::vulns::store as vulns_store;
 use crate::vulns::sync::{freshness, registry};
 
@@ -51,6 +61,15 @@ pub struct Options {
     /// illimité en production, borné par les tests pour épuiser le budget à
     /// un lot près.
     pub analysis_max_batches: usize,
+    /// Budget du rapprochement des failles (#21), pris sur celui du
+    /// passage : aucun lot ne commence au-delà, sauf le premier.
+    pub vulns_budget: Duration,
+    /// Temps réservé aux envois : l'analyse de logs et le rapprochement
+    /// s'arrêtent à `send_budget − send_reserve` ; aucun lot de rapprochement
+    /// ne commence après `send_budget − send_reserve / 2`.
+    pub send_reserve: Duration,
+    /// Lots de rapprochement au plus par passage (tests).
+    pub vulns_max_batches: usize,
 }
 
 impl Default for Options {
@@ -62,6 +81,9 @@ impl Default for Options {
             send_budget: Duration::from_secs(50),
             analysis_budget: Duration::from_secs(10),
             analysis_max_batches: usize::MAX,
+            vulns_budget: Duration::from_secs(10),
+            send_reserve: Duration::from_secs(10),
+            vulns_max_batches: usize::MAX,
         }
     }
 }
@@ -73,6 +95,10 @@ pub struct Summary {
     pub inconclusive: usize,
     /// Entrées de logs repliées, tous sites confondus.
     pub logs_folded: usize,
+    /// Composants d'inventaire rapprochés des failles (plages lues).
+    pub vulns_components: usize,
+    /// Sites dont le rapprochement a échoué ce passage.
+    pub vulns_errors: usize,
     pub emails_sent: usize,
     pub emails_pending: usize,
 }
@@ -136,10 +162,12 @@ pub fn run(config: &Config, now: i64) -> Result<()> {
     let notifier = SmtpNotifier::new(config.alerts.clone());
     let summary = run_with(config, now, &Options::default(), &notifier)?;
     log::info!(
-        "tick : {} contrôle(s), {} non concluant(s), {} entrée(s) de logs repliée(s), {} e-mail(s) envoyé(s), {} en attente",
+        "tick : {} contrôle(s), {} non concluant(s), {} entrée(s) de logs repliée(s), {} composant(s) rapproché(s), {} site(s) en échec de rapprochement, {} e-mail(s) envoyé(s), {} en attente",
         summary.checks_run,
         summary.inconclusive,
         summary.logs_folded,
+        summary.vulns_components,
+        summary.vulns_errors,
         summary.emails_sent,
         summary.emails_pending
     );
@@ -352,8 +380,10 @@ pub fn run_with_sources(
         store.reconcile(&site.id, TYPOLOGY, &findings, now)?;
     }
 
-    let analysis_deadline =
-        (Instant::now() + options.analysis_budget).min(start + options.send_budget);
+    // Le temps des envois est réservé : l'analyse de logs et le
+    // rapprochement s'arrêtent avant.
+    let sends_reserved = start + options.send_budget.saturating_sub(options.send_reserve);
+    let analysis_deadline = (Instant::now() + options.analysis_budget).min(sends_reserved);
     summary.logs_folded = analyse_logs(
         &mut store,
         config,
@@ -362,6 +392,15 @@ pub fn run_with_sources(
         analysis_deadline,
         options.analysis_max_batches,
     );
+
+    let budget = Budget {
+        deadline: (Instant::now() + options.vulns_budget).min(sends_reserved),
+        hard_stop: start + options.send_budget.saturating_sub(options.send_reserve / 2),
+        max_batches: options.vulns_max_batches,
+    };
+    let report = match_vulns(&mut store, config, now, &budget);
+    summary.vulns_components = report.components;
+    summary.vulns_errors = report.errors;
 
     // La référence a pu naître d'un rapport pendant le passage : relue.
     let baselines = store.baseline_sites()?;
@@ -393,6 +432,38 @@ pub fn run_with_sources(
     );
     summary.emails_pending = store.pending_notifications(now)?;
     Ok(summary)
+}
+
+/// Rapprochement inventaire × failles (#21) : l'étape entière est
+/// enveloppée, toute erreur (base de lecture, tables KEV et EPSS) est
+/// journalisée et le passage continue vers `close_unwatched` et `notify`.
+/// Puis minimisation des incidents `vulns` clos depuis 30 jours.
+fn match_vulns(store: &mut Store, config: &Config, now: i64, budget: &Budget) -> PassReport {
+    let report = match Store::open_read(&config.database) {
+        Ok(Some(reader)) => match StoreTables::open(&reader) {
+            Ok(tables) => matching_pass::run(store, &reader, config, &tables, now, budget),
+            Err(err) => {
+                log::error!("rapprochement des failles : tables KEV et EPSS illisibles : {err:#}");
+                PassReport::default()
+            }
+        },
+        Ok(None) => PassReport::default(),
+        Err(err) => {
+            log::error!("rapprochement des failles : base de lecture : {err:#}");
+            PassReport::default()
+        }
+    };
+    if store
+        .schema_version()
+        .is_ok_and(|v| v >= crate::store::SCHEMA_VULNS_MATCH)
+    {
+        match matching_store::mask_closed(store, now) {
+            Ok(0) => {}
+            Ok(n) => log::info!("{n} incident(s) de failles clos depuis 30 jours masqué(s)"),
+            Err(err) => log::error!("minimisation des incidents de failles : {err:#}"),
+        }
+    }
+    report
 }
 
 /// Fraîcheur des bases de failles (#16), avant `notify` pour que l'e-mail
@@ -729,8 +800,18 @@ enum Kind {
     Reminder,
 }
 
+/// Au-delà de ce nombre d'e-mails `vulns` en attente pour un site, un seul
+/// e-mail groupé part (#21).
+pub const VULNS_GROUP_OVER: usize = 5;
+
 /// Envoie dans l'ordre ouvertures, clôtures, rappels. S'arrête au premier
 /// échec : le relais est sans doute en panne, inutile d'insister.
+///
+/// Contrôle `vulns` : ce qui est **en attente pour un site** (ouvertures
+/// nouvelles et gravités montées, rappels, clôtures) au-delà de cinq part en
+/// un seul e-mail, puis tous sont marqués dans une transaction. Envoi raté :
+/// rien n'est marqué, l'e-mail groupé est retenté. Marquage raté après
+/// l'envoi : l'e-mail groupé peut repartir (doublon accepté).
 fn notify(
     store: &mut Store,
     config: &Config,
@@ -747,7 +828,46 @@ fn notify(
             Kind::Close => store.pending_closes()?,
             Kind::Reminder => store.due_reminders(now)?,
         };
-        for incident in incidents {
+        let mut vulns: std::collections::BTreeMap<String, Vec<Incident>> = Default::default();
+        for incident in incidents.iter().filter(|i| alert::is_vulns(i)) {
+            vulns
+                .entry(incident.site.clone())
+                .or_default()
+                .push(incident.clone());
+        }
+        vulns.retain(|_, list| list.len() > VULNS_GROUP_OVER);
+        for (site, list) in &vulns {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                log::warn!("échéance des envois atteinte, la suite au passage suivant");
+                return Ok(sent);
+            }
+            let url = site_url(config, site);
+            let (email, marked) = match kind {
+                Kind::Open => (alert::vulns_grouped_open(site, url, list), Notified::Open),
+                Kind::Close => (alert::vulns_grouped_close(site, url, list), Notified::Close),
+                Kind::Reminder => (
+                    alert::vulns_grouped_reminder(site, url, list),
+                    Notified::Reminder,
+                ),
+            };
+            if let Err(err) = notifier.send(&email, remaining) {
+                log::warn!("e-mail groupé des failles de {site} non envoyé : {err}");
+                return Ok(sent);
+            }
+            sent += 1;
+            let ids: Vec<i64> = list.iter().map(|i| i.id).collect();
+            if let Err(err) = store.mark_all_notified(marked, &ids, now) {
+                log::error!(
+                    "{site} : e-mail groupé des failles envoyé mais non noté, il pourra repartir : {err:#}"
+                );
+                return Ok(sent);
+            }
+        }
+        for incident in incidents
+            .into_iter()
+            .filter(|i| !(alert::is_vulns(i) && vulns.contains_key(&i.site)))
+        {
             let remaining = deadline.saturating_duration_since(Instant::now());
             if remaining.is_zero() {
                 log::warn!("échéance des envois atteinte, la suite au passage suivant");

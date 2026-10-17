@@ -687,3 +687,186 @@ async fn too_many_requests_carry_the_retry_delay() {
         .and_then(|n| n.parse::<u64>().ok());
     assert!(seconds.is_some_and(|s| s >= 1), "{err:?}");
 }
+
+/// Failles des composants (#21) : le site A déclare la source `ci`, une
+/// faille fictive (F1) touche un de ses 60 paquets (F6), `tick` rapproche ;
+/// la console lit les composants page par page, les failles et les sources.
+#[tokio::test]
+async fn reads_components_vulns_and_sources() {
+    use vigie::config::{InventorySource, SiteInventory, Vulns};
+    use vigie::inventory::{Component, ComponentType, Inventory, Scope, Source};
+    use vigie::store::InventoryDoc;
+    use vigie::vulns::advisory::{Advisory, Draft, DraftAffected, DraftEvent, DraftRange, Tally};
+    use vigie::vulns::purl::Purl;
+    use vigie::vulns::store::{LEASE, Load, SourceMeta, SyncMeta, upsert_source};
+    use vigie::vulns::version::Scheme;
+
+    let v = Veilleur::start_with(|config| {
+        config.sites[0].inventory = Some(SiteInventory::new(&[InventorySource::Ci]));
+        config.vulns = Some(Vulns {
+            sources: vec!["osv-packagist".into()],
+            wordfence: None,
+        });
+    })
+    .await;
+    {
+        let mut store = v.store();
+        upsert_source(
+            &mut store,
+            &SourceMeta {
+                id: "osv-packagist".into(),
+                url: "https://example.org/all.zip".into(),
+                license: String::new(),
+                attribution: "Attribution fictive de démonstration".into(),
+            },
+        )
+        .expect("source");
+        let advisory = Advisory::build(
+            Draft {
+                id: "GHSA-2099-aaaa-0001".into(),
+                aliases: vec!["CVE-2099-0001".into()],
+                modified: Some("2099-01-01T00:00:00Z".into()),
+                affected: vec![DraftAffected {
+                    purls: vec![Purl::parse("pkg:composer/exemple/p7").expect("purl")],
+                    scheme: Scheme::Composer,
+                    ranges: vec![DraftRange {
+                        kind: "ECOSYSTEM".into(),
+                        events: vec![
+                            DraftEvent::Introduced("0".into()),
+                            DraftEvent::Fixed("1.2.4".into()),
+                        ],
+                    }],
+                    versions: Vec::new(),
+                    last_known: None,
+                }],
+                ghsa_severity: Some("CRITICAL".into()),
+                attribution: Some("Données fictives (https://example.org/)".into()),
+                source_url: Some("https://example.org/avis/GHSA-2099-aaaa-0001".into()),
+                ..Draft::default()
+            },
+            &mut Tally::default(),
+        )
+        .expect("faille fictive");
+        let clock = FakeClock::new(T0 - 2 * DAY);
+        let mut load = Load::begin(&mut store, "osv-packagist", &clock, LEASE).expect("bail");
+        load.push(&[advisory]).expect("failles");
+        load.commit(&Tally::default(), &SyncMeta::default())
+            .expect("bascule");
+        let key = [9u8; 32];
+        store
+            .add_inventory_key("site-a", &key, T0 - 2 * DAY)
+            .expect("clé d'inventaire");
+        let mut components: Vec<Component> = (0..60)
+            .map(|i| Component {
+                purl: Purl::parse(&format!("pkg:composer/exemple/p{i}@1.2.3")).expect("purl"),
+                name: format!("p{i}"),
+                ty: ComponentType::Library,
+                scope: Scope::Required,
+                path: "composer.lock".into(),
+                parent: None,
+                config_version: None,
+            })
+            .collect();
+        components.sort_by_key(|c| c.purl.canonical());
+        let inventory = Inventory {
+            site: "site-a".into(),
+            source: Source::Ci,
+            seq: 1,
+            sent_at: T0 - DAY,
+            agent: "vigie-inventory/0.1.0".into(),
+            complete: true,
+            skipped: 0,
+            spec_version: "1.7".into(),
+            serial: "urn:uuid:00000000-0000-4000-8000-000000000001".into(),
+            generated_at: T0 - DAY,
+            digest: vigie::inventory::bom::digest(&components),
+            components,
+            dropped: Default::default(),
+        };
+        store
+            .accept_inventory(
+                &InventoryDoc {
+                    site: "site-a",
+                    source: Source::Ci,
+                    pubkey: &key,
+                    inventory: &inventory,
+                },
+                T0 - DAY,
+            )
+            .expect("inventaire");
+    }
+    let options = Options {
+        check_budget: Duration::ZERO,
+        ..Options::default()
+    };
+    tick::run_with_sources(&v.config, T0, &options, &MemoryNotifier::new(), &|_| None)
+        .expect("tick");
+    let client = v.paired("poste").await;
+
+    let mut seen = Vec::new();
+    let mut cursor: Option<String> = None;
+    let mut pages = 0;
+    loop {
+        let page = client
+            .components("site-a", cursor.as_deref())
+            .await
+            .expect("composants");
+        pages += 1;
+        assert_eq!(page.site, "site-a");
+        assert!(page.runs.ci.is_some());
+        assert_eq!(page.runs.agent, None);
+        seen.extend(page.items.iter().map(|c| c.purl.clone()));
+        cursor = page.next_cursor;
+        if cursor.is_none() {
+            break;
+        }
+    }
+    assert_eq!(pages, 2);
+    assert_eq!(seen.len(), 60);
+    assert_eq!(seen.iter().collect::<HashSet<_>>().len(), 60, "doublon");
+    assert_eq!(seen[0], "pkg:composer/exemple/p7", "la plus grave en tête");
+
+    let vulns = client.vulns("site-a", None).await.expect("failles");
+    assert_eq!(vulns.next_cursor, None);
+    let vuln = &vulns.items[0];
+    assert_eq!(vuln.group, "CVE-2099-0001");
+    assert_eq!(vuln.component, "pkg:composer/exemple/p7");
+    assert_eq!(vuln.versions[0].source, "ci");
+    assert_eq!(vuln.versions[0].version.as_deref(), Some("1.2.3"));
+    assert_eq!(vuln.verdict, "affected");
+    assert_eq!(vuln.fixed, ["1.2.4"]);
+    assert_eq!(vuln.severity, Severity::Critical);
+    assert_eq!(vuln.redistribution, "free");
+    assert_eq!(vuln.waiver, None);
+    assert_eq!(
+        vuln.links[0].url,
+        "https://example.org/avis/GHSA-2099-aaaa-0001"
+    );
+    assert_eq!(
+        vuln.attributions,
+        ["Données fictives (https://example.org/)"]
+    );
+
+    let sources = client.vuln_sources().await.expect("sources");
+    let ids: Vec<&str> = sources.sources.iter().map(|s| s.id.as_str()).collect();
+    assert_eq!(ids, ["osv-packagist", "kev", "epss"]);
+    assert_eq!(sources.sources[0].kind, "vulns");
+    assert_eq!(sources.sources[0].entries, 1);
+    assert_eq!(sources.sources[1].kind, "enrichment");
+    assert_eq!(sources.sources[1].dataset, None);
+
+    for site in ["site-b", "inconnu"] {
+        let err = client.vulns(site, None).await.expect_err("sans inventaire");
+        assert_eq!(err.kind, ErrorKind::NotFound, "{site}");
+        let err = client
+            .components(site, None)
+            .await
+            .expect_err("sans inventaire");
+        assert_eq!(err.kind, ErrorKind::NotFound, "{site}");
+    }
+    let err = client
+        .vulns("site-a", Some("!!!"))
+        .await
+        .expect_err("curseur illisible");
+    assert_eq!(err.kind, ErrorKind::BadRequest);
+}

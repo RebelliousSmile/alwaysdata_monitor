@@ -118,6 +118,9 @@ révocation.
 | `GET /api/v1/sites/{id}/incidents` | incidents fermés depuis 30 jours, par pages | Dispo |
 | `GET /api/v1/sites/{id}/logs` | dernier instantané de l'analyse des logs : robots, règles, charge | — |
 | `GET /api/v1/sites/{id}/logs/ips` | verdicts d'IP moyens et élevés, par pages | — |
+| `GET /api/v1/sites/{id}/components` | composants rapprochés des derniers inventaires (#21), par pages | Failles |
+| `GET /api/v1/sites/{id}/vulns` | failles des composants, une par (composant, faille fusionnée), par pages | Failles |
+| `GET /api/v1/vulns/sources` | sources de failles déclarées : âge, issue, attribution, constat `vulns-sync` | SourcesFailles |
 | `GET /api/v1/incidents/{id}` | un incident, ouvert ou fermé | Alerte |
 | `POST /api/v1/incidents/{id}/ack` | l'incident acquitté | Alerte |
 | `GET /api/v1/settings` | sites, fréquences, destinataire masqué, appareils | Parametres, Reglages |
@@ -142,7 +145,12 @@ Toute liste qui croît se lit par pages, par clé (jamais par rang) :
 
 Le curseur porte la clé du dernier élément servi : une page lue plus tard
 reprend juste après lui, sans doublon ni trou dû aux éléments arrivés
-entre-temps. Les listes bornées par la configuration ne se paginent pas :
+entre-temps. Exception : les listes du rapprochement (`components`, `vulns`,
+#21) sont figées sur les runs actifs de chaque source, qui ne changent jamais
+en place ; leur curseur porte ces runs et un rang (une clé citerait un
+chemin du site). Un run basculé entre deux pages (nouveau rapprochement ou
+réévaluation KEV et EPSS) rend 409 `cursor_expired` : le client reprend au
+début, sans curseur. Les listes bornées par la configuration ne se paginent pas :
 sites (200 au plus, `config.toml` en refuse davantage) et contrôles d'un site.
 
 ### Incident
@@ -370,6 +378,96 @@ libellé des raisons, qui peut citer l'un ou l'autre.
   `cursor_expired`, le client reprend au début, sans curseur.
 - Site sans source de logs ou absent de la configuration : 404.
 
+### `GET /api/v1/sites/{id}/components`
+
+```json
+{
+  "site": "site-a",
+  "runs": { "agent": 12, "ci": null },
+  "items": [
+    { "source": "agent", "purl": "pkg:wordpress/plugin/exemple-plugin", "version": "1.2.3",
+      "scope": "required", "vulns": 1, "severity": "critical" }
+  ],
+  "next_cursor": "YzF8…"
+}
+```
+
+Composants des derniers inventaires du site, rapprochés des failles connues
+(#21), une ligne par (source, composant, chemin), triés par gravité puis
+purl. `runs` : run actif de chaque source d'inventaire (`null` : aucun).
+`version` à `null` si inconnue, `severity` à `null` sans faille. Ni
+`vigie:path`, ni `name` CycloneDX brut. **Limite de minimisation** : la
+console appairée reçoit **tous** les composants rapprochés du site, failles
+ou non.
+
+### `GET /api/v1/sites/{id}/vulns`
+
+```json
+{
+  "site": "site-a",
+  "runs": { "agent": 12, "ci": 13 },
+  "items": [
+    { "group": "CVE-2099-0002", "ids": ["CVE-2099-0002", "WF-2099-0002"],
+      "component": "pkg:wordpress/plugin/exemple-plugin",
+      "versions": [{ "source": "agent", "version": "1.2.3" }, { "source": "ci", "version": "1.2.4" }],
+      "verdict": "affected", "corrected": false, "divergence": false, "fixed": ["1.2.4"],
+      "severity": "critical", "rule": "kev",
+      "kev": { "cve": "CVE-2099-0002", "date_added": "2099-01-10", "ransomware": false },
+      "epss": { "score": 123456, "percentile": 900000 }, "score": 98,
+      "redistribution": "internal",
+      "waiver": { "source": "agent", "until": 4073500800, "state": "valid" },
+      "links": [{ "source": "wordfence", "url": "https://example.org/avis/WF-2099-0002" }],
+      "attributions": ["Copyright 2099 Exemple Intelligence SARL"] }
+  ],
+  "next_cursor": null
+}
+```
+
+Failles des composants du site, une par (purl sans version, faille fusionnée
+par alias), triées par gravité, purl puis faille ; chaque faille **embarque**
+son composant et la version vue par chaque source. `verdict` :
+`affected`, `version_unknown` ou `range_unknown` (jamais « aucune faille ») ;
+`fixed` vide : aucun correctif ; `rule` : règle de F4 (`kev`, `malicious`,
+`cvss_critical`, `cvss_high`, `epss`, `unknown_severity`, `informational`,
+`default`) ou `version_unknown`, `range_unknown` ; `score` : CVSS en
+dixièmes ; `epss` en millionièmes ; `redistribution` : `internal`,
+`facts_only` ou `free` ; `waiver` : source, échéance et état (`valid`,
+`expired`, `version_changed`, `group_changed`, `kev`), **jamais le motif ni
+l'opérateur** ; `attributions` : entières, relues depuis la source de chaque
+membre. Aucun résumé ni texte d'avis. Tout texte d'une source passe par
+`LogText`.
+
+Ces deux routes répondent 404, le même corps, pour un site inconnu, un site
+sans `[sites.inventory]` (contrôle `vulns` non surveillé), un site jamais
+rapproché (aucun run actif) et une base antérieure au schéma du
+rapprochement.
+
+### `GET /api/v1/vulns/sources`
+
+```json
+{
+  "sources": [
+    { "id": "kev", "kind": "enrichment", "last_success_at": 1792000000,
+      "last_outcome": "loaded", "entries": 1400, "license": "…", "attribution": "…",
+      "redistribution": "free", "dataset": { "version": "2099.01.15", "released": 1791900000 },
+      "incident": null }
+  ]
+}
+```
+
+Une entrée par source de `[vulns] sources` (KEV et EPSS d'office dès qu'une
+source de failles est déclarée), dans l'ordre du registre ; liste vide sans
+`[vulns]`. `kind` : `vulns` ou `enrichment` ; `dataset` : jeu actif de KEV ou
+d'EPSS ; `incident` : constat `vulns-sync` ouvert de la source (`id`,
+`severity`, `opened_at`). Non paginé. Jamais chargée : `last_success_at` et
+`dataset` à `null`. Ni erreur brute, ni URL de validateur, ni résumé.
+
+Le détail d'un incident `vulns` (dans `overview`, `sites/{id}`,
+`incidents/{id}`) est assaini ligne à ligne par `LogText`, ses sauts de ligne
+gardés, 4 096 caractères au plus. Un incident `vulns` critique rend le site
+`non_compliant`, comme tout incident critique ; un incident d'information ne
+compte pas.
+
 ### `GET /api/v1/incidents/{id}`
 
 L'incident, ouvert ou fermé. Identifiant inconnu ou non entier : 404.
@@ -470,6 +568,8 @@ des maquettes (non conforme, aveugle, à vérifier, OK) : il est placé avant
 | Parametres | `settings` (site concerné) et `sites/{id}` (`interval`, `agent_silence`). |
 | Reglages | `settings` : `alerts.to`, `devices`, `public_url` ; retrait par `devices/self`. |
 | Etats | `state` à `blind` ou `first_read`, `server_time` et `last_read` pour la fraîcheur, échec réseau pour « hors ligne ». |
+| Failles | `sites/{id}/vulns` (composants touchés, failles, versions par source, correctif, KEV, EPSS, dérogation, liens, attributions, mention « usage interne » ou « faits seulement ») et `sites/{id}/components`, par pages ; 404 : écran « non alimenté » ; aucune action d'écriture. |
+| SourcesFailles | `vulns/sources` : âge, dernière issue, entrées, licence, attribution, jeu KEV et EPSS, constat `vulns-sync` ouvert. |
 
 ## Limite de débit
 
@@ -569,6 +669,11 @@ absente ou antérieure au schéma 6 (appareils au schéma 5, résultat des
 passages au schéma 6), toute requête reçoit 401.
 
 Avant le schéma 11 (instantanés de l'analyse des logs), `logs` répond
-`{"analysis": null}` et `logs/ips` une liste vide. Le schéma 12 ajoute
+`{"analysis": null}` et `logs/ips` une liste vide. Avant le schéma du
+rapprochement (fichier `0021.sql`, #21 : `vuln_match_runs`,
+`vuln_match_state`, `vuln_match_components`, `vuln_match_items`,
+`vuln_match_seen`, `vuln_match_keys`, `vuln_waivers`), `components` et
+`vulns` répondent 404 ; `vulns/sources` lit les tables de failles (#15 à
+#18) et vaut des champs à `null` sur une base antérieure. Le schéma 12 ajoute
 l'index `(site, closed_at, id)` des incidents clos, lu par
 `sites/{id}/incidents`.

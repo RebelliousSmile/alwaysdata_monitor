@@ -1169,6 +1169,31 @@ avertissement » : la règle de F0 fait foi.
 - Liée à la version du composant : une autre version la rend caduque.
 - Inscrite dans l'audit.
 - Interdite pour une faille dont un CVE est dans KEV.
+- **Mise en œuvre (#21)** : `vigie site vulns-ack <site> <purl> <faille>
+  [--source agent|ci]… --reason <motif> --until <AAAA-MM-JJ>`, aperçu puis
+  `--apply` ; retrait par `--revoke <id> --reason <motif>`. Une dérogation
+  vaut pour **une source d'inventaire et la version qu'elle voit** (deux
+  sources : deux dérogations, `--source` répété, obligatoire si le site en
+  déclare deux) ; faille saisie par identifiant ou alias, normalisé ;
+  `covered_ids` = tous les identifiants et alias du groupe à la saisie.
+  Caduque (« groupe changé ») dès qu'un identifiant **ou un alias** hors de
+  cet ensemble rejoint le groupe — un simple alias nouveau publié par une
+  source suffit, la dérogation est à ressaisir —, quand la version de la
+  source change, quand un CVE du groupe entre dans KEV, et à son échéance.
+  Refusée pour une version inconnue (l'avertissement « version inconnue » sur
+  une faille critique ne peut qu'être acquitté par `vigie ack`), une faille
+  qui ne touche pas le composant, un composant absent du dernier inventaire
+  de la source, sans `[commands]`. Échéance et motif contrôlés avant toute
+  lecture de la base ; tout refus en code 2.
+- **Effet** : le groupe sort du calcul de gravité, listé « sous dérogation
+  jusqu'au … » ; s'il ne reste rien d'autre, l'incident reste **ouvert en
+  information** (aucune clôture « rétabli ») ; à l'échéance, la gravité
+  remonte et l'e-mail d'ouverture repart sur le même incident.
+- **Audit par empreinte** : chaque saisie et chaque retrait sont inscrits,
+  dans la même transaction, dans la chaîne d'audit signée du site
+  (`vuln-waived`, `vuln-waiver-revoked`) ; `detail` = `{ purl, advisory,
+  until, operator, reason_sha256 }`, jamais le texte du motif, qui ne vit que
+  dans `vuln_waivers`, purgée par `site remove`.
 - Distincte de la **correction de plage** : pour une plage libre de
   Friends-Of-Presta non reconnue, l'exploitant peut saisir sur le VPS la plage
   machine équivalente. Cette correction est auditée et vaut pour tous les
@@ -1207,13 +1232,19 @@ avertissement » : la règle de F0 fait foi.
 
 ## Contrôle `vulns`
 
-- Déclaré dans le registre de capacités (#4).
+- Déclaré dans le registre de capacités (#4) : `Control::Vulns`, nom
+  `vulns`, dernier de `Control::ALL` (15), tous les CMS, condition
+  `Needs::InventorySource`.
 - Surveillé si le site déclare une source d'inventaire dans `[sites.inventory]`
   (`capability::inventory_sources` non vide) : `agent-php` (agent PHP avec
   inventaire, runtime `php`) ou `ci` (`vigie-inventory`, #20, tout runtime).
   Les sites `node` et `static` sont donc couverts par la source `ci`. La clé
   d'inventaire n'entre pas dans la condition : elle n'est admise que pour un
-  site qui déclare `ci`.
+  site qui déclare `ci`. Section retirée : `close_unwatched` clôt les
+  incidents `vulns` « plus surveillé ». **Écart à l'issue #21** (« surveillé
+  si un inventaire reçu depuis moins de 7 jours ») : F0 fait foi, l'absence
+  d'inventaire devient « inventaire périmé », jamais une perte de
+  surveillance.
 - Péremption **par source** (`inventory::stale_after`) : sans inventaire
   `agent` depuis plus de 7 jours, ou sans inventaire `ci` depuis plus de
   35 jours (le job planifié hebdomadaire de la CI le renvoie), constat
@@ -1230,9 +1261,168 @@ avertissement » : la règle de F0 fait foi.
 - Sources consultées : Wordfence pour un site `wordpress`, Friends-Of-Presta
   pour un site `prestashop`, OSV pour tout composant `composer`, `npm` ou
   `cargo`, quel que soit le site.
-- Conservation : dernier inventaire et 30 jours d'historique ; détails des
-  incidents `vulns` masqués 30 jours après leur clôture ; tout est purgé par
-  `site remove`.
+- Conservation : dernier inventaire et 30 jours d'historique ; détail **et
+  clé** des incidents `vulns` masqués 30 jours après leur clôture
+  (`<site>/vulns/masque-<id>` : la clé nomme un composant du client), détail
+  du dernier passage `vulns` d'un site masqué de même ; résultats d'un site
+  retiré de la configuration ou sans source d'inventaire supprimés au passage
+  suivant ; `site remove` purge inventaires, résultats, provenance,
+  dérogations (motifs compris) et passages `vulns`, sans toucher aux
+  incidents.
+
+## Rapprochement (F7)
+
+Issue #21 ; plan `aidd_docs/tasks/2026_10/2026_10_17_rapprochement-failles/`.
+Code : `src/vulns/matching/` (`group`, `assess`, `waiver`, `finding` purs ;
+`epoch`, `store`, `pass` pour `tick` ; `waiver_store`, `report` pour la CLI) ;
+migration `0021.sql` (`SCHEMA_VULNS_MATCH`).
+
+**Déclenchement par état comparé, dans `tick` seul.** « À la réception d'un
+inventaire » et « après chaque synchronisation » s'entendent au passage de
+`tick` qui suit (une minute au plus) ; `serve` et `vulns sync` ne
+rapprochent jamais. Pour chaque (site, source d'inventaire), `tick` compare
+l'état gardé (`vuln_match_state`) à l'état courant : dernier inventaire et
+son `seen_at` ; `match_epoch` = SHA-256 des générations actives des sources
+de failles **déclarées** et du dernier id des corrections de plage ;
+`enrich_epoch` = générations de `kev` et `epss` ; `waiver_epoch` du site =
+`(max(id), max(revoked_at), count(*), count(revoked_at))` ; sources
+d'inventaire déclarées ; échéances gardées (péremption, fin de report, perte
+de vue, dérogation). Ce qui est refait : inventaire ou `match_epoch` changés
+→ rapprochement de la source, plages relues, dans un run neuf ;
+`enrich_epoch` seule → **réévaluation** de la gravité sur les faits gardés,
+dans un run neuf, sans relire une plage ; le reste → constats seuls. Dans
+tous les cas les constats du site sont reconstruits en entier depuis les runs
+de toutes ses sources, puis passés à **une** réconciliation.
+
+**Budget.** Échéance `min(maintenant + 10 s, start + send_budget −
+send_reserve)` (`vulns_budget` et `send_reserve` à 10 s), vérifiée entre deux
+lots ; un lot obligatoire par passage, sauf après `start + send_budget −
+send_reserve / 2` ; l'analyse de logs s'arrête elle aussi à `start +
+send_budget − send_reserve`. Sites à tour de rôle, le plus anciennement dû
+d'abord, ceux en erreur en dernier ; un run commencé reprend au `rowid`
+suivant de l'inventaire. Mesure en release (`tests/vulns_match_budget.rs`,
+200 sites × 2 000 composants, 20 000 failles fictives) : tout couvert en
+13 passages, lot le plus long 0,61 s, bascule la plus longue 24 ms.
+
+**Erreurs isolées.** Chaque site dans son propre `Result` : une erreur (ligne
+illisible, JSON corrompu, faille candidate illisible) est journalisée,
+comptée (`error_count`, `vigie status` : « rapprochement en échec depuis N
+passages »), le passage continue et les e-mails partent ; l'époque des
+failles du site est oubliée, le passage suivant reprend au début dans un run
+neuf. L'étape ne propage jamais d'erreur à `tick`.
+
+**Runs, comme les générations de F1.** Id dans une séquence globale
+(`vuln_match_runs`), lots IMMEDIATE de 500 composants avec compare-and-swap
+du curseur (deux `tick` concurrents n'écrivent jamais deux fois une
+position) ; constats construits **hors transaction**, puis une transaction
+IMMEDIATE revérifie ce qui a été lu (runs actifs et en cours, époques des
+failles et des dérogations, incidents ouverts : tout écart, rien n'est écrit,
+le site reste dû), bascule le run en compare-and-swap, clôt d'abord « plus
+surveillé » ce qui ne tenait qu'à une source retirée ou à un report échu,
+puis appelle `reconcile_in` ; l'ancien run est purgé ensuite par lots. Un
+lecteur (API, CLI) ne lit que l'`active_run` de chaque source. Cache des
+candidates d'un passage borné en poids (50 000 lignes et `versions[]`).
+
+**Deux sources, une union.** Un composant a pour identité (source, purl
+sans version, chemin) ; les composants d'un site sont l'union des derniers
+inventaires de chaque source déclarée ; seuls les écosystèmes admis pour le
+CMS du site (`inventory_ecosystems`) et les candidates des sources de failles
+déclarées comptent. L'absence d'un composant ne se juge que dans un
+inventaire **complet de la même source**. Un composant absent d'un relevé
+**partiel** de sa source est reporté, rapproché sur sa dernière version
+connue, « absent d'un relevé partiel », tant que sa dernière vue a moins de
+`inventory::stale_after(source)` (7 jours `agent`, 35 jours `ci`).
+
+**Fusion et verdict.** Les candidates d'un purl qui partagent un identifiant
+ou un alias normalisé forment un groupe (union-find, fermeture transitive),
+clé = plus petit CVE, sinon plus petit identifiant. Verdict : touché si un
+membre l'est (correctif = le plus grand des plus petits correctifs s'ils se
+comparent, sinon tous), sinon inconnu avec « plage inconnue » prioritaire sur
+« version inconnue », sinon non touché. Gravité par la seule règle de F4
+(`assess_group`, `assess_unknown`, [Gravité](#gravité)) ; niveau de
+redistribution = le plus restrictif des sources du groupe (inconnue :
+interne), affiché, jamais utilisé pour cacher une faille à l'exploitant.
+
+**Un constat par (site, purl sans version)**, agrégé sur toutes les sources,
+tous les chemins et toutes les failles : clé = purl canonique sans version
+tel qu'indexé (jamais la version, le chemin ni un nom propre au site) ;
+constats de péremption `inventaire-perime-agent`, `inventaire-perime-ci`.
+**Seuils** : ouvert à l'avertissement ou au-dessus (une faille d'information
+seule n'ouvre rien : elle reste visible dans `vigie site vulns --all`, l'API
+et la console), ou tenu ouvert par une dérogation ; un incident ouvert reste
+ouvert, en information s'il le faut, tant qu'un groupe touché ou inconnu
+subsiste (pas de battement EPSS 0,09 → 0,11 → 0,09). Gravité = maximum hors
+dérogation ; une faille entrée dans KEV fait monter le même incident, et
+l'e-mail d'ouverture repart. **Détail** écrit par Vigie, assaini champ par
+champ, 4 096 caractères au plus : première ligne de 200 caractères au plus
+(objet de l'e-mail : purl, version vue par chaque source « agent : 1.2.3 ;
+ci : 1.2.4 », nombre de failles et de critiques, « corriger : ≥ v » ou
+« aucun correctif »), une ligne par groupe du plus grave au moins grave
+(identifiants, état, gravité et règle, CVSS, KEV, EPSS, correctif, liens),
+« + K autres : vigie site vulns <site> », mention « usage interne » d'un
+groupe non libre, attributions dédoublonnées et jamais tronquées (les groupes
+cèdent la place). Aucun résumé ni titre de source.
+
+**Clôture : « rétabli » seulement sur preuve.** Un incident est clos
+« rétabli » quand tous les groupes de toutes les vues qui voient le composant
+sont non touchés (version corrigée), ou quand chaque **source requise** a
+fourni, après sa dernière vue, un inventaire complet sans lui. Sources
+requises = sources qui l'ont vu (provenance `vuln_match_seen`, gardée pour les
+seuls purl à faille candidate) ∩ sources encore déclarées ∩ sources qui
+peuvent porter l'écosystème (`source_carries` : `ci` ne porte jamais
+`wordpress` ni `prestashop`, l'agent jamais `cargo`) ; provenance perdue
+(`site remove`) : toutes les sources déclarées qui le peuvent, comptées
+depuis `lost_view_at` (date du retrait). Sinon l'incident est gardé tel quel
+(même clé, gravité, détail), puis clos « **plus surveillé** », jamais
+« rétabli », quand une source requise manquante atteint
+`inventory::stale_after` depuis sa dernière vue. Même règle pour une source
+d'inventaire retirée de `[sites.inventory]` (état et run supprimés,
+constats qu'elle seule voyait clos « plus surveillé ») et pour une source de
+failles retirée de `[vulns]` (constat dont tous les groupes ne tenaient qu'à
+elle).
+
+**Inventaire périmé.** Sans inventaire d'une source depuis plus de
+`stale_after(source)`, compté depuis le plus tardif du dernier inventaire et
+de la déclaration de la source (méta `vulns.inventory.declared.<site>.<source>`
+écrite au premier passage qui la voit) : avertissement
+`inventaire-perime-<source>` ; les constats de composants restent, rapprochés
+sur le dernier inventaire. Un renvoi inchangé le clôt.
+
+**E-mails.** Objet d'un incident `vulns` = première ligne du détail ; corps
+avec `vigie site vulns <site>`. Ce qui est **en attente pour un site** —
+ouvertures (gravités montées et KEV comprises), rappels, clôtures — au-delà de
+cinq part en **un seul e-mail** groupé (comptes par gravité, les dix plus
+graves, rétablis et plus surveillés séparés), puis tous sont marqués dans une
+transaction ; cinq ou moins, un e-mail par incident. Envoi raté : rien n'est
+marqué, l'e-mail groupé repart. Marquage raté après un envoi réussi : il peut
+partir une seconde fois (doublon accepté).
+
+**Lectures.** CLI : `vigie site components`, `vigie site vulns [--all]`,
+`vigie vulns report` (document interne), ligne « failles » de `vigie status`.
+API : `/api/v1/sites/{id}/components`, `/sites/{id}/vulns`, `/vulns/sources`
+([`api-console.md`](./api-console.md)). Console : écrans « Failles » et
+« Sources de failles », sans action d'écriture.
+
+### Limites connues (F7)
+
+- Slug homonyme : une extension privée qui porte le slug d'une extension
+  publique reçoit ses failles ; `wpackagist` sur un site `generic`
+  (`Conventions purl`) ; une fusion par alias erronée dans une source affiche
+  deux failles comme une (membres listés, gravité maximale). Parade : une
+  dérogation par source et version.
+- Rapprochement au passage de `tick` qui suit : jusqu'à une minute après un
+  inventaire ou une synchronisation, plusieurs passages pour un premier
+  rapprochement de nombreux sites.
+- Vue `ci` en retard sur `agent` : un composant corrigé sur le serveur (vu par
+  l'agent) reste signalé par la vue `ci` tant que la CI ne repousse pas
+  d'inventaire, jusqu'à 35 jours ; le détail dit quelle source voit quelle
+  version.
+- E-mail groupé en double si son marquage échoue après l'envoi ; un groupe
+  redescendu de six à cinq en attente donne cinq e-mails.
+- Une dérogation vaut pour une source ; un nouvel alias publié la rend
+  caduque (à ressaisir).
+- `/components` sert à la console appairée **tous** les composants
+  rapprochés d'un site, failles ou non, sans chemin ni nom brut.
 
 ## Redistribution, affichage et fixtures
 

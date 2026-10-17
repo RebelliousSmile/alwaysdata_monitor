@@ -30,6 +30,7 @@ const readAt = computed<number | undefined>(() => {
   if (routeName.value === 'sites') return sites.overview?.at
   if (inSite.value) return sites.details[site.value]?.at
   if (routeName.value === 'reglages') return sites.settings?.at
+  if (routeName.value === 'sources-failles') return sites.vulnSources?.at
   return undefined
 })
 
@@ -65,13 +66,13 @@ const header = computed(() => {
   return {
     title: route.meta.title ?? 'Vigie',
     back: { name: route.meta.back ?? 'sites' } as RouteLocationRaw,
-    reloadLabel: routeName.value === 'reglages' ? 'Relire maintenant' : undefined,
+    reloadLabel: ['reglages', 'sources-failles'].includes(routeName.value) ? 'Relire maintenant' : undefined,
   }
 })
 
 const global = computed(() => {
   if (routeName.value === 'sites') return 'sites'
-  if (routeName.value === 'reglages' || routeName.value === 'emails') return 'reglages'
+  if (['reglages', 'emails', 'sources-failles'].includes(routeName.value)) return 'reglages'
   return undefined
 })
 
@@ -108,11 +109,16 @@ async function load(): Promise<void> {
     await sites.loadSettings()
     return
   }
+  if (name === 'sources-failles') {
+    await sites.loadVulnSources()
+    return
+  }
   if (!inSite.value || !site.value) return
   const jobs: Promise<boolean>[] = [sites.loadSite(site.value)]
   if (DETAIL_SCREENS.has(name)) jobs.push(sites.loadHistory(site.value))
   if (LOG_SCREENS.has(name)) jobs.push(sites.loadLogs(site.value))
   if (name === 'trafic') jobs.push(sites.loadIps(site.value))
+  if (name === 'failles') jobs.push(sites.loadVulns(site.value), sites.loadComponents(site.value))
   if (name === 'alerte') {
     const id = Number(route.params.id)
     if (Number.isSafeInteger(id) && id > 0) jobs.push(sites.loadIncident(id))

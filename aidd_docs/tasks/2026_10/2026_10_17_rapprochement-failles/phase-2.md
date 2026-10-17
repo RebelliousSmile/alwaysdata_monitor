@@ -1,5 +1,5 @@
 ---
-status: pending
+status: done
 ---
 
 # Instruction: Résultats stockés, passage de tick borné, contrôle vulns, péremption, e-mails

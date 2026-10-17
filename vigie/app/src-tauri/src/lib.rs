@@ -12,8 +12,8 @@ use serde::Serialize;
 use tauri::{Manager, State};
 
 use client::{
-    ApiError, Client, ErrorKind, Incident, LogIps, Overview, Settings, SiteDetail, SiteIncidents,
-    SiteLogs,
+    ApiError, Client, ErrorKind, Incident, LogIps, Overview, Settings, SiteComponents, SiteDetail,
+    SiteIncidents, SiteLogs, SiteVulns, VulnSources,
 };
 use secret::{SecretStore, TokenStorage};
 
@@ -252,6 +252,37 @@ async fn log_ips(
         .await
 }
 
+/// Une page des composants d'un site ; `cursor` absent pour la première.
+#[tauri::command]
+async fn components(
+    console: State<'_, Console>,
+    site: String,
+    cursor: Option<String>,
+) -> Result<SiteComponents, ApiError> {
+    console
+        .call(|client| async move { client.components(&site, cursor.as_deref()).await })
+        .await
+}
+
+/// Une page des failles d'un site ; `cursor` absent pour la première.
+#[tauri::command]
+async fn vulns(
+    console: State<'_, Console>,
+    site: String,
+    cursor: Option<String>,
+) -> Result<SiteVulns, ApiError> {
+    console
+        .call(|client| async move { client.vulns(&site, cursor.as_deref()).await })
+        .await
+}
+
+#[tauri::command]
+async fn vuln_sources(console: State<'_, Console>) -> Result<VulnSources, ApiError> {
+    console
+        .call(|client| async move { client.vuln_sources().await })
+        .await
+}
+
 #[tauri::command]
 async fn incident(console: State<'_, Console>, id: i64) -> Result<Incident, ApiError> {
     console
@@ -286,7 +317,20 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            status, pair, unpair, overview, site, incidents, logs, log_ips, incident, ack, settings
+            status,
+            pair,
+            unpair,
+            overview,
+            site,
+            incidents,
+            logs,
+            log_ips,
+            components,
+            vulns,
+            vuln_sources,
+            incident,
+            ack,
+            settings
         ])
         .run(tauri::generate_context!())
         .expect("échec du lancement de la console Vigie");
@@ -388,6 +432,9 @@ mod tests {
                 "incidents",
                 "logs",
                 "log_ips",
+                "components",
+                "vulns",
+                "vuln_sources",
                 "incident",
                 "ack",
                 "settings"

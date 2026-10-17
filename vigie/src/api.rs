@@ -59,7 +59,15 @@ use crate::store::{
 
 use limit::{IpKey, Limiter};
 use log_text::LogText;
-use page::{IncidentCursor, Page, PageQuery, VerdictCursor};
+use page::{
+    ComponentCursor, IncidentCursor, MatchCursor, Page, PageQuery, VerdictCursor, VulnCursor,
+};
+
+use crate::inventory::Source;
+use crate::vulns::matching::finding::MAX_VULNS_DETAIL_CHARS;
+use crate::vulns::matching::report as match_report;
+use crate::vulns::matching::store as match_store;
+use crate::vulns::sources::Redistribution;
 
 /// Taille maximale du corps de `POST /api/v1/pair`, en octets.
 pub const MAX_PAIR_BYTES: usize = 1024;
@@ -70,6 +78,8 @@ pub const PREFIX: &str = "/api/v1";
 /// Contrôle dont les incidents et les passages portent du texte de logs
 /// (analyse de #8).
 pub const LOGS_CHECK: &str = "logs";
+/// Contrôle dont les incidents citent des failles de sources tierces (#21).
+pub const VULNS_CHECK: &str = crate::vulns::matching::finding::CHECK;
 
 pub(crate) fn routes() -> Router<Arc<AppState>> {
     Router::new()
@@ -90,6 +100,18 @@ pub(crate) fn routes() -> Router<Arc<AppState>> {
         .route(
             "/api/v1/sites/{id}/logs/ips",
             get(site_log_ips_handler).fallback(not_found),
+        )
+        .route(
+            "/api/v1/sites/{id}/components",
+            get(site_components_handler).fallback(not_found),
+        )
+        .route(
+            "/api/v1/sites/{id}/vulns",
+            get(site_vulns_handler).fallback(not_found),
+        )
+        .route(
+            "/api/v1/vulns/sources",
+            get(vuln_sources_handler).fallback(not_found),
         )
         .route(
             "/api/v1/incidents/{id}",
@@ -763,10 +785,20 @@ struct IncidentJson {
 
 /// Texte d'un incident ou d'un passage : assaini par [`LogText`] pour le
 /// contrôle `logs`, dont il vient des logs (déjà assaini à l'écriture par
-/// #8 ; la lecture ne s'y fie pas).
+/// #8 ; la lecture ne s'y fie pas), et pour `vulns` (#21), dont il cite des
+/// identifiants, liens et attributions de sources tierces : ligne à ligne,
+/// les sauts de ligne du détail gardés, 4 096 caractères au plus.
 fn check_text(check: &str, text: &str) -> String {
     if check == LOGS_CHECK {
         LogText::detail(text).into()
+    } else if check == VULNS_CHECK {
+        text.split('\n')
+            .map(|line| String::from(LogText::new(line, MAX_VULNS_DETAIL_CHARS)))
+            .collect::<Vec<_>>()
+            .join("\n")
+            .chars()
+            .take(MAX_VULNS_DETAIL_CHARS)
+            .collect()
     } else {
         text.to_owned()
     }
@@ -957,7 +989,8 @@ async fn site_handler(
                 | Control::Agent(_)
                 | Control::Logs
                 | Control::Typology
-                | Control::VulnsSync => {
+                | Control::VulnsSync
+                | Control::Vulns => {
                     if let Some(run) = run_of(name) {
                         checks.push(CheckJson::new(name, None, Some(run)));
                     }
@@ -1326,6 +1359,455 @@ async fn site_log_ips_handler(
     .await
 }
 
+/// Rang d'un site surveillé par le contrôle `vulns` (#21) ; `None` (404)
+/// sinon.
+fn vulns_site_index(state: &AppState, id: Result<Path<String>, PathRejection>) -> Option<usize> {
+    site_index(state, id)
+        .filter(|&index| !capability::inventory_sources(&state.config.sites[index]).is_empty())
+}
+
+/// Runs actifs de chaque source, servis avec chaque page.
+#[derive(Debug, Clone, Copy, Serialize)]
+struct RunsJson {
+    agent: Option<i64>,
+    ci: Option<i64>,
+}
+
+impl RunsJson {
+    fn of(runs: &[(Source, i64)]) -> Self {
+        let find = |s: Source| runs.iter().find(|(r, _)| *r == s).map(|(_, id)| *id);
+        Self {
+            agent: find(Source::Agent),
+            ci: find(Source::Ci),
+        }
+    }
+
+    fn cursor(self, offset: usize) -> MatchCursor {
+        MatchCursor {
+            agent: self.agent,
+            ci: self.ci,
+            offset,
+        }
+    }
+
+    fn matches(self, cursor: &MatchCursor) -> bool {
+        (self.agent, self.ci) == (cursor.agent, cursor.ci)
+    }
+}
+
+/// Lecture d'une page du rapprochement : base au schéma de F7 et un run
+/// actif au moins, sinon 404 commun ; runs du curseur toujours actifs,
+/// sinon 409 `cursor_expired`. `read` reçoit les runs, dans la même
+/// transaction de lecture que leur vérification.
+fn match_page<T>(
+    store: &Store,
+    site: &str,
+    cursor: Option<&MatchCursor>,
+    read: impl FnOnce(&Store, &[(Source, i64)]) -> anyhow::Result<T>,
+) -> anyhow::Result<Result<(RunsJson, T), ApiError>> {
+    if !match_store::available(store)? {
+        return Ok(Err(ApiError::NOT_FOUND));
+    }
+    let tx = store.conn.unchecked_transaction()?;
+    let runs = match_report::active_runs(store, site)?;
+    if runs.is_empty() {
+        return Ok(Err(ApiError::NOT_FOUND));
+    }
+    let json = RunsJson::of(&runs);
+    if cursor.is_some_and(|c| !json.matches(c)) {
+        return Ok(Err(ApiError::CURSOR_EXPIRED));
+    }
+    let value = read(store, &runs)?;
+    tx.finish()?;
+    Ok(Ok((json, value)))
+}
+
+/// Composant d'un site, en liste blanche : ni chemin, ni nom brut.
+#[derive(Serialize)]
+struct ComponentJson {
+    source: &'static str,
+    purl: LogText,
+    version: Option<LogText>,
+    scope: LogText,
+    vulns: i64,
+    severity: Option<&'static str>,
+}
+
+#[derive(Serialize)]
+struct SiteComponents {
+    site: String,
+    runs: RunsJson,
+    #[serde(flatten)]
+    page: Page<ComponentJson>,
+}
+
+/// Longueur maximale d'une version servie.
+const MAX_VERSION_CHARS: usize = 256;
+
+fn parse_match_cursor<C>(
+    uri: &Uri,
+    decode: impl Fn(&str) -> Result<C, ApiError>,
+) -> Result<(PageQuery, Option<C>), ApiError> {
+    let page = PageQuery::parse(uri.query())?;
+    let cursor = page.cursor.as_deref().map(decode).transpose()?;
+    Ok((page, cursor))
+}
+
+/// Composants des derniers inventaires du site, rapprochés : triés par
+/// gravité puis purl, par pages figées sur les runs actifs (#21).
+async fn site_components_handler(
+    State(state): State<Arc<AppState>>,
+    Authenticated(_device): Authenticated,
+    id: Result<Path<String>, PathRejection>,
+    uri: Uri,
+) -> Response {
+    let Some(index) = vulns_site_index(&state, id) else {
+        return ApiError::NOT_FOUND.into_response();
+    };
+    let (page, cursor) = match parse_match_cursor(&uri, ComponentCursor::decode) {
+        Ok(parsed) => parsed,
+        Err(err) => return err.into_response(),
+    };
+    with_store(&state, "/api/v1/sites/components", move |state, store| {
+        let site = &state.site_ids[index];
+        let cursor = cursor.map(|c| c.0);
+        let offset = cursor.map_or(0, |c| c.offset);
+        let read = match_page(&store, site, cursor.as_ref(), |store, runs| {
+            match_store::components_page(store, site, runs, offset, page.limit + 1)
+        })?;
+        let (runs, mut rows) = match read {
+            Ok(read) => read,
+            Err(err) => return Ok(err.into_response()),
+        };
+        let more = page::split(&mut rows, page.limit);
+        let next_cursor = more.then(|| ComponentCursor(runs.cursor(offset + page.limit)).encode());
+        let items = rows
+            .into_iter()
+            .map(|r| ComponentJson {
+                source: r.source.as_str(),
+                purl: LogText::new(&r.base, MAX_VULNS_DETAIL_CHARS),
+                version: r
+                    .version
+                    .as_deref()
+                    .map(|v| LogText::new(v, MAX_VERSION_CHARS)),
+                scope: LogText::new(&r.scope, 16),
+                vulns: r.groups,
+                severity: r.severity.map(Severity::as_str),
+            })
+            .collect();
+        Ok(json(&SiteComponents {
+            site: site.clone(),
+            runs,
+            page: Page { items, next_cursor },
+        }))
+    })
+    .await
+}
+
+#[derive(Serialize)]
+struct VersionJson {
+    source: &'static str,
+    version: Option<LogText>,
+}
+
+#[derive(Serialize)]
+struct KevJson {
+    cve: LogText,
+    date_added: LogText,
+    ransomware: bool,
+}
+
+#[derive(Serialize)]
+struct EpssJson {
+    /// Millionièmes.
+    score: u32,
+    percentile: u32,
+}
+
+#[derive(Serialize)]
+struct WaiverJson {
+    source: &'static str,
+    until: i64,
+    /// `valid`, `expired`, `version_changed`, `group_changed`, `kev`.
+    state: &'static str,
+}
+
+#[derive(Serialize)]
+struct LinkJson {
+    source: LogText,
+    url: LogText,
+}
+
+/// Faille d'un composant, en liste blanche : ni motif de dérogation, ni
+/// opérateur, ni texte d'avis ; attributions entières.
+#[derive(Serialize)]
+struct VulnJson {
+    group: LogText,
+    ids: Vec<LogText>,
+    component: LogText,
+    versions: Vec<VersionJson>,
+    /// `affected`, `version_unknown`, `range_unknown`.
+    verdict: &'static str,
+    corrected: bool,
+    divergence: bool,
+    fixed: Vec<LogText>,
+    severity: &'static str,
+    rule: LogText,
+    kev: Option<KevJson>,
+    epss: Option<EpssJson>,
+    /// Dixièmes.
+    score: Option<u8>,
+    redistribution: Redistribution,
+    waiver: Option<WaiverJson>,
+    links: Vec<LinkJson>,
+    attributions: Vec<LogText>,
+}
+
+#[derive(Serialize)]
+struct SiteVulns {
+    site: String,
+    runs: RunsJson,
+    #[serde(flatten)]
+    page: Page<VulnJson>,
+}
+
+/// Longueur maximale d'un identifiant de faille servi.
+const MAX_ID_CHARS: usize = 64;
+
+fn vuln_json(
+    view: match_report::VulnView,
+    attribution: &dyn Fn(&str, &str) -> Option<String>,
+) -> VulnJson {
+    let g = &view.group;
+    let mut attributions: Vec<LogText> = Vec::new();
+    for m in &g.members {
+        if let Some(a) = attribution(&m.source, &m.id) {
+            let a = LogText::new(&a, usize::MAX);
+            if !attributions.contains(&a) {
+                attributions.push(a);
+            }
+        }
+    }
+    VulnJson {
+        group: LogText::new(&g.key, MAX_ID_CHARS),
+        ids: g
+            .ids
+            .iter()
+            .map(|id| LogText::new(id, MAX_ID_CHARS))
+            .collect(),
+        component: LogText::new(&view.base, MAX_VULNS_DETAIL_CHARS),
+        versions: view
+            .versions
+            .iter()
+            .map(|(s, v)| VersionJson {
+                source: s.as_str(),
+                version: v.as_deref().map(|v| LogText::new(v, MAX_VERSION_CHARS)),
+            })
+            .collect(),
+        verdict: g.state.as_str(),
+        corrected: g.corrected(),
+        divergence: g.divergence,
+        fixed: g
+            .fixed
+            .iter()
+            .map(|f| LogText::new(f, MAX_VERSION_CHARS))
+            .collect(),
+        severity: view.severity.as_str(),
+        rule: LogText::new(&g.rule, 32),
+        kev: g.kev.as_ref().map(|k| KevJson {
+            cve: LogText::new(&k.cve, MAX_ID_CHARS),
+            date_added: LogText::new(&k.date_added, 10),
+            ransomware: k.ransomware,
+        }),
+        epss: g.epss.map(|e| EpssJson {
+            score: e.epss_ppm,
+            percentile: e.percentile_ppm,
+        }),
+        score: g.score,
+        redistribution: g.redistribution,
+        waiver: view.waiver.map(|w| WaiverJson {
+            source: w.source.as_str(),
+            until: w.until,
+            state: w.state.as_str(),
+        }),
+        links: g
+            .members
+            .iter()
+            .filter(|m| m.link.starts_with("https://") || m.link.starts_with("http://"))
+            .map(|m| LinkJson {
+                source: LogText::new(&m.source, MAX_ID_CHARS),
+                url: LogText::new(&m.link, 2_048),
+            })
+            .collect(),
+        attributions,
+    }
+}
+
+/// Failles des composants du site, une par (purl sans version, groupe),
+/// triées par gravité, avec le composant et la version vue par chaque
+/// source ; pages figées sur les runs actifs (#21).
+async fn site_vulns_handler(
+    State(state): State<Arc<AppState>>,
+    Authenticated(_device): Authenticated,
+    id: Result<Path<String>, PathRejection>,
+    uri: Uri,
+) -> Response {
+    let Some(index) = vulns_site_index(&state, id) else {
+        return ApiError::NOT_FOUND.into_response();
+    };
+    let (page, cursor) = match parse_match_cursor(&uri, VulnCursor::decode) {
+        Ok(parsed) => parsed,
+        Err(err) => return err.into_response(),
+    };
+    let now = state.clock.unix();
+    with_store(&state, "/api/v1/sites/vulns", move |state, store| {
+        let site = &state.site_ids[index];
+        let cursor = cursor.map(|c| c.0);
+        let offset = cursor.map_or(0, |c| c.offset);
+        let read = match_page(&store, site, cursor.as_ref(), |store, _runs| {
+            let results = match_report::site_results(store, site)?;
+            let rows = crate::vulns::matching::waiver_store::rows(store, site)?;
+            Ok(match_report::vuln_views(&results, &rows, now))
+        })?;
+        let (runs, views) = match read {
+            Ok(read) => read,
+            Err(err) => return Ok(err.into_response()),
+        };
+        let mut views: Vec<_> = views
+            .into_iter()
+            .skip(offset)
+            .take(page.limit + 1)
+            .collect();
+        let more = page::split(&mut views, page.limit);
+        let next_cursor = more.then(|| VulnCursor(runs.cursor(offset + page.limit)).encode());
+        let mut cache: HashMap<(String, String), Option<String>> = HashMap::new();
+        let mut items = Vec::new();
+        for view in views {
+            for m in &view.group.members {
+                let k = (m.source.clone(), m.id.clone());
+                if let std::collections::hash_map::Entry::Vacant(slot) = cache.entry(k) {
+                    slot.insert(match_store::attribution(&store.conn, &m.source, &m.id)?);
+                }
+            }
+            let lookup = |source: &str, id: &str| -> Option<String> {
+                cache
+                    .get(&(source.to_owned(), id.to_owned()))
+                    .cloned()
+                    .flatten()
+            };
+            items.push(vuln_json(view, &lookup));
+        }
+        Ok(json(&SiteVulns {
+            site: site.clone(),
+            runs,
+            page: Page { items, next_cursor },
+        }))
+    })
+    .await
+}
+
+#[derive(Serialize)]
+struct DatasetJson {
+    version: LogText,
+    released: i64,
+}
+
+#[derive(Serialize)]
+struct SourceIncidentJson {
+    id: i64,
+    severity: &'static str,
+    opened_at: i64,
+}
+
+/// Source de failles ou table d'enrichissement déclarée, en liste blanche :
+/// ni résumé, ni erreur, ni URL de validateur.
+#[derive(Serialize)]
+struct SourceJson {
+    id: String,
+    /// `vulns` ou `enrichment`.
+    kind: &'static str,
+    last_success_at: Option<i64>,
+    last_outcome: Option<&'static str>,
+    entries: i64,
+    license: LogText,
+    attribution: LogText,
+    redistribution: Redistribution,
+    dataset: Option<DatasetJson>,
+    incident: Option<SourceIncidentJson>,
+}
+
+#[derive(Serialize)]
+struct VulnSources {
+    sources: Vec<SourceJson>,
+}
+
+/// Sources de `[vulns] sources` (KEV et EPSS d'office) : âge, dernière
+/// issue, entrées, licence, attribution, jeu actif, constat `vulns-sync`
+/// ouvert. Non paginé : sept sources au plus.
+async fn vuln_sources_handler(
+    State(state): State<Arc<AppState>>,
+    Authenticated(_device): Authenticated,
+) -> Response {
+    with_store(&state, "/api/v1/vulns/sources", move |state, store| {
+        use crate::vulns::{enrich_store, store as vulns_store, sync::registry};
+        let declared = registry::declared(&state.config);
+        let rows = if vulns_store::available(&store)? {
+            vulns_store::sources(&store)?
+        } else {
+            Vec::new()
+        };
+        let states: HashMap<String, vulns_store::SyncState> =
+            if vulns_store::sync_available(&store)? {
+                vulns_store::sync_states(&store)?.into_iter().collect()
+            } else {
+                HashMap::new()
+            };
+        let datasets: HashMap<&str, enrich_store::ActiveDataset> = enrich_store::datasets(&store)?
+            .into_iter()
+            .map(|(source, set)| (source.id(), set))
+            .collect();
+        let open = store.open_incidents()?;
+        let mut sources = Vec::new();
+        for id in declared {
+            let row = rows.iter().find(|r| r.id == id);
+            let sync = states.get(id);
+            let incident = open.iter().find(|i| {
+                i.site == capability::WATCHER_SITE
+                    && i.check_name == capability::VULNS_SYNC
+                    && i.finding_key() == Some(id)
+            });
+            sources.push(SourceJson {
+                id: id.to_owned(),
+                kind: if registry::ENRICHMENT.contains(&id) {
+                    "enrichment"
+                } else {
+                    "vulns"
+                },
+                last_success_at: row.and_then(|r| r.last_success_at),
+                last_outcome: sync.and_then(|s| s.last_outcome).map(|o| o.as_str()),
+                entries: row.map_or(0, |r| r.entries),
+                license: LogText::new(row.map_or("", |r| r.license.as_str()), 64),
+                attribution: LogText::new(
+                    row.map_or("", |r| r.attribution.as_str()),
+                    log_text::MAX_ATTRIBUTION_CHARS,
+                ),
+                redistribution: registry::redistribution(id).unwrap_or(Redistribution::Internal),
+                dataset: datasets.get(id).map(|d| DatasetJson {
+                    version: LogText::new(&d.version, 32),
+                    released: d.released.as_second(),
+                }),
+                incident: incident.map(|i| SourceIncidentJson {
+                    id: i.id,
+                    severity: i.severity.as_str(),
+                    opened_at: i.opened_at,
+                }),
+            });
+        }
+        Ok(json(&VulnSources { sources }))
+    })
+    .await
+}
+
 async fn incident_handler(
     State(state): State<Arc<AppState>>,
     Authenticated(_device): Authenticated,
@@ -1457,7 +1939,8 @@ async fn settings_handler(
                         | Control::Agent(_)
                         | Control::Logs
                         | Control::Typology
-                        | Control::VulnsSync => None,
+                        | Control::VulnsSync
+                        | Control::Vulns => None,
                     })
                     .collect(),
             })

@@ -562,6 +562,8 @@ struct Seeds {
     pubkey: [u8; 32],
     signatures: Vec<String>,
     password: String,
+    /// Motif et opérateur d'une dérogation, chemin d'un composant (#21).
+    vulns: Vec<String>,
 }
 
 impl Seeds {
@@ -584,6 +586,7 @@ impl Seeds {
         out.push(URL_SAFE_NO_PAD.encode(self.pubkey));
         out.extend(self.signatures.iter().cloned());
         out.push(self.password.clone());
+        out.extend(self.vulns.iter().cloned());
         out
     }
 }
@@ -680,6 +683,13 @@ async fn populated() -> (Veilleur, Seeds) {
             hosts: vec!["site-a.example.org".into()],
             ..SiteLogs::default()
         });
+        config.sites[0].inventory = Some(vigie::config::SiteInventory::new(&[
+            vigie::config::InventorySource::Ci,
+        ]));
+        config.vulns = Some(vigie::config::Vulns {
+            sources: vec!["osv-packagist".into()],
+            wordfence: None,
+        });
     });
     let password = "mot-de-passe-smtp-seme-5f2c9a".to_owned();
     std::fs::write(&v.config.alerts.password_file, &password).expect("mot de passe");
@@ -759,6 +769,7 @@ async fn populated() -> (Veilleur, Seeds) {
         .collect::<Vec<_>>();
     assert!(!signatures.is_empty());
     findings::persist(&mut store, &seeded_analysis()).expect("instantané");
+    let vulns = seed_vulns(&v, &mut store);
     drop(store);
     open_incident(&v, "exposed", Severity::Critical, "/.env lisible");
 
@@ -772,8 +783,140 @@ async fn populated() -> (Veilleur, Seeds) {
         pubkey,
         signatures,
         password,
+        vulns,
     };
     (v, seeds)
+}
+
+/// Rapprochement du site A (#21) : une faille fictive, un inventaire `ci`
+/// au chemin semé, un passage, une dérogation au motif et à l'opérateur
+/// semés. Rend les valeurs qui ne doivent jamais sortir.
+fn seed_vulns(v: &Veilleur, store: &mut Store) -> Vec<String> {
+    use vigie::inventory::{Component, ComponentType, Inventory, Scope, Source};
+    use vigie::store::InventoryDoc;
+    use vigie::vulns::advisory::{Advisory, Draft, DraftAffected, DraftEvent, DraftRange, Tally};
+    use vigie::vulns::purl::Purl;
+    use vigie::vulns::store::{LEASE, Load, SourceMeta, SyncMeta, upsert_source};
+    use vigie::vulns::version::Scheme;
+
+    const PATH: &str = "chemin-seme/vendor";
+    const REASON: &str = "motif-de-derogation-seme";
+    const OPERATOR: &str = "operateur-seme";
+    upsert_source(
+        store,
+        &SourceMeta {
+            id: "osv-packagist".into(),
+            url: "https://example.org/all.zip".into(),
+            license: String::new(),
+            attribution: String::new(),
+        },
+    )
+    .expect("source");
+    let advisory = Advisory::build(
+        Draft {
+            id: "GHSA-2099-aaaa-0001".into(),
+            aliases: vec!["CVE-2099-0001".into()],
+            summary: Some("résumé-d-avis-seme".into()),
+            modified: Some("2099-01-01T00:00:00Z".into()),
+            affected: vec![DraftAffected {
+                purls: vec![Purl::parse("pkg:composer/exemple/paquet").unwrap()],
+                scheme: Scheme::Composer,
+                ranges: vec![DraftRange {
+                    kind: "ECOSYSTEM".into(),
+                    events: vec![
+                        DraftEvent::Introduced("0".into()),
+                        DraftEvent::Fixed("1.2.4".into()),
+                    ],
+                }],
+                versions: Vec::new(),
+                last_known: None,
+            }],
+            ghsa_severity: Some("HIGH".into()),
+            attribution: Some("Données fictives (https://example.org/)".into()),
+            source_url: Some("https://example.org/avis".into()),
+            ..Draft::default()
+        },
+        &mut Tally::default(),
+    )
+    .expect("faille");
+    let clock = FakeClock::new(T0 - 2 * DAY);
+    let mut load = Load::begin(store, "osv-packagist", &clock, LEASE).expect("bail");
+    load.push(&[advisory]).expect("failles");
+    load.commit(&Tally::default(), &SyncMeta::default())
+        .expect("bascule");
+    let ci = SigningKey::from_bytes(&[44; 32]).verifying_key().to_bytes();
+    store
+        .add_inventory_key("site-a", &ci, T0 - 2 * DAY)
+        .expect("clé d'inventaire");
+    let components = vec![Component {
+        purl: Purl::parse("pkg:composer/exemple/paquet@1.2.3").unwrap(),
+        name: "nom-brut-seme".into(),
+        ty: ComponentType::Library,
+        scope: Scope::Required,
+        path: PATH.into(),
+        parent: None,
+        config_version: None,
+    }];
+    let inventory = Inventory {
+        site: "site-a".into(),
+        source: Source::Ci,
+        seq: 1,
+        sent_at: T0 - DAY,
+        agent: "vigie-inventory/0.1.0".into(),
+        complete: true,
+        skipped: 0,
+        spec_version: "1.7".into(),
+        serial: "urn:uuid:00000000-0000-4000-8000-000000000001".into(),
+        generated_at: T0 - DAY,
+        digest: vigie::inventory::bom::digest(&components),
+        components,
+        dropped: Default::default(),
+    };
+    store
+        .accept_inventory(
+            &InventoryDoc {
+                site: "site-a",
+                source: Source::Ci,
+                pubkey: &ci,
+                inventory: &inventory,
+            },
+            T0 - DAY,
+        )
+        .expect("inventaire");
+    let reader = Store::open_read(&v.config.database)
+        .expect("lecteur")
+        .expect("base");
+    let far = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    let report = vigie::vulns::matching::pass::run(
+        store,
+        &reader,
+        &v.config,
+        &vigie::vulns::exploit::MemoryTables::default(),
+        T0 - DAY + 60,
+        &vigie::vulns::matching::pass::Budget {
+            deadline: far,
+            hard_stop: far,
+            max_batches: usize::MAX,
+        },
+    );
+    assert_eq!(report.commits, 1, "{report:?}");
+    rusqlite::Connection::open(&v.config.database)
+        .expect("base")
+        .execute(
+            "INSERT INTO vuln_waivers (site, source, base, advisory_ref, version, covered_ids,
+                 reason, until, operator, created_at, audit_hash)
+             VALUES ('site-a', 'ci', 'pkg:composer/exemple/paquet', 'CVE-2099-0001', '1.2.3',
+                 '[\"CVE-2099-0001\",\"GHSA-2099-aaaa-0001\"]', ?1, ?2, ?3, ?4, 'h')",
+            rusqlite::params![REASON, T0 + 30 * DAY, OPERATOR, T0 - DAY],
+        )
+        .expect("dérogation");
+    vec![
+        PATH.into(),
+        REASON.into(),
+        OPERATOR.into(),
+        "nom-brut-seme".into(),
+        "résumé-d-avis-seme".into(),
+    ]
 }
 
 /// Chemins de clés d'une valeur JSON : `a.b`, `a[].c`. `facts` et `observed`
@@ -852,6 +995,18 @@ async fn every_route_serves_only_the_reviewed_keys_and_no_seeded_secret() {
         (
             "GET /api/v1/sites/{id}/logs/ips",
             "/api/v1/sites/site-a/logs/ips".to_owned(),
+        ),
+        (
+            "GET /api/v1/sites/{id}/components",
+            "/api/v1/sites/site-a/components".to_owned(),
+        ),
+        (
+            "GET /api/v1/sites/{id}/vulns",
+            "/api/v1/sites/site-a/vulns".to_owned(),
+        ),
+        (
+            "GET /api/v1/vulns/sources",
+            "/api/v1/vulns/sources".to_owned(),
         ),
         ("erreur", "/api/v1/sites/inconnu".to_owned()),
     ] {

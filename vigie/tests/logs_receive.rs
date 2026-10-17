@@ -537,7 +537,7 @@ async fn rotate_key_resets_the_logs_seq_and_remove_purges_the_logs() {
     next["seq"] = json!(1);
     assert_eq!(h.send("site-a", &next).await, StatusCode::NO_CONTENT);
 
-    assert!(h.store().remove_key("site-a").unwrap());
+    assert!(h.store().remove_key("site-a", 0).unwrap());
     let raw = h.raw();
     for table in ["log_entries", "log_batches", "log_marks"] {
         let n: i64 = raw

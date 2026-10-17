@@ -108,9 +108,11 @@ export const FEATURES: Record<FeatureKey, Feature> = {
     missing: WRITE,
   },
   wordpress: {
-    title: 'WordPress détaillé',
-    shows: 'Le jeu de contrôles propre à WordPress : versions du cœur, des extensions et des thèmes, comptes administrateurs, fichiers modifiés.',
-    missing: 'Un jeu de contrôles WordPress dans le veilleur. Il ne reçoit aujourd’hui que les faits envoyés par l’agent, montrés dans les contrôles « Agent ».',
+    title: 'Failles des composants',
+    shows: 'Les failles connues du cœur, des extensions, des thèmes et des paquets du site, rapprochées par le veilleur de son inventaire : gravité, version corrigée, exploitation connue.',
+    missing:
+      'Un inventaire des composants de ce site. Il se déclare dans la section [sites.inventory] de config.toml sur le VPS (agent PHP ou vigie-inventory en CI) ; le veilleur le rapproche au passage suivant de tick. Ou le veilleur ne sert pas encore cette lecture.',
+    link: { label: 'Voir les failles', name: 'failles' },
   },
   personnalises: {
     title: 'Contrôles personnalisés',
