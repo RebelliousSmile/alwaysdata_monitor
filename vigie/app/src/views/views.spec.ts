@@ -437,6 +437,97 @@ describe('Retirer cet appareil', () => {
   })
 })
 
+describe('Failles', () => {
+  it('composants du plus grave au moins grave, failles, versions par source, attributions', async () => {
+    const veilleur = mockVeilleur()
+    const { wrapper } = await open('/s/site-a/failles')
+    expect(wrapper.find('h1').text()).toBe('Failles')
+    const components = wrapper.findAll('[data-component]')
+    expect(components.map((c) => c.get('h2').text())).toEqual([
+      'pkg:wordpress/plugin/exemple-plugin',
+      'pkg:composer/exemple/paquet',
+      'pkg:npm/%40exemple/paquet',
+    ])
+    const plugin = components[0]!
+    expect(plugin.text()).toMatch(/Critique.*1 faille\(s\) · correction disponible/s)
+    const first = plugin.get('[data-vuln]').text()
+    expect(first).toMatch(/CVE-2099-0002.*Critique · Touché.*WF-2099-0002/s)
+    expect(first).toContain('agent 1.2.3 · ci 1.2.4 · corrigée en 1.2.4')
+    expect(first).toContain('Règle : exploitée (CISA KEV) · CVSS 9,8 · EPSS 12,3 %')
+    expect(plugin.get('[data-kev]').text()).toContain('2099-01-10')
+    expect(plugin.get('[data-redistribution]').text()).toContain('Usage interne')
+    expect(plugin.get('[data-link]').text()).toBe('wordfence : https://example.org/avis/WF-2099-0002')
+    expect(plugin.get('[data-attribution]').text()).toContain('Exemple Intelligence SARL')
+    // Chaque faille porte ses attributions.
+    for (const v of wrapper.findAll('[data-vuln]')) expect(v.findAll('[data-attribution]').length).toBeGreaterThan(0)
+
+    const paquet = components[1]!
+    expect(paquet.get('[data-redistribution]').text()).toContain('Faits seulement')
+    expect(paquet.get('[data-waiver]').text()).toMatch(/Sous dérogation \(agent\) jusqu’au .*: valide/)
+    // Version inconnue : libellé dédié, jamais « aucune faille ».
+    expect(components[2]!.text()).toContain('Information · Version inconnue')
+    expect(components[2]!.text()).toContain('ci version inconnue')
+    // Lecture seule : aucun bouton hors pagination, aucune écriture.
+    const buttons = wrapper.get('main').findAll('button').map((b) => b.text())
+    expect(buttons.every((b) => b.startsWith('Afficher plus'))).toBe(true)
+    expect(wrapper.get('[data-reminder]').text()).toContain('mettre à jour un composant se fait sur le site')
+    expect(veilleur.calls.filter((c) => !['status', 'site', 'vulns', 'components'].includes(c))).toEqual([])
+  })
+
+  it('« Afficher plus » ajoute la page suivante ; un 409 reprend au début', async () => {
+    const veilleur = mockVeilleur()
+    const { wrapper } = await open('/s/site-a/failles')
+    await wrapper.get('[data-more]').trigger('click')
+    await settle()
+    expect(wrapper.findAll('[data-vuln]')).toHaveLength(4)
+    expect(wrapper.text()).toContain('Avertissement · Plage inconnue')
+    expect(wrapper.find('[data-more]').exists()).toBe(false)
+    await wrapper.get('[data-more-components]').trigger('click')
+    await settle()
+    expect(wrapper.findAll('[data-row]')).toHaveLength(3)
+
+    const again = await open('/s/site-a/failles')
+    veilleur.expired = true
+    await again.wrapper.get('[data-more]').trigger('click')
+    await settle()
+    expect(again.wrapper.findAll('[data-vuln]')).toHaveLength(3)
+    expect(again.wrapper.get('[data-list-notice]').text()).toContain('reprend au début')
+  })
+
+  it('un site sans inventaire (404) dit ce qui manque, sans donnée d’exemple', async () => {
+    mockVeilleur()
+    const { wrapper } = await open('/s/site-b/failles')
+    expect(wrapper.get('[data-notyet] h2').text()).toBe('Failles des composants')
+    expect(wrapper.text()).toContain('[sites.inventory]')
+    expect(wrapper.find('[data-vuln]').exists()).toBe(false)
+  })
+
+  it('une attribution en HTML s’affiche en texte', async () => {
+    mockVeilleur()
+    const { wrapper } = await open('/s/site-a/failles')
+    expect(wrapper.find('[data-attribution] b').exists()).toBe(false)
+    expect(wrapper.text()).toContain('<b>Attribution</b> \ufffd fictive')
+  })
+})
+
+describe('Sources de failles', () => {
+  it('âge, issue, attributions et constat vulns-sync ouvert', async () => {
+    mockVeilleur()
+    const { wrapper } = await open('/reglages/sources')
+    expect(wrapper.find('h1').text()).toBe('Sources de failles')
+    const sources = wrapper.findAll('[data-source]').map((s) => s.text())
+    expect(sources).toHaveLength(4)
+    expect(sources[0]).toMatch(/osv-packagist.*synchronisée à 07:00.*chargée.*1200 entrée\(s\)/s)
+    expect(sources[1]).toContain('Exemple Intelligence SARL')
+    expect(sources[1]).toContain('Usage interne')
+    expect(sources[2]).toContain('Jeu 2099.01.15')
+    expect(sources[3]).toContain('jamais synchronisée')
+    const link = wrapper.get('[data-incident]')
+    expect(link.attributes('href')).toBe('/s/_veilleur/alerte/21')
+    expect(link.text()).toContain('Incident n° 21')
+  })
+})
+
 describe('aucune valeur d’exemple des maquettes', () => {
   // Valeurs propres aux maquettes de aidd_docs/design/vigie-design.
   const SAMPLES = [
@@ -464,7 +555,9 @@ describe('aucune valeur d’exemple des maquettes', () => {
     '/s/site-a/trafic/blocages',
     '/s/site-a/sante/ressources',
     '/s/site-a/parametres',
+    '/s/site-a/failles',
     '/reglages',
+    '/reglages/sources',
   ])('%s', async (path) => {
     mockVeilleur()
     const { wrapper } = await open(path)

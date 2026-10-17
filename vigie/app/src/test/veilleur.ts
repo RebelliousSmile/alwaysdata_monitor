@@ -6,16 +6,22 @@ import type {
   LogIps,
   Overview,
   Settings,
+  SiteComponents,
   SiteDetail,
   SiteIncidents,
   SiteLogs,
+  SiteVulns,
   Status,
+  Vuln,
+  VulnSources,
 } from '@/lib/api'
 
 // Faux veilleur derrière les commandes Tauri, sur des données fictives : le
 // dépôt est public. Site A non conforme (incidents critique, avertissement et
-// information, un agent, une analyse des logs), site B sans rien à signaler
-// et sans source de logs. IP des plages de documentation (RFC 5737, 3849).
+// information, un agent, une analyse des logs, des failles fictives
+// `CVE-2099-…` aux attributions d'un titulaire inventé et aux liens
+// `example.org`), site B sans rien à signaler, sans source de logs ni
+// inventaire. IP des plages de documentation (RFC 5737, 3849).
 
 /** Vendredi 16 octobre 2026, 10:00 à Paris. */
 export const NOW = 1792137600
@@ -167,7 +173,168 @@ export interface Fixture {
   ips: Record<string, LogIps>
   /** Pages suivantes des verdicts, par curseur. */
   moreIps: Record<string, LogIps>
+  /** Première page des composants rapprochés ; absent : 404 (sans inventaire). */
+  components: Record<string, SiteComponents>
+  moreComponents: Record<string, SiteComponents>
+  /** Première page des failles ; absent : 404 (sans inventaire). */
+  vulns: Record<string, SiteVulns>
+  moreVulns: Record<string, SiteVulns>
+  vulnSources: VulnSources
   settings: Settings
+}
+
+/** Attribution fictive d'une source « usage interne ». */
+export const ATTRIBUTION = 'Copyright 2099 Exemple Intelligence SARL, données fictives (https://example.org/licence)'
+
+function vuln(fields: Partial<Vuln> & Pick<Vuln, 'group' | 'component' | 'severity'>): Vuln {
+  return {
+    ids: [fields.group],
+    versions: [{ source: 'agent', version: '1.2.3' }],
+    verdict: 'affected',
+    corrected: false,
+    fixed: ['1.2.4'],
+    rule: 'cvss_high',
+    kev: null,
+    epss: null,
+    score: 75,
+    redistribution: 'free',
+    waiver: null,
+    links: [{ source: 'osv-packagist', url: `https://example.org/avis/${fields.group}` }],
+    attributions: ['Données fictives de démonstration (https://example.org/)'],
+    ...fields,
+  }
+}
+
+const PLUGIN = 'pkg:wordpress/plugin/exemple-plugin'
+const PAQUET = 'pkg:composer/exemple/paquet'
+
+const VULNS_A: SiteVulns = {
+  site: 'site-a',
+  runs: { agent: 4, ci: 5 },
+  items: [
+    vuln({
+      group: 'CVE-2099-0002',
+      ids: ['CVE-2099-0002', 'WF-2099-0002'],
+      component: PLUGIN,
+      severity: 'critical',
+      versions: [
+        { source: 'agent', version: '1.2.3' },
+        { source: 'ci', version: '1.2.4' },
+      ],
+      rule: 'kev',
+      kev: { date_added: '2099-01-10', ransomware: false },
+      epss: { score: 123_456, percentile: 900_000 },
+      score: 98,
+      redistribution: 'internal',
+      links: [{ source: 'wordfence', url: 'https://example.org/avis/WF-2099-0002' }],
+      attributions: [ATTRIBUTION],
+    }),
+    vuln({
+      group: 'CVE-2099-0003',
+      component: PAQUET,
+      severity: 'warning',
+      redistribution: 'facts_only',
+      waiver: { source: 'agent', until: NOW + 30 * DAY, state: 'valid' },
+    }),
+    vuln({
+      group: 'GHSA-2099-aaaa-0004',
+      component: 'pkg:npm/%40exemple/paquet',
+      severity: 'info',
+      verdict: 'version_unknown',
+      versions: [{ source: 'ci', version: null }],
+      fixed: [],
+      rule: 'version_unknown',
+      score: null,
+      attributions: ['<b>Attribution</b> \ufffd fictive'],
+    }),
+  ],
+  next_cursor: 'vulns-2',
+}
+
+const VULNS_A_2: SiteVulns = {
+  site: 'site-a',
+  runs: VULNS_A.runs,
+  items: [
+    vuln({
+      group: 'CVE-2099-0005',
+      component: 'pkg:wordpress/theme/exemple-theme',
+      severity: 'warning',
+      verdict: 'range_unknown',
+      fixed: [],
+      rule: 'range_unknown',
+    }),
+  ],
+  next_cursor: null,
+}
+
+const COMPONENTS_A: SiteComponents = {
+  site: 'site-a',
+  runs: VULNS_A.runs,
+  items: [
+    { source: 'agent', purl: PLUGIN, version: '1.2.3', scope: 'required', vulns: 1, severity: 'critical' },
+    { source: 'agent', purl: PAQUET, version: '1.2.3', scope: 'required', vulns: 1, severity: 'warning' },
+  ],
+  next_cursor: 'components-2',
+}
+
+const COMPONENTS_A_2: SiteComponents = {
+  site: 'site-a',
+  runs: VULNS_A.runs,
+  items: [{ source: 'ci', purl: 'pkg:npm/sans-faille', version: '1.0.0', scope: 'required', vulns: 0, severity: null }],
+  next_cursor: null,
+}
+
+const SOURCES: VulnSources = {
+  sources: [
+    {
+      id: 'osv-packagist',
+      kind: 'vulns',
+      last_success_at: NOW - 3 * HOUR,
+      last_outcome: 'loaded',
+      entries: 1200,
+      license: '',
+      attribution: 'Données fictives de démonstration (https://example.org/)',
+      redistribution: 'free',
+      dataset: null,
+      incident: null,
+    },
+    {
+      id: 'wordfence',
+      kind: 'vulns',
+      last_success_at: NOW - 4 * DAY,
+      last_outcome: 'failed',
+      entries: 300,
+      license: 'licence fictive',
+      attribution: ATTRIBUTION,
+      redistribution: 'internal',
+      dataset: null,
+      incident: { id: 21, severity: 'warning', opened_at: NOW - DAY },
+    },
+    {
+      id: 'kev',
+      kind: 'enrichment',
+      last_success_at: NOW - HOUR,
+      last_outcome: 'loaded',
+      entries: 20,
+      license: 'licence fictive',
+      attribution: 'Données fictives (https://example.org/)',
+      redistribution: 'free',
+      dataset: { version: '2099.01.15', released: NOW - DAY },
+      incident: null,
+    },
+    {
+      id: 'epss',
+      kind: 'enrichment',
+      last_success_at: null,
+      last_outcome: null,
+      entries: 0,
+      license: '',
+      attribution: '',
+      redistribution: 'free',
+      dataset: null,
+      incident: null,
+    },
+  ],
 }
 
 /** Heure de référence de l'analyse : 09:55 à Paris. */
@@ -284,6 +451,11 @@ export function fixture(): Fixture {
     logs: { 'site-a': LOGS_A },
     ips: { 'site-a': IPS_A },
     moreIps: { 'ips-2': IPS_A_2 },
+    components: { 'site-a': COMPONENTS_A },
+    moreComponents: { 'components-2': COMPONENTS_A_2 },
+    vulns: { 'site-a': VULNS_A },
+    moreVulns: { 'vulns-2': VULNS_A_2 },
+    vulnSources: SOURCES,
     settings: {
       sites: [
         { id: 'site-a', url: SITE_A.url, kind: 'wordpress', interval: 900, agent_silence: 2 * HOUR, agent: true, checks: { content: 900, tls: DAY } },
@@ -391,6 +563,21 @@ export function mockVeilleur(paired = true): Veilleur {
         if (!ips) throw fail('not_found', 'introuvable')
         return args.cursor ? page(state.data.moreIps, args.cursor) : ips
       }
+      case 'components': {
+        reach()
+        const components = state.data.components[String(args.site)]
+        if (!components) throw fail('not_found', 'introuvable')
+        return args.cursor ? page(state.data.moreComponents, args.cursor) : components
+      }
+      case 'vulns': {
+        reach()
+        const vulns = state.data.vulns[String(args.site)]
+        if (!vulns) throw fail('not_found', 'introuvable')
+        return args.cursor ? page(state.data.moreVulns, args.cursor) : vulns
+      }
+      case 'vuln_sources':
+        reach()
+        return state.data.vulnSources
       case 'incident': {
         reach()
         const found = findIncident(Number(args.id))

@@ -1,20 +1,25 @@
 <script setup lang="ts">
+import { computed } from 'vue'
+import { useRoute } from 'vue-router'
 import AppIcon from '@/components/AppIcon.vue'
 import { useSiteLinks } from '@/lib/links'
 import { SITE_NAV, badgeOf, type NavBadges } from '@/lib/nav'
 import type { NavKey } from '@/router'
 
-// Colonne de gauche au-delà de 900 px : onglets du site s'il y en a un,
-// puis Mes sites et Réglages.
+// Colonne de gauche au-delà de 900 px : onglets du site s'il y en a un et
+// ses Failles (#21), puis Mes sites, Réglages et Sources de failles.
 withDefaults(
   defineProps<{ inSite?: boolean; active?: NavKey; badges?: NavBadges; global?: 'sites' | 'reglages' }>(),
   { inSite: false, active: undefined, badges: () => ({}), global: undefined },
 )
 const { to } = useSiteLinks()
+const route = useRoute()
+/** Écran courant, pour les entrées hors des onglets : Failles, Sources. */
+const current = computed(() => (typeof route.name === 'string' ? route.name : ''))
 
 const item = 'relative flex min-h-tap items-center gap-3 rounded-control px-3 text-md'
 const idle = 'text-text-2'
-const current = 'bg-surface-3 font-semibold text-text'
+const selected = 'bg-surface-3 font-semibold text-text'
 </script>
 
 <template>
@@ -32,7 +37,7 @@ const current = 'bg-surface-3 font-semibold text-text'
         :key="tab.key"
         :to="to(tab.name)"
         :aria-current="tab.key === active ? 'page' : undefined"
-        :class="[item, tab.key === active ? current : idle]"
+        :class="[item, tab.key === active ? selected : idle]"
       >
         <AppIcon :name="tab.icon" />
         <span class="flex-1">{{ tab.label }}</span>
@@ -42,12 +47,20 @@ const current = 'bg-surface-3 font-semibold text-text'
           data-badge
         >{{ badgeOf(badges, tab.key) }}</span>
       </RouterLink>
+      <RouterLink
+        :to="to('failles')"
+        :aria-current="current === 'failles' ? 'page' : undefined"
+        :class="[item, current === 'failles' ? selected : idle]"
+      >
+        <AppIcon name="vulns" />
+        Failles
+      </RouterLink>
       <hr class="my-2 border-line">
     </template>
     <RouterLink
       :to="{ name: 'sites' }"
       :aria-current="global === 'sites' ? 'page' : undefined"
-      :class="[item, global === 'sites' ? current : idle]"
+      :class="[item, global === 'sites' ? selected : idle]"
     >
       <AppIcon name="sites" />
       Mes sites
@@ -55,10 +68,18 @@ const current = 'bg-surface-3 font-semibold text-text'
     <RouterLink
       :to="{ name: 'reglages' }"
       :aria-current="global === 'reglages' ? 'page' : undefined"
-      :class="[item, global === 'reglages' ? current : idle]"
+      :class="[item, global === 'reglages' && current !== 'sources-failles' ? selected : idle]"
     >
       <AppIcon name="settings" />
       Réglages
+    </RouterLink>
+    <RouterLink
+      :to="{ name: 'sources-failles' }"
+      :aria-current="current === 'sources-failles' ? 'page' : undefined"
+      :class="[item, current === 'sources-failles' ? selected : idle]"
+    >
+      <AppIcon name="sources" />
+      Sources de failles
     </RouterLink>
   </nav>
 </template>

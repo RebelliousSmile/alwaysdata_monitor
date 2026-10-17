@@ -12,6 +12,8 @@ export type IconName =
   | 'errors'
   | 'health'
   | 'sites'
+  | 'vulns'
+  | 'sources'
 
 export const ICON_PATHS: Record<IconName, string[]> = {
   back: ['M15 18l-6-6 6-6'],
@@ -28,6 +30,12 @@ export const ICON_PATHS: Record<IconName, string[]> = {
   errors: ['M12 3l9.5 17h-19z', 'M12 10v4M12 17v.5'],
   health: ['M20.8 5.6a5.5 5.5 0 0 0-7.8 0L12 6.6l-1-1a5.5 5.5 0 0 0-7.8 7.8L12 22l8.8-8.6a5.5 5.5 0 0 0 0-7.8z'],
   sites: ['M4 5h16v5H4zM4 14h16v5H4z'],
+  vulns: ['M21 8l-9-5-9 5 9 5 9-5z', 'M3 8v8l9 5 9-5V8', 'M12 13v8'],
+  sources: [
+    'M4 6c0-1.7 3.6-3 8-3s8 1.3 8 3-3.6 3-8 3-8-1.3-8-3z',
+    'M4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6',
+    'M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3',
+  ],
 }
 
 /** Curseurs de l'icône Paramètres. */
