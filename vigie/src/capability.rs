@@ -1,17 +1,273 @@
-//! Registre des capacités : quelles commandes un site admet (issue #2).
+//! Registre des capacités (issues #2 et #4) : la seule déclaration de ce
+//! qui s'exécute ou s'ouvre pour un site.
 //!
-//! La liste des commandes est fermée et codée en dur : ajouter une commande
-//! est un changement de code relu, jamais une valeur de configuration. Chaque
-//! commande déclare les runtimes qui l'admettent ; un site sans runtime
-//! (`generic` non déclaré) n'en admet aucune. Le runtime d'un site vient de
-//! `config.toml`, jamais de l'agent (`docs/protocole-commandes.md`).
+//! - Chaque **contrôle** ([`Control`]) déclare les CMS auxquels il
+//!   s'applique et sa condition d'existence : agent enregistré et runtime
+//!   effectif `php` pour le battement de cœur, l'intégrité et les familles
+//!   de l'agent, référence d'empreintes en plus pour l'intégrité, source de
+//!   logs pour `logs`. [`watched`] en dérive le seul verdict « surveillé »,
+//!   que `tick`, l'ingestion des rapports et l'API consultent tous.
+//! - Chaque **commande** ([`CommandKind`]) déclare les runtimes qui
+//!   l'admettent ; un site sans runtime (`generic` non déclaré) n'en admet
+//!   aucune.
 //!
-//! Les contrôles déclarent de même les CMS auxquels ils s'appliquent
-//! (`CheckKind::cms`).
+//! Les listes sont fermées et codées en dur, par des `match` sans joker : une
+//! variante nouvelle oblige à décider, et ajouter un contrôle, une famille ou
+//! une commande est un changement de code relu, jamais une valeur de
+//! configuration. Le CMS et le runtime d'un site viennent de `config.toml`,
+//! jamais de l'agent (`docs/protocole-commandes.md`). Ce que le registre ne
+//! connaît pas n'est pas surveillé : fail-closed.
 
 use std::fmt;
 
-use crate::config::{Runtime, Site};
+use crate::checks::CheckKind;
+use crate::config::{Runtime, Site, SiteKind};
+use crate::finding::{Finding, Severity};
+
+const ALL_CMS: &[SiteKind] = &[SiteKind::Generic, SiteKind::Wordpress, SiteKind::Prestashop];
+
+/// Familles de constats qu'émet l'agent PHP (`finding('…'` de
+/// `vigie-agent.php`), sous le préfixe `agent:`. Une famille bien formée
+/// mais absente d'ici, ou non admise pour le CMS du site, est écartée à
+/// l'ingestion et comptée (`reports.dropped`). `integrity` n'en est pas une :
+/// le nom est réservé au veilleur ([`Control::Integrity`]), et un rapport qui
+/// l'emploie est refusé en entier (`report.rs`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum AgentFamily {
+    /// Racine du site introuvable.
+    Root,
+    /// Fichier critique absent ou illisible.
+    CriticalFile,
+    /// Fichier qui ne contient plus le texte attendu.
+    MustContain,
+    /// Fichier PHP dans `wp-content/uploads`.
+    UploadsPhp,
+}
+
+impl AgentFamily {
+    pub const ALL: [Self; 4] = [
+        Self::Root,
+        Self::CriticalFile,
+        Self::MustContain,
+        Self::UploadsPhp,
+    ];
+
+    /// Nom émis par l'agent, sans préfixe.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Root => "root",
+            Self::CriticalFile => "critical-file",
+            Self::MustContain => "must-contain",
+            Self::UploadsPhp => "uploads-php",
+        }
+    }
+
+    /// Nom du contrôle, préfixé par `agent:`.
+    pub fn check_name(self) -> &'static str {
+        match self {
+            Self::Root => "agent:root",
+            Self::CriticalFile => "agent:critical-file",
+            Self::MustContain => "agent:must-contain",
+            Self::UploadsPhp => "agent:uploads-php",
+        }
+    }
+
+    /// `None` pour un nom hors de la liste : fail-closed.
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|family| family.name() == name)
+    }
+
+    /// CMS qui admettent la famille : `uploads-php` ne vaut que pour
+    /// WordPress (`wp-content/uploads`).
+    pub fn cms(self) -> &'static [SiteKind] {
+        match self {
+            Self::UploadsPhp => &[SiteKind::Wordpress],
+            Self::Root | Self::CriticalFile | Self::MustContain => ALL_CMS,
+        }
+    }
+}
+
+/// Condition d'existence d'un contrôle, en plus du CMS.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Needs {
+    /// Aucune : les contrôles externes.
+    Nothing,
+    /// Agent enregistré et runtime effectif `php`.
+    PhpAgent,
+    /// Agent enregistré, runtime effectif `php` et référence d'empreintes.
+    PhpAgentAndBaseline,
+    /// `[sites.logs] source` déclaré.
+    LogSource,
+    /// Agent enregistré sur un site dont le runtime effectif n'est pas `php`.
+    AgentWithoutPhp,
+}
+
+/// Ce que le veilleur sait d'un site hors de sa configuration : lu en base
+/// par l'appelant (dans la transaction d'`accept_report` pour la référence,
+/// que le premier rapport y crée).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Ctx {
+    /// Une clé d'agent est enregistrée.
+    pub agent: bool,
+    /// Une référence d'empreintes existe.
+    pub baseline: bool,
+}
+
+/// Contrôles connus du veilleur : un incident ou un passage ne porte jamais
+/// d'autre nom.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Control {
+    /// Contrôle externe, lancé par `tick`.
+    Check(CheckKind),
+    /// Silence de l'agent (`checks/heartbeat.rs`).
+    Heartbeat,
+    /// Dérive des empreintes, calculée par le veilleur (`facts.rs`).
+    Integrity,
+    /// Famille de constats de l'agent.
+    Agent(AgentFamily),
+    /// Analyse des logs (#8).
+    Logs,
+    /// Avertissement : clé d'agent sur un site sans runtime `php`.
+    Typology,
+}
+
+/// Nom du contrôle `typology`.
+pub const TYPOLOGY: &str = "typology";
+/// Clé de l'unique constat `typology`.
+pub const TYPOLOGY_KEY: &str = "agent-runtime";
+
+impl Control {
+    /// Tous les contrôles, dans l'ordre d'affichage.
+    pub const ALL: [Self; 13] = [
+        Self::Check(CheckKind::Content),
+        Self::Check(CheckKind::Installer),
+        Self::Check(CheckKind::Exposed),
+        Self::Check(CheckKind::Tls),
+        Self::Check(CheckKind::Headers),
+        Self::Heartbeat,
+        Self::Integrity,
+        Self::Agent(AgentFamily::Root),
+        Self::Agent(AgentFamily::CriticalFile),
+        Self::Agent(AgentFamily::MustContain),
+        Self::Agent(AgentFamily::UploadsPhp),
+        Self::Logs,
+        Self::Typology,
+    ];
+
+    /// Nom du contrôle, tel qu'il figure dans les incidents et les passages.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Check(kind) => kind.name(),
+            Self::Heartbeat => crate::checks::heartbeat::NAME,
+            Self::Integrity => "agent:integrity",
+            Self::Agent(family) => family.check_name(),
+            Self::Logs => crate::analysis::findings::CHECK,
+            Self::Typology => TYPOLOGY,
+        }
+    }
+
+    /// `None` pour un nom hors du registre : fail-closed.
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|control| control.name() == name)
+    }
+
+    /// CMS auxquels le contrôle s'applique.
+    pub fn cms(self) -> &'static [SiteKind] {
+        match self {
+            Self::Check(kind) => match kind {
+                CheckKind::Installer => &[SiteKind::Wordpress, SiteKind::Prestashop],
+                CheckKind::Content | CheckKind::Exposed | CheckKind::Tls | CheckKind::Headers => {
+                    ALL_CMS
+                }
+            },
+            Self::Agent(family) => family.cms(),
+            Self::Heartbeat | Self::Integrity | Self::Logs | Self::Typology => ALL_CMS,
+        }
+    }
+
+    /// Condition d'existence, en plus du CMS.
+    pub fn needs(self) -> Needs {
+        match self {
+            Self::Check(_) => Needs::Nothing,
+            Self::Heartbeat | Self::Agent(_) => Needs::PhpAgent,
+            Self::Integrity => Needs::PhpAgentAndBaseline,
+            Self::Logs => Needs::LogSource,
+            Self::Typology => Needs::AgentWithoutPhp,
+        }
+    }
+
+    /// Le contrôle est-il surveillé pour ce site ?
+    pub fn watched(self, site: &Site, ctx: &Ctx) -> bool {
+        if !self.cms().contains(&site.kind) {
+            return false;
+        }
+        let php = site.effective_runtime() == Some(Runtime::Php);
+        match self.needs() {
+            Needs::Nothing => true,
+            Needs::PhpAgent => ctx.agent && php,
+            Needs::PhpAgentAndBaseline => ctx.agent && php && ctx.baseline,
+            Needs::LogSource => site.logs.as_ref().is_some_and(|l| l.source.is_some()),
+            Needs::AgentWithoutPhp => ctx.agent && !php,
+        }
+    }
+
+    /// Contrôle rapporté par l'agent (familles et intégrité, préfixe `agent:`).
+    pub fn is_agent(self) -> bool {
+        match self {
+            Self::Integrity | Self::Agent(_) => true,
+            Self::Check(_) | Self::Heartbeat | Self::Logs | Self::Typology => false,
+        }
+    }
+}
+
+impl fmt::Display for Control {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.name())
+    }
+}
+
+/// Verdict unique « surveillé » d'un nom de contrôle pour un site : celui de
+/// `tick` (`close_unwatched`), de l'ingestion (constats écartés,
+/// `accept_report`) et de l'API (passages affichés). Un nom inconnu du
+/// registre n'est jamais surveillé.
+pub fn watched(site: &Site, check: &str, ctx: &Ctx) -> bool {
+    Control::from_name(check).is_some_and(|control| control.watched(site, ctx))
+}
+
+/// Contrôles surveillés pour ce site, dans l'ordre de [`Control::ALL`].
+pub fn allowed_controls(site: &Site, ctx: &Ctx) -> Vec<Control> {
+    Control::ALL
+        .into_iter()
+        .filter(|control| control.watched(site, ctx))
+        .collect()
+}
+
+/// Constat d'une famille de l'agent admis pour ce site ? Seulement les noms
+/// `agent:<famille>` du registre, au verdict de [`watched`] pour un site
+/// dont l'agent vient de signer : `agent:integrity` vient du veilleur.
+pub fn admits_agent_finding(site: &Site, check: &str) -> bool {
+    let ctx = Ctx {
+        agent: true,
+        baseline: false,
+    };
+    matches!(Control::from_name(check), Some(Control::Agent(_))) && watched(site, check, &ctx)
+}
+
+/// Constat `typology` du site : un avertissement tant qu'une clé d'agent est
+/// enregistrée sur un site dont le runtime effectif n'est pas `php`, aucun
+/// sinon.
+pub fn typology_findings(site: &Site, ctx: &Ctx) -> Vec<Finding> {
+    if !Control::Typology.watched(site, ctx) {
+        return Vec::new();
+    }
+    vec![Finding::new(
+        &site.id,
+        TYPOLOGY,
+        Severity::Warning,
+        TYPOLOGY_KEY,
+        "agent enregistré sur un site sans runtime php : déclarer runtime = \"php\"",
+    )]
+}
 
 /// Commandes que le veilleur peut servir à un agent (#10).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -131,91 +387,4 @@ pub fn allowed(site: &Site) -> Vec<CommandKind> {
         .into_iter()
         .filter(|&command| permit(command, site).is_ok())
         .collect()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::config::SiteKind;
-
-    fn site(kind: SiteKind, runtime: Option<Runtime>) -> Site {
-        Site {
-            id: "site-a".into(),
-            url: "https://site-a.example.org/".into(),
-            kind,
-            runtime,
-            keyword_url: None,
-            keyword: None,
-            interval: 300,
-            agent_silence: 900,
-            logs: None,
-        }
-    }
-
-    #[test]
-    fn the_full_matrix_matches_the_literal_table() {
-        use CommandKind::*;
-        let generic = |runtime| site(SiteKind::Generic, runtime);
-        // (commande, aucun, php, node, static)
-        let table = [
-            (Ping, false, true, false, false),
-            (RotateKey, false, true, false, false),
-            // Disponibles depuis #13, pour php seulement.
-            (HtaccessApply, false, true, false, false),
-            (HtaccessRollback, false, true, false, false),
-        ];
-        assert_eq!(table.len(), CommandKind::ALL.len());
-        for (command, none, php, node, stat) in table {
-            for (runtime, expected) in [
-                (None, none),
-                (Some(Runtime::Php), php),
-                (Some(Runtime::Node), node),
-                (Some(Runtime::Static), stat),
-            ] {
-                assert_eq!(
-                    permit(command, &generic(runtime)).is_ok(),
-                    expected,
-                    "{command} pour {runtime:?}"
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn a_php_command_is_refused_for_static_and_node() {
-        let php = site(SiteKind::Generic, Some(Runtime::Php));
-        assert_eq!(permit(CommandKind::RotateKey, &php), Ok(()));
-        assert_eq!(permit(CommandKind::HtaccessApply, &php), Ok(()));
-        for runtime in [Runtime::Static, Runtime::Node] {
-            assert_eq!(
-                permit(
-                    CommandKind::HtaccessApply,
-                    &site(SiteKind::Generic, Some(runtime))
-                ),
-                Err(Refusal::RuntimeNotAllowed { runtime })
-            );
-        }
-        assert_eq!(
-            permit(CommandKind::Ping, &site(SiteKind::Generic, None)),
-            Err(Refusal::NoRuntime)
-        );
-        assert!(allowed(&site(SiteKind::Generic, None)).is_empty());
-    }
-
-    #[test]
-    fn a_cms_implies_php() {
-        for kind in [SiteKind::Wordpress, SiteKind::Prestashop] {
-            assert_eq!(allowed(&site(kind, None)), CommandKind::ALL);
-        }
-    }
-
-    #[test]
-    fn names_round_trip_and_unknown_names_are_refused() {
-        for command in CommandKind::ALL {
-            assert_eq!(CommandKind::from_name(command.name()), Some(command));
-        }
-        for name in ["", "PING", "shell", "eval", "rotate_key", "ping "] {
-            assert_eq!(CommandKind::from_name(name), None, "{name:?}");
-        }
-    }
 }

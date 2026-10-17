@@ -245,12 +245,18 @@ Forme commune à toutes les routes qui renvoient un incident :
   `facts` valent `null` avant le premier rapport accepté.
 - `open_incidents` : tous les incidents ouverts du site, y compris `info`, du
   plus grave au moins grave, puis du plus ancien.
-- `checks` : d'abord les contrôles externes applicables au type du site
-  (`content`, `installer` hors `generic`, `exposed`, `tls`, `headers`), puis,
-  si un agent est déclaré, `heartbeat` et chaque contrôle `agent:*` déjà passé.
+- `checks` : les contrôles que le registre des capacités (`capability.rs`,
+  issue #4) surveille pour ce site, dans son ordre : d'abord les contrôles
+  externes applicables au type du site (`content`, `installer` hors
+  `generic`, `exposed`, `tls`, `headers`), puis, si un agent est déclaré sur
+  un site au runtime effectif `php`, `heartbeat` ; enfin, dès leur premier
+  passage, `agent:integrity` (référence posée), les familles `agent:*` admises
+  pour le site, `logs` (site avec une source) et `typology` (clé d'agent sur
+  un site sans runtime `php`). Le passage d'un contrôle que le registre ne
+  surveille plus n'est pas montré.
   - `interval` : secondes entre deux passages. `tls` et `headers` passent au
     plus une fois par heure. `heartbeat` porte le silence d'agent toléré ;
-    les contrôles `agent:*` valent `null`, ils suivent les rapports.
+    les autres valent `null`, ils suivent les rapports ou `tick`.
   - `last_run` : `null` si le contrôle n'a jamais tourné. Tous les champs
     suivants sont alors `null` aussi.
   - `result` : `ok` (concluant, sans constat), `finding` (concluant, avec au

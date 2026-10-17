@@ -17,7 +17,7 @@ mod veilleur;
 use vigie::alert::MemoryNotifier;
 use vigie::checks::CheckKind;
 use vigie::clock::FakeClock;
-use vigie::config::{Api, Config, LogSourceKind, Site, SiteKind, SiteLogs as LogsConfig};
+use vigie::config::{Api, Config, LogSourceKind, Runtime, Site, SiteKind, SiteLogs as LogsConfig};
 use vigie::device::{self, PAIRING_TTL};
 use vigie::finding::{Finding, Severity as VSeverity};
 use vigie::logs::Entry;
@@ -67,6 +67,9 @@ impl Veilleur {
         config.api = Some(Api {
             public_url: "https://vigie.example.org".into(),
         });
+        // Site A en PHP : son agent n'est surveillé qu'avec ce runtime
+        // (registre des capacités, #4).
+        config.sites[0].runtime = Some(Runtime::Php);
         config.sites.push(site_b());
         configure(&mut config);
         Store::open(&config.database).expect("open");
@@ -158,7 +161,7 @@ impl Veilleur {
             .expect("add_key");
         let findings = [Finding::new(
             "site-a",
-            "agent:core",
+            "agent:must-contain",
             VSeverity::Info,
             "maj",
             "mise à jour disponible",
@@ -174,8 +177,10 @@ impl Veilleur {
                     facts: "{\"php\":\"8.3\"}",
                     files: "{}",
                     findings: &findings,
+                    dropped: 0,
                 },
                 T0 - 300,
+                &|_, _| true,
             )
             .expect("accept_report");
         assert_eq!(outcome, ReportOutcome::Accepted);

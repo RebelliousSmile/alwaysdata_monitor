@@ -85,7 +85,9 @@ pub fn health(last_tick: Option<i64>, now: i64) -> (StatusCode, Health) {
 }
 
 pub(crate) struct AppState {
-    /// Configuration lue au démarrage : la console en publie une partie.
+    /// Configuration lue au démarrage, sites typés compris : la console en
+    /// publie une partie, et l'ingestion des rapports y lit le CMS et le
+    /// runtime de chaque site (même source que `typology.serve`).
     pub(crate) config: Config,
     /// Identifiants des sites de la configuration, dans son ordre.
     pub(crate) site_ids: Vec<String>,
@@ -256,7 +258,7 @@ async fn report_handler(State(state): State<Arc<AppState>>, request: Request) ->
         let written = task_state.writer.write(|store| {
             Ok(ingest::ingest(
                 store,
-                &task_state.site_ids,
+                &task_state.config.sites,
                 task_site.as_deref(),
                 signature.as_deref(),
                 &bytes,
@@ -279,6 +281,14 @@ async fn report_handler(State(state): State<Arc<AppState>>, request: Request) ->
                 accepted.site,
                 accepted.seq
             );
+            if accepted.dropped > 0 {
+                log::warn!(
+                    "[{}] {} : {} constat(s) écarté(s), famille hors du registre des capacités ou non admise pour le site",
+                    crate::request_id::current(),
+                    accepted.site,
+                    accepted.dropped
+                );
+            }
             StatusCode::NO_CONTENT
         }
         Ok(Err(refusal)) => refuse(refusal),

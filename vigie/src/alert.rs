@@ -16,7 +16,7 @@ use lettre::transport::smtp::authentication::Credentials;
 use lettre::{Message, SmtpTransport, Transport};
 
 use crate::config::Alerts;
-use crate::store::Incident;
+use crate::store::{CloseReason, Incident};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Email {
@@ -202,17 +202,32 @@ pub fn reminder_email(incident: &Incident, site_url: &str) -> Email {
     }
 }
 
+/// E-mail de clôture, selon sa raison : « rétabli » quand le contrôle ne
+/// voit plus le constat, « plus surveillé » quand le contrôle a quitté la
+/// typologie du site (`close_unwatched`), sans rien dire de l'état du site.
 pub fn close_email(incident: &Incident, site_url: &str) -> Email {
     let closed = incident
         .closed_at
         .map(crate::iso_utc)
         .unwrap_or_else(|| "?".into());
-    Email {
-        subject: one_line(&format!(
-            "[vigie] {} : rétabli — {}",
-            incident.site, incident.detail
-        )),
-        body: format!("{}Rétabli : {closed}\n", header(site_url, incident)),
+    match incident.close_reason {
+        Some(CloseReason::Unwatched) => Email {
+            subject: one_line(&format!(
+                "[vigie] {} : plus surveillé — {}",
+                incident.site, incident.detail
+            )),
+            body: format!(
+                "{}Plus surveillé : {closed}\nLe contrôle ne s'applique plus à ce site (site, typologie ou clé d'agent changés) : l'incident est clos sans que l'état du site soit connu.\n",
+                header(site_url, incident)
+            ),
+        },
+        Some(CloseReason::Resolved) | None => Email {
+            subject: one_line(&format!(
+                "[vigie] {} : rétabli — {}",
+                incident.site, incident.detail
+            )),
+            body: format!("{}Rétabli : {closed}\n", header(site_url, incident)),
+        },
     }
 }
 
@@ -245,6 +260,7 @@ mod tests {
             open_notified_at: None,
             close_notified_at: None,
             last_reminder_at: None,
+            close_reason: Some(CloseReason::Resolved),
         }
     }
 
@@ -258,6 +274,20 @@ mod tests {
         let close = close_email(&incident(), "https://a.example.org/");
         assert!(close.subject.contains("rétabli"));
         assert!(!close.body.contains("ack"));
+    }
+
+    #[test]
+    fn an_unwatched_close_never_says_restored() {
+        let incident = Incident {
+            close_reason: Some(CloseReason::Unwatched),
+            ..incident()
+        };
+        let close = close_email(&incident, "https://a.example.org/");
+        assert!(close.subject.contains("plus surveillé"), "{close:?}");
+        assert!(!close.subject.contains(['\r', '\n']));
+        for text in [&close.subject, &close.body] {
+            assert!(!text.to_lowercase().contains("rétabli"), "{close:?}");
+        }
     }
 
     #[test]

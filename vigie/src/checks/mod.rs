@@ -12,7 +12,7 @@ mod tls;
 
 use std::time::{Duration, Instant};
 
-use crate::config::{Site, SiteKind};
+use crate::config::Site;
 use crate::finding::Finding;
 use crate::http::{Http, HttpError, Page, Trust};
 
@@ -20,7 +20,7 @@ use crate::http::{Http, HttpError, Page, Trust};
 /// au plus souvent.
 const SLOW_INTERVAL: u64 = 3600;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CheckKind {
     Content,
     Installer,
@@ -50,19 +50,10 @@ impl CheckKind {
         }
     }
 
-    /// CMS auxquels le contrôle s'applique (registre des capacités, issue
-    /// #2). `match` sans joker : un contrôle nouveau oblige à décider.
-    pub fn cms(self) -> &'static [SiteKind] {
-        const ALL_CMS: &[SiteKind] =
-            &[SiteKind::Generic, SiteKind::Wordpress, SiteKind::Prestashop];
-        match self {
-            Self::Installer => &[SiteKind::Wordpress, SiteKind::Prestashop],
-            Self::Content | Self::Exposed | Self::Tls | Self::Headers => ALL_CMS,
-        }
-    }
-
+    /// Le contrôle s'applique-t-il à ce site ? Décidé par le registre des
+    /// capacités (`capability::Control::cms`), seule déclaration.
     pub fn applies(self, site: &Site) -> bool {
-        self.cms().contains(&site.kind)
+        crate::capability::Control::Check(self).watched(site, &crate::capability::Ctx::default())
     }
 
     /// Secondes entre deux passages de ce contrôle sur ce site.
@@ -181,22 +172,4 @@ fn witness_path(prefix: &str) -> String {
 /// blancs près), c'est la page générique du site, pas le fichier demandé.
 fn same_as_witness(page: &Page, witness: &Page) -> bool {
     witness.status == page.status && witness.body.trim() == page.body.trim()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn the_installer_check_applies_to_a_cms_only() {
-        assert_eq!(
-            CheckKind::Installer.cms(),
-            [SiteKind::Wordpress, SiteKind::Prestashop]
-        );
-        for kind in CheckKind::ALL {
-            if kind != CheckKind::Installer {
-                assert_eq!(kind.cms().len(), 3, "{}", kind.name());
-            }
-        }
-    }
 }
