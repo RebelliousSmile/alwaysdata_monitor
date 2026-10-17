@@ -4,7 +4,7 @@ status: pending
 
 # Instruction: Stockage KEV et EPSS par générations, lecture pour F7
 
-Prérequis : F1 phase 3 livrée (`vuln_sources` à générations et bail, `Load`, purge par lots, `vuln_aliases` indexée par `alias`) et migration 0017 de F2 (validateurs, `last_outcome`, `Load::release`, `mark_fresh`, `record_outcome`).
+Prérequis : F1 phase 3 livrée (`vuln_sources` à générations et bail, `Load`, purge par lots, `vuln_aliases` indexée par `alias`) et F2 (plan commité en 1b5a76e) : migration 0017 (validateurs, `last_outcome`, `loader_version`, `recent_entries`, `last_request_at`, `retry_after_until`), `Load::begin(.., lease)`, `finish_unchanged(source, g, expected, validators: ValidatorsUpdate::{Keep, Set(..)}, outcome, now)` (primitive générique, une seule instruction en compare-and-swap, partagée par `Load` et `EnrichLoad` ; `mark_fresh` n'existe pas), `Load::release`, `Load::commit(tally, SyncMeta)`, `claim_request`, `record_outcome`.
 
 ## Architecture projection
 
@@ -17,8 +17,8 @@ Prérequis : F1 phase 3 livrée (`vuln_sources` à générations et bail, `Load`
     │   ├── store.rs                   ✏️ entrée de MIGRATIONS, SCHEMA_ENRICHMENT ; tests de dernière version et instantané du schéma mis à jour
     │   └── vulns/
     │       ├── generation.rs          ✅ seulement si F1 a gardé ses primitives privées : reserve, check_lease, commit_cas, release, purge_batches(&[(table, KeyShape)]) extraits sans changement de comportement
-    │       ├── store.rs               ✏️ appelle generation.rs si extrait ; commit et mark_fresh écrivent validator_url avec les validateurs
-    │       └── enrich_store.rs        ✅ EnrichLoad { begin, push_kev, push_epss, commit, release } ; ENRICH_BATCH ; active(source) ; StoreTables (impl Exploitation) ; datasets()
+    │       ├── store.rs               ✏️ appelle generation.rs si extrait ; commit et la primitive finish_unchanged de F2 écrivent validator_url avec les validateurs (Set) ou le laissent (Keep), finish_unchanged incrémente stale_count, dans leur instruction unique
+    │       └── enrich_store.rs        ✅ EnrichLoad { begin, push_kev, push_epss, commit, finish_unchanged, release } ; ENRICH_BATCH ; active(source) ; StoreTables (impl Exploitation) ; datasets()
     └── tests/
         ├── vulns_enrich_store.rs      ✅ remplacement atomique, bail, release, compare-and-swap, purge par clé, montée de gravité entre deux générations
         └── store_concurrency.rs       ✏️ chargement de 400 000 lignes EPSS pendant les écritures de serve et tick et des lectures StoreTables
@@ -38,8 +38,9 @@ journey
     Second chargement => un lecteur ne voit que l'ancien ou le nouveau jeu complet: 1: lib
     Deux EnrichLoad concurrents sur epss => le second refusé tant que le bail court ; aucune génération réutilisée: 1: lib
     Bail expiré => repris ; le commit de l'ancien échoue (compare-and-swap), aucune ligne mélangée: 1: lib
-    release (304 ou empreinte inchangée) => bail rendu, génération réservée vide et orpheline, actif intact, nouveau begin immédiat accepté: 1: lib
-    release après reprise du bail par un autre => sans effet: 1: lib
+    finish_unchanged (304 ou empreinte identique) => une seule instruction : bail rendu, succès daté, actif intact, nouveau begin immédiat accepté: 1: lib
+    finish_unchanged avec validators Keep et stale => stale_count + 1, etag, http_last_modified et validator_url de l'actif inchangés, dans la même instruction: 1: lib
+    finish_unchanged ou release après reprise du bail ou bascule concurrente => zéro ligne, rien écrit: 1: lib
     Chargement interrompu entre deux lots => génération active intacte ; orpheline purgée ensuite: 1: lib
     kev et epss chargés en même temps => baux indépendants par source: 1: lib
   section Purge
@@ -49,7 +50,7 @@ journey
     Tables de F1 purgées par rowid et source => tests de F1 inchangés et verts: 1: lib
   section Validateurs
     commit servi par l'URL A avec ETag => etag et validator_url = A écrits dans la transaction de bascule: 1: lib
-    mark_fresh servi par l'URL B sans ETag => etag et validator_url effacés: 1: lib
+    finish_unchanged avec Set(..) servi par l'URL B sans ETag => etag et validator_url effacés: 1: lib
   section Edge case
     Base sans aucun chargement => TablesState vide, kev et epss rendent None, aucune erreur: 1: lib
     Même CVE poussé deux fois dans une génération => second ignoré, compté duplicate: 1: lib
@@ -71,12 +72,12 @@ journey
    - les lignes `kev` et `epss` de `vuln_sources` sont créées par `upsert_source` au premier passage, comme les sources de F2.
 2. **Primitives de génération** : réutiliser celles de F1 ; si elles sont privées, les extraire dans `vulns/generation.rs` sans changer leur comportement. `purge_batches(store, source, &[(table, KeyShape)])` avec `KeyShape::RowidBySource` et `KeyShape::GenerationCve` (requêtes du plan) ; la liste exclue est construite sans `NULL` (active seule si aucun bail) ; `vuln_dataset` purgée par `DELETE … WHERE source = ? AND generation NOT IN (…)` (une ligne par génération). Tests de F1 inchangés et verts.
 3. **`enrich_store.rs`** :
-   - `EnrichLoad::begin(store, source: EnrichSource, now)` (bail de 6 h, pris par le moteur avant tout téléchargement) ;
+   - `EnrichLoad::begin(store, source: EnrichSource, now, lease)` (bail de F2 : plafond de durée de la source + 30 min, pris par le moteur avant toute requête et avant `claim_request`) ;
    - `push_kev(&[KevRow])` / `push_epss(&[EpssRow])` : tampon vidé par transactions IMMEDIATE de `ENRICH_BATCH` lignes (5 000 au départ, réglé par la mesure du test de contention), bail revérifié dans chaque transaction, `INSERT OR IGNORE` avec comptage des doublons ;
-   - `commit(info: DatasetInfo, rows, sync_meta)` : `vuln_dataset` de `g`, puis bascule en compare-and-swap, validateurs, `validator_url`, `dump_sha256` dans la même transaction courte ; zéro ligne touchée → `Supplanted` ; puis purge par lots et `PRAGMA wal_checkpoint(PASSIVE)` ;
-   - `release(self)` : celle de F2 (`Load::release`) appliquée à la source ; aucune ligne active touchée ;
+   - `commit(info: DatasetInfo, tally, SyncMeta)` (signature de F2) : `vuln_dataset` de `g`, puis bascule en compare-and-swap, validateurs, `validator_url`, `dump_sha256`, `loader_version`, `recent_entries` dans la même transaction courte ; zéro ligne touchée → `Supplanted` ; puis purge par lots et `PRAGMA wal_checkpoint(PASSIVE)` ;
+   - `finish_unchanged` : la primitive générique de F2 `finish_unchanged(source, g, expected, validators: ValidatorsUpdate::{Keep, Set(..)}, outcome, now) -> bool` (une seule instruction en compare-and-swap, partagée par `Load` et `EnrichLoad`, colonnes extensibles) ; F4 y ajoute deux colonnes : `validator_url` (écrite avec `Set(..)`, laissée avec `Keep`) et `stale_count` (`+ 1` sur le chemin périmé) ; zéro ligne → `false`, rien écrit (issue `busy`) ;
+   - `release(self)` : celle de F2 appliquée à la source (abandon) ; aucune ligne active touchée ;
    - `active(source) -> Option<ActiveDataset { released, rows }>` (pour l'`EnrichSink` de la phase 3) ;
-   - `mark_fresh` (F2) étendu : validateurs et `validator_url` de l'URL qui a répondu, effacés si elle n'en porte pas ; `bump_stale(source)` incrémente `stale_count` ;
    - `StoreTables::open(&Store)` : `TablesState` et KEV entier de la génération active dans une même transaction de lecture ; `epss(&Cve)` par une instruction préparée jointe sur `active_generation` (`EpssFact.generation` rempli), cache `HashMap` pour la durée d'un passage ;
    - `datasets()` pour `vigie vulns sources`.
 4. **Tests** : `vulns_enrich_store.rs` (cas « Happy path », « Générations », « Purge », « Validateurs », « Edge case », horloge injectée pour le bail) ; montée de gravité par `StoreTables` avant et après le commit de la génération 2 ; `store_concurrency.rs` étendu (cas « Contention », durée maximale d'une transaction d'écriture affirmée en release seulement) ; tests de migration et instantané du schéma.
@@ -87,6 +88,6 @@ journey
 | ---- | ------------------- |
 | 1 | Migration depuis la version précédente verte ; `MIGRATIONS.len() == SCHEMA_ENRICHMENT` ; rejouée sans effet ; instantané à jour ; `validator_url` rempli pour les sources OSV qui avaient un ETag |
 | 2 | Tests de F1 et F2 verts sans modification de leurs attentes ; purge `GenerationCve` sans jamais toucher l'active, même CVE commun compris |
-| 3 | Aucun lecteur ne voit un jeu partiel ; aucune génération réutilisée ; commit supplanté sans mélange ; `release` sans effet sur un bail repris ; aucune transaction d'écriture au-delà d'un lot ; un ETag n'est jamais écrit sans la génération ou le succès qui lui correspond, ni sans son URL |
+| 3 | Aucun lecteur ne voit un jeu partiel ; aucune génération réutilisée ; commit supplanté sans mélange ; `finish_unchanged` et `release` sans effet sur un bail repris ; aucun chemin « inchangé » n'écrit en plus d'une instruction ; aucune transaction d'écriture au-delà d'un lot ; un ETag n'est jamais écrit sans la génération ou le succès qui lui correspond, ni sans son URL |
 | 4 | Montée d'avertissement à critique prouvée par le stockage réel ; contention sans `SQLITE_BUSY` ni écriture perdue, sur Linux et Windows |
 | 1-4 | fmt, clippy, tests verts sur Linux et Windows ; musl vert ; `Cargo.toml` inchangé |
