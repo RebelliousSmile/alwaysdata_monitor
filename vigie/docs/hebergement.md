@@ -24,6 +24,7 @@ est public.
 | `/health` en IPv4 et IPv6 depuis le poste | **Fait** le 2026-10-15 : `curl -4` et `curl -6` en 200 |
 | API de la console (schéma 6) | **Fait** le 2026-10-16 : déploiement du commit 0401e1c à 09:08 UTC (code 0), `/api/v1/overview` sans jeton en 401, `/health` en 200, rapport de l'agent du site A accepté à 09:10:08 par le nouveau binaire (`site list`). Incident : `[api]` posé avant le déploiement, le binaire c874f74 refuse toute section inconnue, aucun tick de 08:58 à 09:08 UTC et `/health` en 503 `late`, signalé par la sonde externe (voir l'ordre imposé dans [API de la console](#api-de-la-console)) |
 | Synchronisation des failles (migration 0017, issue #16) | **Non déployée** : timer installé par `provision.sh`, relevé de la première synchronisation réelle à faire après déploiement, voir [Synchronisation des failles](#synchronisation-des-failles-issue-16) |
+| Priorisation KEV et EPSS (migration `0019.sql`, issue #18) | **Non déployée** : relevé KEV et EPSS (dont `Content-Encoding` d'EPSS) à faire après déploiement, voir [Relevé de la synchronisation réelle](#relevé-de-la-synchronisation-réelle) |
 | Registre des capacités (schéma 14, issue #4) | **Non déployé** : relevés de la cible (binaire de la CI, `tick` à blanc) et de la configuration (aucune clé d'agent sur un site sans runtime `php`) à faire avant, voir [`audit-chemin-critique.md`](./audit-chemin-critique.md) |
 
 ## Installation
@@ -338,6 +339,13 @@ Règles et plafonds : [`failles.md`](./failles.md#synchronisation-f2).
   2026-10-16.
 - **Mémoire** : une entrée décompressée à la fois (4 Mio au plus), lots de
   500 failles, répertoire central en mémoire (64 Mio au plus).
+- **KEV et EPSS** (#18, déclarés d'office avec la première source de
+  failles) : KEV, 1,8 Mo, lu en mémoire ; EPSS lu en flux, lots de 5 000
+  lignes. Pendant un chargement EPSS, la base porte deux générations :
+  ≈ 11 Mio par génération de 400 000 lignes (mesure du 2026-10-17 sur une
+  table de même forme), donc ≈ 22 Mio plus le WAL le temps du chargement.
+  Hôtes à ouvrir : `raw.githubusercontent.com`, `www.cisa.gov`,
+  `epss.empiricalsecurity.com`, `epss.cyentia.com` (`failles.md`).
 - **Retour arrière** : un binaire antérieur refuse une base migrée
   (« binaire trop ancien ») ; retirer d'abord la section `[vulns]`, puis
   restaurer la base sauvegardée avant le déploiement.
@@ -365,6 +373,22 @@ seuil de 30 min qui rouvrirait la mise à jour incrémentale.
 | dump compressé, décompressé | à relever | à relever | à relever |
 | entrées lues, retenues, écartées | à relever | à relever | à relever |
 | croissance de `data/`, mémoire maximale | à relever | | |
+
+Relevé KEV et EPSS (#18), à faire par l'exploitant après déploiement,
+valeurs masquées : `vigie vulns sync --source kev` puis `--source epss`,
+deux fois chacun (le second : `not_modified` ou `unchanged`), puis
+`vigie vulns sources`. Pour EPSS, noter la présence ou non de
+`Content-Encoding: gzip` sur la réponse (`curl -sI` sur l'URL finale) ;
+absente, `raw_content_encodings` est vidé et la décision consignée dans
+`failles.md`. La grammaire EPSS est figée ensuite (`failles.md`, « À
+vérifier », point 3).
+
+| Mesure | KEV (miroir) | KEV (cisa.gov) | EPSS |
+| --- | --- | --- | --- |
+| URL finale, redirection | à relever | à relever | à relever |
+| ETag ou `Last-Modified`, 304 au second passage | à relever | à relever | à relever |
+| `Content-Encoding` | à relever | à relever | à relever |
+| poids, durée, lignes retenues et écartées | à relever | à relever | à relever |
 
 ## Secrets
 

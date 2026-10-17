@@ -354,7 +354,8 @@ fn rate_limited_sources_exit_0_and_sources_shows_why() {
     );
     {
         let mut store = Store::open(&dir.path().join("vigie.db")).unwrap();
-        for id in ["osv-crates-io", "osv-packagist", "osv-npm"] {
+        // KEV et EPSS, déclarés d'office (#18), aussi : aucun réseau.
+        for id in ["osv-crates-io", "osv-packagist", "osv-npm", "kev", "epss"] {
             source(&mut store, id);
         }
     }
@@ -368,7 +369,7 @@ fn rate_limited_sources_exit_0_and_sources_shows_why() {
     let out = vigie(&config, &["vulns", "sync"]);
     assert_eq!(out.status.code(), Some(0), "{out:?}");
     let text = stdout(&out);
-    for id in ["osv-crates-io", "osv-packagist", "osv-npm"] {
+    for id in ["osv-crates-io", "osv-packagist", "osv-npm", "kev", "epss"] {
         assert!(text.contains(&format!("{id} : rate_limited")), "{text}");
     }
     let out = vigie(&config, &["vulns", "sources"]);
@@ -405,6 +406,15 @@ fn sources_prints_the_sync_state_after_a_load() {
             "Sat, 17 Oct 2026 03:00:00 GMT",
         ),
     );
+    // KEV et EPSS, déclarés d'office (#18), sur le même serveur.
+    server.route(
+        KEV_MIRROR,
+        Reply::ok_etag(vulns_fixture("kev/catalogue-n1.json"), "\"k1\"", LM),
+    );
+    server.route(
+        EPSS_PATH,
+        Reply::ok(gzip(&vulns_fixture("epss/scores.csv"))),
+    );
     let options = vigie::vulns::sync::SyncOptions {
         trust: vigie::http::Trust::Custom(vec![server.ca.clone()]),
         endpoint_override: Some(server.base()),
@@ -413,6 +423,9 @@ fn sources_prints_the_sync_state_after_a_load() {
     let clock = FakeClock::new(vigie::now() - 3_600);
     let report = vigie::vulns::sync::run(&config, &options, &clock, None, false).unwrap();
     assert_eq!(report.failures(), 0, "{report:?}");
+    assert!(report.loaded());
+    let ids: Vec<&str> = report.sources.iter().map(|s| s.id).collect();
+    assert_eq!(ids, ["osv-crates-io", "kev", "epss"]);
     let out = vigie(&config_path, &["vulns", "sources"]);
     assert!(out.status.success(), "{out:?}");
     let text = stdout(&out);
@@ -422,12 +435,178 @@ fn sources_prints_the_sync_state_after_a_load() {
         "dernière tentative : il y a 1 h : loaded",
         "ETag oui  lecteur 1",
         "attribution : OSV.dev, licence de chaque enregistrement selon son préfixe",
+        "kev  licence CC0-1.0  chargée il y a 1 h  entrées 4",
+        "jeu : version 2099.01.15  publié le 2099-01-15T17:15:48Z  lignes 4  inchangé (périmé) : 0",
+        "âge du catalogue KEV : ",
+        "attribution : CISA KEV (Known Exploited Vulnerabilities Catalog), CC0 1.0",
+        "epss  licence FIRST EPSS Usage Agreement  chargée il y a 1 h  entrées 4",
+        "jeu : version v2099.01.01  publié le 2099-01-15T00:00:00Z  lignes 4",
+        "attribution : FIRST EPSS, See EPSS at https://www.first.org/epss",
     ] {
         assert!(text.contains(want), "{want}\n{text}");
     }
+    assert!(
+        text.contains(&format!(
+            "validateurs servis par {}",
+            server.url(KEV_MIRROR)
+        )),
+        "{text}"
+    );
+    assert!(!text.contains("avertissement : catalogue KEV"), "{text}");
     let out = vigie(&config_path, &["vulns", "match", "pkg:cargo/base64@0.5.0"]);
     assert!(
         stdout(&out).contains("RUSTSEC-2017-0004  touché"),
         "{out:?}"
+    );
+}
+
+// --- KEV et EPSS (#18) ---
+
+const LM: &str = "Sat, 17 Oct 2026 03:00:00 GMT";
+const KEV_MIRROR: &str = "/cisagov/kev-data/main/known_exploited_vulnerabilities.json";
+const EPSS_PATH: &str = "/epss_scores-current.csv.gz";
+
+fn vulns_fixture(rel: &str) -> Vec<u8> {
+    std::fs::read(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/vulns")
+            .join(rel),
+    )
+    .unwrap()
+}
+
+fn gzip(bytes: &[u8]) -> Vec<u8> {
+    use std::io::Write;
+    let mut gz = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+    gz.write_all(bytes).unwrap();
+    gz.finish().unwrap()
+}
+
+/// Base : une faille fictive à alias `CVE-2099-90001`, sans score, puis
+/// KEV (publié `released`) et EPSS chargés par la bibliothèque.
+fn with_tables(released: &str) -> (tempfile::TempDir, PathBuf) {
+    use vigie::vulns::enrich_store::{DatasetHeader, EnrichLoad, EnrichSource, EpssRow, KevRow};
+    use vigie::vulns::exploit::{Cve, KevFact};
+    let dir = tempfile::tempdir().unwrap();
+    let config = write_config(dir.path());
+    let mut store = Store::open(&dir.path().join("vigie.db")).unwrap();
+    let clock = FakeClock::new(vigie::now() - 3_600);
+    let draft = Draft {
+        id: "GHSA-ex18-ex18-ex18".into(),
+        aliases: vec!["cve-2099-90001".into()],
+        summary: Some("Faille fictive".into()),
+        modified: Some("2099-01-01T00:00:00Z".into()),
+        affected: vec![DraftAffected {
+            purls: vec![Purl::parse("pkg:composer/exemple/paquet").unwrap()],
+            scheme: Scheme::Composer,
+            ranges: vec![DraftRange {
+                kind: "ECOSYSTEM".into(),
+                events: vec![DraftEvent::Introduced("0".into())],
+            }],
+            versions: Vec::new(),
+            last_known: None,
+        }],
+        ..Draft::default()
+    };
+    source(&mut store, "osv-packagist");
+    let mut load = Load::begin(&mut store, "osv-packagist", &clock, LEASE).unwrap();
+    load.push(&[Advisory::build(draft, &mut Tally::default()).unwrap()])
+        .unwrap();
+    load.commit(&Tally::default(), &SyncMeta::default())
+        .unwrap();
+    let cve = |raw: &str| Cve::parse(raw).unwrap();
+    for id in ["kev", "epss"] {
+        source(&mut store, id);
+    }
+    let header = |version: &str, released: &str| DatasetHeader {
+        version: version.into(),
+        released: released.parse().unwrap(),
+    };
+    let mut kev = EnrichLoad::begin(&mut store, EnrichSource::Kev, &clock, LEASE).unwrap();
+    kev.push_kev(&[KevRow {
+        cve: cve("CVE-2099-90001"),
+        fact: KevFact {
+            date_added: "2099-01-10".parse().unwrap(),
+            due_date: "2099-01-31".parse().unwrap(),
+            known_ransomware: false,
+            name: "Exemple Produit fictif : faille inventée".into(),
+        },
+    }])
+    .unwrap();
+    kev.commit(
+        &header("2099.01.15", released),
+        &Tally::default(),
+        &SyncMeta::default(),
+    )
+    .unwrap();
+    let mut epss = EnrichLoad::begin(&mut store, EnrichSource::Epss, &clock, LEASE).unwrap();
+    epss.push_epss(&[
+        (
+            cve("CVE-2099-90001"),
+            EpssRow {
+                epss_ppm: 12,
+                percentile_ppm: 1_000,
+            },
+        ),
+        (
+            cve("CVE-2099-90002"),
+            EpssRow {
+                epss_ppm: 100_000,
+                percentile_ppm: 800_000,
+            },
+        ),
+    ])
+    .unwrap();
+    epss.commit(
+        &header("v2099.01.01", "2099-01-15T00:00:00Z"),
+        &Tally::default(),
+        &SyncMeta::default(),
+    )
+    .unwrap();
+    (dir, config)
+}
+
+#[test]
+fn show_explains_kev_epss_and_the_severity() {
+    let (_dir, config) = with_tables("2099-01-15T17:15:48Z");
+    let out = vigie(&config, &["vulns", "show", "CVE-2099-90001"]);
+    assert!(out.status.success(), "{out:?}");
+    let text = stdout(&out);
+    for want in [
+        "GHSA-ex18-ex18-ex18  (source osv-packagist)",
+        "CISA KEV CVE-2099-90001 : ajoutée le 2099-01-10, échéance 2099-01-31, usage par rançongiciel connu : non",
+        "FIRST EPSS CVE-2099-90001 : score 0.000012  percentile 0.001000 (modèle v2099.01.01 du 2099-01-15T00:00:00Z)",
+        "gravité : critique (exploitée (CISA KEV))",
+    ] {
+        assert!(text.contains(want), "{want}\n{text}");
+    }
+    // Présent dans EPSS seulement : montré, sans faille.
+    let out = vigie(&config, &["vulns", "show", "cve-2099-90002"]);
+    assert!(out.status.success(), "{out:?}");
+    let text = stdout(&out);
+    assert!(
+        text.contains("CVE-2099-90002  (aucune faille connue ; tables d'enrichissement seulement)"),
+        "{text}"
+    );
+    assert!(
+        text.contains("CISA KEV CVE-2099-90002 : absente du catalogue"),
+        "{text}"
+    );
+    assert!(text.contains("score 0.100000"), "{text}");
+    let out = vigie(&config, &["vulns", "show", "CVE-2099-99999"]);
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+}
+
+#[test]
+fn sources_warns_about_a_kev_catalogue_older_than_14_days() {
+    let old = vigie::iso_utc(vigie::now() - 15 * 86_400);
+    let (_dir, config) = with_tables(&old);
+    let out = vigie(&config, &["vulns", "sources"]);
+    assert!(out.status.success(), "{out:?}");
+    let text = stdout(&out);
+    assert!(text.contains("âge du catalogue KEV : 15 j"), "{text}");
+    assert!(
+        text.contains("avertissement : catalogue KEV de plus de 14 jours"),
+        "{text}"
     );
 }

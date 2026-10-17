@@ -185,9 +185,37 @@ fn vulns_sources_are_a_closed_list_without_duplicates() {
     let config = load("[vulns]\nsources = []\n").expect("liste vide");
     assert!(vigie::vulns::sync::registry::declared(&config).is_empty());
     let config = load("[vulns]\nsources = [\"osv-npm\", \"osv-crates-io\"]\n").expect("admise");
+    // KEV et EPSS (#18) d'office, après les sources de failles.
     assert_eq!(
         vigie::vulns::sync::registry::declared(&config),
-        ["osv-crates-io", "osv-npm"]
+        ["osv-crates-io", "osv-npm", "kev", "epss"]
     );
     assert!(load("").expect("sans section").vulns.is_none());
+}
+
+#[test]
+fn kev_and_epss_come_with_vulnerability_sources_only() {
+    let config = load("[vulns]\nsources = [\"osv-npm\"]\n").expect("admise");
+    assert_eq!(
+        vigie::vulns::sync::registry::declared(&config),
+        ["osv-npm", "kev", "epss"]
+    );
+    // Écrits explicitement : admis, une seule fois.
+    let config = load("[vulns]\nsources = [\"kev\", \"osv-npm\", \"epss\"]\n").expect("admise");
+    assert_eq!(
+        vigie::vulns::sync::registry::declared(&config),
+        ["osv-npm", "kev", "epss"]
+    );
+    for sources in ["[\"kev\"]", "[\"epss\"]", "[\"kev\", \"epss\"]"] {
+        let err = refused(
+            &format!("[vulns]\nsources = {sources}\n"),
+            "au moins une source de failles",
+        );
+        assert!(matches!(err, ConfigError::Invalid { .. }), "{err}");
+    }
+    let err = refused(
+        "[vulns]\nsources = [\"osv-npm\", \"kev\", \"kev\"]\n",
+        "deux fois",
+    );
+    assert!(matches!(err, ConfigError::Invalid { .. }), "{err}");
 }

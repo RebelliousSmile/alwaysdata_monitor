@@ -56,7 +56,8 @@ pub struct Config {
 }
 
 /// `[vulns]` : sources de failles à synchroniser, parmi la liste fermée
-/// `vulns::sync::registry::KNOWN`. Aucune URL n'est configurable.
+/// `vulns::sync::registry::KNOWN` ; `kev` et `epss` s'y ajoutent d'office
+/// (`registry::declared`). Aucune URL n'est configurable.
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Vulns {
@@ -585,6 +586,20 @@ impl Config {
                 if !seen.insert(id.as_str()) {
                     return Err(format!("vulns.sources : « {id} » déclarée deux fois"));
                 }
+            }
+            // KEV et EPSS (#18) n'enrichissent que des failles : déclarés
+            // d'office avec la première source de failles, jamais seuls.
+            let enrichment = crate::vulns::sync::registry::ENRICHMENT;
+            if !vulns.sources.is_empty()
+                && vulns
+                    .sources
+                    .iter()
+                    .all(|id| enrichment.contains(&id.as_str()))
+            {
+                return Err(format!(
+                    "vulns.sources : {} demandent au moins une source de failles (ils sont alors ajoutés d'office)",
+                    enrichment.join(" et ")
+                ));
             }
         }
         let mut seen = HashSet::new();

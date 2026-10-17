@@ -9,8 +9,12 @@
 //! de `vulns/store.rs`. Une source implémente [`VulnSource`] : elle décrit
 //! ses origines, plafonds et licence ([`SourceMeta`]) et pousse ses failles
 //! **en flux** dans un [`Sink`], jamais en une liste en mémoire. F3
-//! (Wordfence, Friends-Of-Presta) et F4 (KEV, EPSS) s'y branchent :
-//! identifiant dans [`registry::KNOWN`], champs ajoutés à [`SourceMeta`].
+//! (Wordfence, Friends-Of-Presta) s'y branche : identifiant dans
+//! [`registry::KNOWN`], champs ajoutés à [`SourceMeta`]. Les tables
+//! d'enrichissement de F4 (KEV, EPSS) ne sont pas des failles : elles
+//! implémentent [`enrichment::EnrichmentSource`], voisin de
+//! [`VulnSource`], et passent par le même moteur, le même bail, le même
+//! débit et le même état.
 //!
 //! Seul `vigie vulns sync` écrit les tables de failles ; `tick` lit l'état
 //! des sources (constat `vulns-sync`), `serve` lit les failles.
@@ -30,6 +34,7 @@ use crate::vulns::version::SourceEcosystem;
 
 pub mod download;
 pub mod engine;
+pub mod enrichment;
 pub mod freshness;
 pub mod origin;
 pub mod registry;
@@ -126,6 +131,10 @@ pub enum SyncError {
     LeaseLost,
     #[error("base : {0}")]
     Store(String),
+    /// Jeu illisible ou refusé par ses contrôles (F4 : JSON KEV, CSV EPSS,
+    /// gzip, taux d'écart) ; le message ne cite aucun texte de la source.
+    #[error("format refusé : {0}")]
+    Format(String),
 }
 
 impl From<crate::vulns::store::LoadError> for SyncError {
@@ -162,6 +171,10 @@ pub struct SourceMeta {
     /// la génération active, le dump est rechargé sans requête
     /// conditionnelle.
     pub loader_version: u32,
+    /// `Content-Encoding` admis **sans décodage** (F4, EPSS : `gzip`) : les
+    /// octets reçus sont gardés tels quels, empreinte comprise ; tout autre
+    /// encodage est refusé. Vide pour les autres sources.
+    pub raw_content_encodings: &'static [&'static str],
 }
 
 /// Ce que la source sait au moment de décider si elle peut être demandée.
@@ -192,18 +205,28 @@ pub struct Dumped {
     pub unpacked_bytes: u64,
     /// Entrées lues du dump (dénominateur du taux d'écart).
     pub entries: u64,
+    /// URL demandée qui a servi le dump, gardée avec ses validateurs.
+    pub served: Option<String>,
 }
 
 /// Issue d'une source qui n'a pas échoué.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FetchOutcome {
     /// 304 (`not_modified`) ou même empreinte que l'active ; `validators`
-    /// à écrire (`None` : gardés).
+    /// à écrire avec l'URL qui les a servis (`served`), `None` : gardés.
+    /// `stale` (F4, KEV) : jeu reçu plus ancien que l'actif, refusé ;
+    /// validateurs de l'actif gardés, `stale_count` + 1.
     Unchanged {
         not_modified: bool,
         validators: Option<Received>,
+        stale: bool,
+        served: Option<String>,
     },
     Loaded(Dumped),
+    /// Garde contre le rétrécissement appliquée par la source elle-même
+    /// (F4, KEV : avant d'essayer son second hôte) : enregistré tel quel,
+    /// sans réévaluer la garde.
+    RefusedShrink(String),
 }
 
 /// Une source de failles.
@@ -238,6 +261,9 @@ pub struct SyncOptions {
     pub limits_override: Option<Limits>,
     /// Espace libre imposé, à la place de `statvfs`.
     pub free_space_override: Option<u64>,
+    /// Tests des sources de failles seules : KEV et EPSS, déclarés d'office,
+    /// ne sont pas synchronisés.
+    pub skip_enrichment: bool,
 }
 
 /// Bilan d'une source.
@@ -257,6 +283,12 @@ pub struct SyncReport {
 }
 
 impl SyncReport {
+    /// Au moins une source chargée, enrichissement compris : le
+    /// rapprochement de F7 (#21) doit être refait.
+    pub fn loaded(&self) -> bool {
+        self.sources.iter().any(|s| s.outcome == Outcome::Loaded)
+    }
+
     /// Sources en échec (`failed`, `refused_shrink`) : code de sortie 1.
     pub fn failures(&self) -> usize {
         self.sources
@@ -297,17 +329,27 @@ pub fn run(
         if only.is_some_and(|o| o != id) {
             continue;
         }
-        let Some(source) = registry::build(id) else {
-            continue;
+        let accept = accept_shrink && only == Some(id);
+        let one = match registry::build(id) {
+            None => continue,
+            Some(registry::Registered::Vulns(source)) => engine::sync_source(
+                &mut store,
+                &base_dir,
+                source.as_ref(),
+                options,
+                clock,
+                accept,
+            ),
+            Some(registry::Registered::Enrichment(_)) if options.skip_enrichment => continue,
+            Some(registry::Registered::Enrichment(source)) => engine::sync_enrichment(
+                &mut store,
+                &base_dir,
+                source.as_ref(),
+                options,
+                clock,
+                accept,
+            ),
         };
-        let one = engine::sync_source(
-            &mut store,
-            &base_dir,
-            source.as_ref(),
-            options,
-            clock,
-            accept_shrink && only == Some(id),
-        );
         report.sources.push(one);
     }
     Ok(report)

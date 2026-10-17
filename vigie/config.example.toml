@@ -45,6 +45,10 @@ password_file = "/home/vigie/vigie/smtp-password"
 # (`vigie vulns sync`, docs/failles.md) : liste fermée parmi osv-crates-io,
 # osv-packagist et osv-npm. Sans cette section ou avec une liste vide, aucune
 # synchronisation ni constat `vulns-sync`. Aucune URL n'est configurable.
+# Les tables de priorisation kev (CISA KEV) et epss (FIRST EPSS) sont
+# ajoutées d'office dès qu'une source de failles est déclarée, et
+# synchronisées après elles ; les écrire est admis, les déclarer seules est
+# une erreur.
 # [vulns]
 # sources = ["osv-crates-io", "osv-packagist", "osv-npm"]
 

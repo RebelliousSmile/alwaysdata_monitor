@@ -315,6 +315,32 @@ détaillées dans [`failles.md`](./failles.md#synchronisation-f2).
 | Constat `vulns-sync` évalué par `tick` (3 jours sans réussite), pseudo-site réservé `_veilleur` déclaré au registre (`Needs::Watcher`), `close_unwatched` reçoit l'incident entier, e-mails propres au veilleur ; lecture de l'état en échec : aucune réconciliation | Un timer cassé se voit ; tout incident porte un contrôle déclaré ; retirer une source ne l'annonce pas « rétablie » |
 | Timer quotidien à 03:40 décalé de 45 min, `Persistent=true`, basse priorité CPU et E/S, tué avant `serve` et `tick` en manque de mémoire | Heure creuse ; un VPS éteint rattrape ; la synchronisation ne prive jamais le service |
 
+### Priorisation KEV et EPSS (issue #18)
+
+Plan : `aidd_docs/tasks/2026_10/2026_10_17_priorisation-failles/plan.md` ;
+règles détaillées dans [`failles.md`](./failles.md#priorisation-f4).
+
+| Décision du 2026-10-17 | Raison |
+| --- | --- |
+| **La règle de F0 fait foi, pas le tableau de l'issue** (écart) : KEV, `MAL-` ou CVSS ≥ 9,0 → critique ; CVSS ≥ 7,0, EPSS ≥ 0,1 ou gravité inconnue → avertissement ; version ou plage inconnue sur une faille critique → avertissement ; « aucun correctif » ne baisse jamais la gravité. L'issue proposait « CVSS ≥ 9 et correctif disponible → avertissement » et ne nommait ni `MAL-` ni la gravité inconnue | `decisions.md` est la référence des failles ; un CVSS 9,8 sans correctif reste critique |
+| Un seul module, `vulns/severity.rs`, fonctions pures (`assess`, `assess_group`, `assess_unknown`) sur `AdvisoryFacts` et le trait `Exploitation` ; aucune lecture de base, d'horloge ni de configuration ; huit règles nommées dans un seul `match` | F7 les appelle telles quelles ; une fonction pure se prouve par table de vérité et par propriétés sur une grille exhaustive |
+| Seuils exacts, sans flottant : score en dixièmes entiers comparé à 90 et 70, EPSS en millionièmes entiers comparé à 100 000, texte du CSV converti par troncature (`parse_ppm`) ; seuils en constantes, pas en configuration | Les bornes 7,0, 9,0 et 0,1 sont exactes ; changer un seuil est une décision, pas un réglage par VPS |
+| Groupe fusionné : KEV et EPSS sur l'union des CVE, chaque membre par ses propres drapeaux, maximum, premier membre reçu au maximum | Un avis Wordfence sans CVE et la GHSA de la même faille dans KEV sont la même faille exploitée ; `informational` ne déclasse pas la GHSA |
+| `Cve` validé par la grammaire du schéma KEV ; plusieurs CVE : KEV si l'un y est (`dateAdded` le plus ancien, rançongiciel si l'un l'est), EPSS le plus haut ; sans CVE : ni KEV ni EPSS | Une faille exploitée sous l'un de ses identifiants l'est tout court |
+| KEV et EPSS **déclarés d'office** dès qu'une source de failles l'est ; seuls : erreur de configuration ; synchronisés après les failles | Une gravité calculée sans KEV serait trop basse en silence ; les configurations écrites pour F2 restent valides |
+| Trait `EnrichmentSource` voisin de `VulnSource`, même moteur, même bail, même débit, même état, même constat ; `SourceMeta.raw_content_encodings` ; `FetchOutcome::Unchanged { stale, served }` et `RefusedShrink` | Une ligne KEV ou EPSS n'est pas un `Advisory` ; rien n'est dupliqué du cadre F2 |
+| Stockage par générations comme F1 : `vuln_kev`, `vuln_epss` en `WITHOUT ROWID`, lots de 5 000 sous bail, bascule en compare-and-swap, purge par forme de clé, `vuln_dataset` par génération (écart : pas de `model_date` par ligne) ; migration en fichier `0019.sql` (#17 prend 0018), `SCHEMA_ENRICHMENT` calculé par sa place | Remplacement atomique sans tenir le verrou pendant 300 000 insertions ; un lecteur voit l'ancien jeu ou le nouveau |
+| Primitives de génération de F1 réutilisées dans `vulns/store.rs` (`reserve`, `switch`, `check_lease`, `purge_batches` avec `KeyShape`), sans fichier `generation.rs` séparé | Un seul code de bail et de bascule ; diff minimal à côté de #17 |
+| `validator_url` : validateurs liés à l'URL qui les a servis, écrits avec elle ; requête conditionnelle seulement vers cette URL | KEV a deux hôtes ; un 304 doit toujours désigner le contenu actif |
+| KEV : miroir d'abord, cisa.gov en secours ; cisa.gov d'abord avec `--accept-shrink` ; régression de `dateReleased` (à la seconde) refusée, « inchangé (périmé) » sans écraser les validateurs de l'actif (`stale_count`) | Le miroir peut retarder sur cisa.gov ; revenir à N après N+1 ferait disparaître des CVE ajoutés |
+| Seuil d'écart de F2 réutilisé (1 %), raisons F4 dans `Reason` (`bad_cve`, `bad_value`, `missing_field`, `duplicate` : écarts ; `unknown_ransomware`, `count_mismatch` : notes) ; garde de rétrécissement de F2 seulement, exposée en `shrink_refused` | Un seul seuil et une seule fenêtre ; aucun double compte |
+| Deux 429 avec `Retry-After` sur les deux hôtes KEV : `rate_limited` comme pour OSV (écart au plan, qui disait `failed`) | Même règle du moteur pour toutes les sources ; `retry_after_until` est écrit dans les deux cas |
+| EPSS en flux (`MultiGzDecoder`, compteur coupé à 64 Mio, lignes de 128 octets), `Content-Encoding: gzip` admis sans décodage, plafonds provisoires ; grammaire à figer après le relevé du VPS | Le CSV n'est jamais entier en mémoire ; un format changé échoue au lieu de charger n'importe quoi |
+| `LOADER_VERSION` = 1 pour `kev` et `epss` | Une correction du lecteur s'applique au passage suivant |
+| Lecture pour F7 : `StoreTables::open` sur une connexion de lecture, KEV en mémoire, EPSS par CVE joint sur la génération active | `serve` et la CLI n'ouvrent jamais l'écrivain pour lire une gravité |
+| Âge du catalogue KEV affiché, avertissement au-delà de 14 jours, sans constat | Distinct de la fraîcheur de synchronisation ; F7 le reprendra s'il le juge utile |
+| Critères transmis à F7 (#21) : rapprochement déclenché par une issue `loaded` de KEV ou EPSS (`SyncReport::loaded`), constat ouvert passé en critique au passage suivant, gravité d'un groupe par `assess_group`, inconnues par `assess_unknown` et maximum par composant | F7 seul possède les constats |
+
 ## Dépendances (issue #22)
 
 Plan : `aidd_docs/tasks/2026_10/2026_10_17_osv-scanner/plan.md`. Job `deps`

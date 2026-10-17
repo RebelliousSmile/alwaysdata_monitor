@@ -6,9 +6,12 @@
 //!   sensibles (F3 : `Authorization`) retirés dès que l'origine change,
 //!   jamais journalisés ;
 //! - requête conditionnelle (`If-None-Match`, `If-Modified-Since`) si les
-//!   validateurs connus le permettent ; 304 → [`Fetched::NotModified`] ;
+//!   validateurs connus le permettent et seulement vers l'URL qui les a
+//!   servis (`validator_url`, F4) ; 304 → [`Fetched::NotModified`] ;
 //! - `Accept-Encoding: identity` : un corps encodé ne serait pas le dump dont
-//!   on calcule l'empreinte ; toute autre `Content-Encoding` est refusée ;
+//!   on calcule l'empreinte ; toute autre `Content-Encoding` est refusée,
+//!   sauf celles que la source admet sans décodage (F4, EPSS : `gzip`),
+//!   octets gardés tels quels ;
 //! - 200 : `Content-Length` au-delà du plafond refusé avant lecture, corps
 //!   écrit en flux avec son SHA-256, longueur différente de `Content-Length`
 //!   refusée (corps tronqué) ; empreinte égale à celle de la génération
@@ -124,6 +127,12 @@ pub struct Download {
     files: usize,
     /// URL du dump de la source, origine remplacée par les tests.
     url: Option<Url>,
+    /// Origine des tests qui remplace celle de chaque URL de la source.
+    endpoint: Option<Url>,
+    /// URL demandée qui a servi les validateurs ; `None` : toute URL (F2).
+    validator_url: Option<String>,
+    /// `Content-Encoding` admis sans décodage.
+    raw_encodings: &'static [&'static str],
 }
 
 impl Download {
@@ -144,7 +153,36 @@ impl Download {
             workdir,
             files: 0,
             url: None,
+            endpoint: None,
+            validator_url: None,
+            raw_encodings: &[],
         }
+    }
+
+    /// Origine qui remplace celle des URL de la source (tests, posée par
+    /// le moteur depuis `SyncOptions::endpoint_override`).
+    pub fn with_endpoint(mut self, endpoint: Option<Url>) -> Self {
+        self.endpoint = endpoint;
+        self
+    }
+
+    /// URL qui a servi les validateurs : une requête vers une autre URL
+    /// part sans en-têtes conditionnels.
+    pub fn with_validator_url(mut self, url: Option<String>) -> Self {
+        self.validator_url = url;
+        self
+    }
+
+    /// `Content-Encoding` admis sans décodage.
+    pub fn with_raw_encodings(mut self, encodings: &'static [&'static str]) -> Self {
+        self.raw_encodings = encodings;
+        self
+    }
+
+    /// URL codée en dur d'une source (KEV : second hôte), origine remplacée
+    /// par celle des tests le cas échéant, chemin gardé.
+    pub fn endpoint(&self, url: &str) -> Result<Url, SyncError> {
+        super::engine::source_url(url, self.endpoint.as_ref())
     }
 
     /// URL du dump de la source (posée par le moteur).
@@ -176,6 +214,12 @@ impl Download {
     /// Télécharge le dump de `request` dans le dossier de travail.
     pub fn get_to_file(&mut self, request: &Request) -> Result<Fetched, SyncError> {
         let first = self.origins.admit(&request.url)?;
+        // Un validateur ne vaut que pour l'URL qui l'a servi.
+        let conditional = self.validators.conditional
+            && self
+                .validator_url
+                .as_deref()
+                .is_none_or(|u| u == request.url.as_str());
         let mut url = request.url.clone();
         let mut sensitive = true;
         let mut hops = 0;
@@ -188,7 +232,7 @@ impl Download {
                 .agent
                 .get(url.as_str())
                 .header("Accept-Encoding", "identity");
-            if self.validators.conditional {
+            if conditional {
                 if let Some(etag) = &self.validators.etag {
                     builder = builder.header("If-None-Match", etag.as_str());
                 }
@@ -213,7 +257,7 @@ impl Download {
             let status = response.status().as_u16();
             match status {
                 200 => return self.save(response),
-                304 if self.validators.conditional => return Ok(Fetched::NotModified),
+                304 if conditional => return Ok(Fetched::NotModified),
                 301 | 302 | 303 | 307 | 308 => {
                     if hops == MAX_REDIRECTS {
                         return Err(SyncError::Redirect("plus de 3 redirections"));
@@ -255,6 +299,7 @@ impl Download {
             .get("content-encoding")
             .map(|v| String::from_utf8_lossy(v.as_bytes()).trim().to_owned())
             .filter(|e| !e.is_empty() && !e.eq_ignore_ascii_case("identity"))
+            .filter(|e| !self.raw_encodings.iter().any(|r| e.eq_ignore_ascii_case(r)))
         {
             let shown: String = encoding
                 .chars()
