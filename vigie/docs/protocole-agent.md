@@ -159,6 +159,118 @@ d'enregistrement de la clé) date de plus de `agent_silence` secondes (900 par
 défaut, réglable par site dans la configuration). Le rapport accepté suivant le
 clôt.
 
+## Inventaire des composants (issue #19)
+
+`POST /r/v1/inventory` reçoit l'inventaire des composants d'un site, en
+CycloneDX, relevé par l'agent PHP 0.5.0 (`agent-php.md`, « Inventaire »).
+Code : `vigie/src/inventory/` ; tests : `vigie/tests/inventory_receive.rs`,
+`interop.rs`, `inventory_vectors.rs`, `agent_e2e.rs`.
+
+- Mêmes en-têtes que le rapport. `X-Vigie-Signature` signe
+  `vigie-inventory-v1\n` suivi des octets bruts du corps, avec la clé de
+  rapport (`sodium_crypto_sign_detached(DOMAIN_INVENTORY . $body, $secret)`).
+- Corps de 512 Kio au plus, reçu en 10 s, sans gzip.
+- Ouvert seulement pour un site qui déclare `[sites.inventory]` dans
+  `config.toml` (`source = "agent-php"`, runtime effectif `php` exigé au
+  chargement). C'est la configuration du veilleur qui dit « surveillé », jamais
+  ce qu'un agent envoie.
+
+### Enveloppe et liste blanche
+
+```json
+{"v":1,"type":"inventory","site":"site-a","seq":1792079580123,"sent_at":1792079580,
+ "agent":"vigie-agent-php/0.5.0","complete":true,"skipped":0,
+ "bom":{"bomFormat":"CycloneDX","specVersion":"1.7","serialNumber":"urn:uuid:…",
+        "metadata":{"timestamp":"2026-10-15T15:53:00Z","component":{"type":"application","name":"site-a"}},
+        "components":[{"type":"library","name":"exemple-formulaire","version":"5.9.3",
+                       "purl":"pkg:wordpress/plugin/exemple-formulaire@5.9.3","scope":"required",
+                       "properties":[{"name":"vigie:path","value":"wp-content/plugins/exemple-formulaire"},
+                                     {"name":"vigie:scope","value":"required"}]}]}}
+```
+
+| Champ | Règle |
+| --- | --- |
+| `v`, `type` | `1`, `inventory` |
+| `site` | égal à `X-Vigie-Site` |
+| `seq` | ≥ 1, strictement croissant, propre aux inventaires (`site_keys.last_inventory_seq`) |
+| `sent_at` | ±300 s de l'heure du veilleur |
+| `agent` | 1 à 64 caractères imprimables |
+| `complete`, `skipped` | booléen ; 0 à 100 000 composants et sources écartés par l'agent. `complete = false` dès que `skipped > 0` ou qu'une borne a tronqué le relevé. **Seul un inventaire complet vaut absence d'un composant** (règle de F7) |
+| `bom.bomFormat`, `specVersion` | `CycloneDX` ; `1.6` ou `1.7` (l'agent émet `1.7`) |
+| `bom.serialNumber` | `urn:uuid:` et UUID en minuscules |
+| `bom.metadata` | `{timestamp, component}` : RFC 3339 en UTC à 30 jours au plus de `sent_at` ; `{"type":"application","name":<site>}` |
+| `bom.components` | 0 à 2 000 objets `{type, name, version, purl, scope, properties}`, rien d'autre |
+| `type` | `application` pour un noyau (`pkg:wordpress/core/core`, `pkg:prestashop/core/prestashop`), `library` sinon |
+| `version` | vide, ou la version du purl (grammaire `[0-9A-Za-z.+_-]{1,128}`) |
+| `purl` | forme canonique de la grammaire commune (`failles.md`, « Conventions purl ») |
+| `scope` | `required`, ou `excluded` pour une dépendance de développement |
+| `properties` | `vigie:path` (obligatoire, relatif, 200 octets, segments de `[A-Za-z0-9._@+-]`), `vigie:scope` (obligatoire : `required`, `dev` ou `mu`), `vigie:parent` (thème parent d'un thème enfant), `vigie:config-version` (module PrestaShop dont `config.xml` diffère) |
+
+`deny_unknown_fields` partout : **un champ hors liste** (`authors`,
+`supplier`, `licenses`, `hashes`, `bom-ref`…) **ou une propriété hors de ces
+quatre, ou en double, fait refuser le document entier**. Le scope CycloneDX
+n'admet que `required`, `optional` et `excluded` : le scope Vigie de l'issue
+(`required`, `dev`, `mu`) part dans `vigie:scope`.
+
+Un défaut propre à un composant l'écarte et le compte (`dropped`), le reste
+étant accepté : purl hors grammaire ou non canonique (le veilleur recalcule la
+forme canonique, Composer en minuscules), écosystème non admis pour le CMS du
+site (`wordpress` sur un site `wordpress`, `prestashop` sur un site
+`prestashop`, `composer`, `npm` et `cargo` partout), version différente de
+celle du purl, incohérence (`excluded` si et seulement si `dev`, `mu` hors
+extension WordPress, `vigie:parent` hors thème, `vigie:config-version` hors
+module, `application` hors noyau), doublon `(purl, vigie:path)`. L'agent
+applique la même grammaire : il n'émet rien que le veilleur écarterait.
+
+### Vérifications
+
+Dans l'ordre, arrêt au premier échec, 404 sans corps :
+
+1. **Avant de lire le corps** : `X-Vigie-Site` bien formé, site connu,
+   `[sites.inventory]` déclarée, clé d'agent enregistrée, signature présente.
+   Un corps annoncé de 10 Mio d'un site fermé n'est jamais lu.
+2. Taille et délai du corps.
+3. Hors du writer de `serve` : signature (domaine `vigie-inventory-v1\n`),
+   liste blanche, purl, liste canonique et digest, horloge.
+4. Dans le writer, transaction IMMEDIATE : clé inchangée, `seq` strictement
+   croissant, **un inventaire accepté par site et par 240 s** (nouveau ou
+   inchangé, sur le `seen_at` du dernier), **24 inventaires nouveaux par site
+   et par jour UTC** (au-delà, raison `plafond quotidien des inventaires`),
+   écriture.
+
+Le journal ne porte que des raisons fixes (« schéma : champ hors liste
+blanche », « schéma : JSON illisible »…) et des nombres : jamais le texte
+d'erreur de serde, ni un nom, une version ou un purl reçu. Un rapport, un
+retrait ou un lot de logs rejoués sur `/r/v1/inventory` échouent à la
+signature, et un inventaire envoyé à `/r/v1/report` ou `/r/v1/logs` aussi.
+
+### Effets
+
+- Digest SHA-256 de la liste canonique (composants triés par `(purl, path)`,
+  sérialisés par le veilleur, sans `serialNumber`, `timestamp` ni `seq`). Même
+  digest et même `complete` que le dernier inventaire du site : seuls
+  `seen_at` et `seq` avancent (renvoi des 24 h). Sinon, nouvel inventaire et
+  ses composants en une transaction.
+- Le corps reçu n'est jamais stocké : `site_inventory` (tête) et
+  `site_inventory_components` (`ecosystem`, `base` = purl sans version,
+  `purl`, `name`, `version`, scope Vigie, `type`, `path`, `parent`,
+  `config_version`), migration 16.
+- Conservation : le dernier inventaire de chaque site ; les précédents
+  purgés par `tick` 30 jours après leur `seen_at`. Un site retiré de la
+  configuration ou de `[sites.inventory]` perd aussi son dernier inventaire
+  30 jours après son dernier `seen_at`.
+- **Pas une preuve de vie** : un inventaire ne touche ni au dernier rapport,
+  ni au silence, ni aux incidents, et n'ouvre aucun constat. « Inventaire
+  périmé » (7 jours) et le rapprochement sont des règles du contrôle `vulns`
+  (F7).
+- `site rotate-key` (et la rotation par commande) remet `seq` à zéro et garde
+  l'inventaire ; `site remove` purge tous les inventaires du site.
+
+### Limites V1
+
+Aucune lecture de l'inventaire par l'API, la console ou la CLI (F7) ; aucun
+gzip ; les limites de relevé de l'agent sont dans `agent-php.md`.
+
 ## Clés
 
 ```console
@@ -177,12 +289,12 @@ $ ~/vigie/bin/vigie site remove site-a
   `php` (issue #4) : déclarer `runtime = "php"` pour un site `generic` en PHP.
   Une clé déjà en base sur un tel site ouvre l'avertissement `typology`.
 - `site rotate-key` remplace la clé : un rapport signé avec l'ancienne est
-  refusé dès la rotation. La séquence repart de zéro (celle des lots de logs
-  aussi), puisque l'ancienne clé ne
+  refusé dès la rotation. La séquence repart de zéro (celles des lots de logs
+  et des inventaires aussi), puisque l'ancienne clé ne
   peut plus rien faire accepter ; le silence reste mesuré depuis le dernier
   rapport accepté.
 - `site remove` retire la clé, l'état des rapports, la référence
-  d'empreintes et les logs reçus du site, après confirmation (taper
+  d'empreintes, les logs et les inventaires reçus du site, après confirmation (taper
   l'identifiant du site) ou avec `--yes`. Les incidents de l'agent sont clos au
   passage suivant de `tick`.
 
@@ -196,6 +308,7 @@ ne vérifie jamais ce qu'une autre a signé.
 | Rapports | l'agent | le veilleur, avec la clé publique de `site add` | sur le site, hors webroot, 0600 vérifié par l'agent |
 | Retraits de commandes | l'agent, préfixe `vigie-pull-v1\n` | le veilleur, même clé que les rapports | idem rapports ; le préfixe sépare les deux usages |
 | Lots de logs (`/r/v1/logs`) | l'agent, préfixe `vigie-logs-v1\n` | le veilleur, même clé que les rapports | idem rapports ; le préfixe sépare les usages |
+| Inventaires (`/r/v1/inventory`) | l'agent, préfixe `vigie-inventory-v1\n` | le veilleur, même clé que les rapports | idem rapports ; le préfixe sépare les usages |
 | Commandes | le veilleur (`[commands] key_file`) | l'agent, avec la clé publique épinglée | sur le VPS, lue par `serve` seul (`protocole-commandes.md`) |
 | Audit des commandes | le veilleur (`[commands] audit_key_file`) | `vigie site audit --verify` | sur le VPS, lue par `serve`, `tick` et la CLI |
 

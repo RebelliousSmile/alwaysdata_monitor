@@ -266,6 +266,28 @@ détaillées dans [`failles.md`](./failles.md#modèle-interne-et-versions).
 | `vigie vulns sources \| show \| match` en lecture seule ; erreur d'usage (`UsageError`) en code 2 comme une erreur de configuration | Périmètre de l'issue ; codes de sortie cohérents avec le reste de la CLI |
 | Fixtures OSV réelles intactes sous `NOTICE` ; Wordfence et Friends-Of-Presta fictifs ; vecteurs Composer repris sous la licence MIT complète | Dépôt public : c'est une redistribution |
 
+### Inventaire de l'agent (issue #19, F5)
+
+Plan : `aidd_docs/tasks/2026_10/2026_10_17_inventaire-agent/plan.md` ;
+contrat dans [`protocole-agent.md`](./protocole-agent.md#inventaire-des-composants-issue-19),
+agent dans [`agent-php.md`](./agent-php.md#inventaire-agent-050-issue-19).
+
+| Décision du 2026-10-17 | Raison |
+| --- | --- |
+| `POST /r/v1/inventory`, signé par la clé de rapport sur `vigie-inventory-v1\n` ; `seq` propre (`site_keys.last_inventory_seq`, migration 16), remis à zéro par `site rotate-key` et par la commande `rotate-key` | Une signature ne vaut que pour son usage ; même parcours que `/r/v1/logs` |
+| Porte `[sites.inventory] source = "agent-php"` (runtime `php` exigé au chargement), vérifiée avec le site et la clé **avant** de lire le corps ; signature et liste blanche hors du writer | « Surveillé » se lit dans la configuration du veilleur ; aucun corps de 512 Kio lu pour un site fermé ; le writer unique n'est pas tenu pendant le travail CPU |
+| Liste blanche stricte de CycloneDX 1.6/1.7, document entier refusé sur un champ ou une propriété de trop ; raisons fixes au journal, jamais le texte de serde ni une valeur reçue | Champs inutiles au rapprochement et porteurs de données du client ; l'inventaire ne sort pas de la base |
+| **Écart à l'issue** : `scope` CycloneDX `required`/`excluded`, scope Vigie (`required`, `dev`, `mu`) dans `vigie:scope` | Un `scope: "dev"` rendrait le document invalide pour tout outil CycloneDX (vérifié contre `bom-1.7.schema.json`) |
+| **Écart à l'issue** : état de l'agent dans `inventory.json` sous `inventory.lock`, `state.json` jamais touché, aucune migration d'état | Un relevé de 20 s sous `state.lock` ferait sauter les commandes ; aucun agent 0.2 à 0.4 n'a à migrer |
+| Pas de gzip : corps de 512 Kio au plus, composants retirés depuis la fin au-delà, inventaire alors partiel | Pas de bombe de décompression ; un site courant tient en 10 à 30 Kio |
+| Un inventaire accepté par site et par 240 s ; 24 nouveaux par jour UTC ; renvoi inchangé (même digest **et même `complete`**) sans réécriture | L'envoi des 24 h ne gonfle pas l'historique ; un agent fou ne remplit pas la base ; un relevé redevenu complet doit se voir (F7 ne juge l'absence que sur un inventaire complet) |
+| Noyau PrestaShop lu dans `src/Core/Version.php` (8.1 et suivantes, dont 9), puis `app/AppKernel.php` (1.7, 8.0), puis `config/settings.inc.php` (1.6) | Vérifié le 2026-10-17 sur les sources publiques de PrestaShop (tags 1.7.8.0, 8.0.0, 8.1.0, 9.0.0, branche develop) : depuis 8.1, `AppKernel::VERSION` vaut `Version::VERSION`, ce n'est plus un littéral |
+| Registre Composer : `notification-url` présent, ou nom `wpackagist-plugin/…` / `wpackagist-theme/…` ; npm : `resolved` d'archive de registre (`…/-/<fichier>.tgz`) ; sinon hors registre, compté dans `skipped` ; membres du projet ignorés sans compte | Règle commune avec l'outil d'inventaire (#20) ; WPackagist n'écrit pas de `notification-url` ; un paquet git ou local n'a pas de faille connue sous son nom |
+| Ligne d'en-tête de plus de 256 caractères coupée pour la recherche, et une valeur lue sur une ligne coupée tenue pour illisible (version vide) | Aucune valeur relevée n'est jamais tronquée |
+| Lectures pour F7 (`last_inventory`, `inventory_history`, `inventory_heads`, `inventory_components` par lots sur le rowid) sur `Store::open_read`, vides sur une base antérieure à la migration 16 | Le rapprochement choisit les sites sans lire de composant, puis lit un inventaire par lots reprenables ; un lecteur tolère une base plus ancienne pendant un déploiement |
+| Fixtures de l'agent sous leurs vrais noms (`composer.lock`, `package-lock.json`), paquets fictifs ; WPackagist au format écrit par Composer (source svn, dist zip, sans `notification-url`) ; cas hostiles, liens, en-têtes géants et 2 001 composants fabriqués par les tests | Le relevé lit ces noms à la racine ; dépôt public ; l'antivirus Windows et les liens versionnés |
+| Document produit validé contre `bom-1.7.schema.json` (JSON Schema draft-07, avec `spdx`, `jsf-0.82` et `cryptography-defs`) le 2026-10-17 : fixtures `wp-inventory`, `ps8-inventory`, `ps-hostile` valides | Contrôle unique demandé par le plan, fait avec `jsonschema` à défaut de `cyclonedx-cli` |
+
 ## Dépendances (issue #22)
 
 Plan : `aidd_docs/tasks/2026_10/2026_10_17_osv-scanner/plan.md`. Job `deps`

@@ -18,7 +18,7 @@ Sur le veilleur, toujours appeler le binaire par son chemin complet.
 
 | Commande | Rôle |
 | -------- | ---- |
-| `~/vigie/bin/vigie serve` | Service `vigie-serve` derrière Caddy : écoute sur `$IP:$PORT` (ou `--ip`, `--port`), `127.0.0.1:8080` dans l'unité. Routes : `GET /health`, `POST /r/v1/report` et l'API de la console `/api/v1` ; tout le reste renvoie 404 sans corps. Migre la base au démarrage |
+| `~/vigie/bin/vigie serve` | Service `vigie-serve` derrière Caddy : écoute sur `$IP:$PORT` (ou `--ip`, `--port`), `127.0.0.1:8080` dans l'unité. Routes : `GET /health`, `POST /r/v1/report`, `/r/v1/commands`, `/r/v1/logs`, `/r/v1/inventory` et l'API de la console `/api/v1` ; tout le reste renvoie 404 sans corps. Migre la base au démarrage |
 | `~/vigie/bin/vigie tick` | Lancé chaque minute par `vigie-tick.timer` : lance les contrôles dus, ouvre ou clôt les incidents, envoie les e-mails |
 | `~/vigie/bin/vigie check <site> --once` | Lance tous les contrôles d'un site et affiche les constats, sans écrire dans la base ni envoyer d'e-mail ; code 1 si un constat est à traiter |
 | `~/vigie/bin/vigie status` | Dernier passage, sites et dernier contrôle, incidents ouverts avec leur âge, état de l'agent de chaque site, informations (en-têtes manquants), notifications en attente ; code 1 si `tick` est en retard |
@@ -78,6 +78,14 @@ un fichier critique dont l'empreinte diffère ouvre un avertissement
 `site accept`. Un chemin nouveau entre dans la référence sans constat. Le
 contrôle `integrity` est réservé au veilleur : un rapport qui l'envoie est
 refusé.
+
+`POST /r/v1/inventory` (issue #19) reçoit l'inventaire CycloneDX des
+composants d'un site, signé sur `vigie-inventory-v1\n` par la clé de
+rapport : **512 Kio au plus**, lus en 10 s, et seulement pour un site qui
+déclare `[sites.inventory]` (refus avant toute lecture du corps sinon). Liste
+blanche stricte, 240 s entre deux inventaires acceptés, 24 nouveaux par jour
+UTC, dernier inventaire et 30 jours d'historique ; un inventaire n'est pas une
+preuve de vie. Contrat : [`docs/protocole-agent.md`](./docs/protocole-agent.md#inventaire-des-composants-issue-19).
 
 ## Contrôles
 

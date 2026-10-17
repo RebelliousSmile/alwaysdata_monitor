@@ -1,5 +1,5 @@
 ---
-status: pending
+status: done
 ---
 
 # Instruction: Envoi, état 0.5.0, interopérabilité, bout en bout et docs

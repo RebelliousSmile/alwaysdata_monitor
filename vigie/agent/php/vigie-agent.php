@@ -13,21 +13,24 @@ if (\PHP_SAPI !== 'cli') {
 // Agent Vigie, protocole v1 (vigie/docs/protocole-agent.md, vigie/docs/agent-php.md).
 //
 //   php vigie-agent.php              contrôles, rapport signé, envoi au veilleur
-//                                    (puis commandes et logs, s'ils sont configurés)
+//                                    (puis commandes, inventaire et logs, s'ils sont
+//                                    configurés)
 //   php vigie-agent.php --dry-run    affiche le rapport sans le signer ni l'envoyer
+//   php vigie-agent.php --inventory  affiche l'inventaire sans le signer ni l'envoyer
 //   php vigie-agent.php --init       crée la paire de clés, affiche la clé publique
 //   --config <fichier>               sinon ~/.vigie-agent/config.json
 //
 // Lecture seule pour le site : l'agent n'écrit que dans son propre dossier, à
 // côté de la configuration (sa clé, à --init ; avec `commands`, l'état du canal
-// de commandes et une nouvelle clé en rotation ; avec `logs`, la position de
-// lecture des logs). Le `seq` d'un rapport est l'heure en ms.
+// de commandes et une nouvelle clé en rotation ; avec `inventory`, l'état de
+// l'inventaire ; avec `logs`, la position de lecture des logs). Le `seq` d'un
+// rapport est l'heure en ms.
 // Codes de retour : 0 succès, 1 envoi échoué, 2 configuration ou usage,
 // 3 extension sodium absente.
 // Compatible PHP 8.1 (version du site A) : ni classes readonly, ni constantes
 // typées, ni json_validate.
 
-const VERSION = '0.4.0';
+const VERSION = '0.5.0';
 const AGENT = 'vigie-agent-php/' . VERSION;
 const KEY_FILE = 'secret.key';
 const MAX_BODY = 65536;
@@ -107,6 +110,14 @@ function main(array $argv): int
         }
         $config = load_config($configPath);
         $now = time();
+        if ($mode === 'inventory') {
+            // Relecture à la pose : rien de signé, d'envoyé ni d'écrit.
+            $inventory = collect_inventory($config, hrtime(true) + INVENTORY_SECONDS * 1_000_000_000);
+            $body = build_inventory_body($config, $inventory, (int) floor(microtime(true) * 1000), $now, uuid_v4(random_bytes(16)));
+            echo json_encode(json_decode($body), \JSON_PRETTY_PRINT | \JSON_UNESCAPED_SLASHES | \JSON_UNESCAPED_UNICODE), "\n";
+
+            return 0;
+        }
         $body = build_body($config, collect($config), (int) floor(microtime(true) * 1000), $now);
         if ($mode === 'dry-run') {
             echo json_encode(json_decode($body), \JSON_PRETTY_PRINT | \JSON_UNESCAPED_SLASHES | \JSON_UNESCAPED_UNICODE), "\n";
@@ -126,6 +137,14 @@ function main(array $argv): int
                 pull_commands($config, $dir, $now);
             } catch (SendError|UsageError $e) {
                 fwrite(\STDERR, 'Commandes : ' . $e->getMessage() . "\n");
+                $code = $e instanceof UsageError ? 2 : 1;
+            }
+        }
+        if ($config->inventory !== null) {
+            try {
+                send_inventory($config, $dir, time());
+            } catch (SendError|UsageError $e) {
+                fwrite(\STDERR, 'Inventaire : ' . $e->getMessage() . "\n");
                 $code = $e instanceof UsageError ? 2 : 1;
             }
         }
@@ -151,22 +170,22 @@ function main(array $argv): int
     }
 }
 
-/** @return array{0: string, 1: string} mode (run, dry-run, init) et chemin de la configuration */
+/** @return array{0: string, 1: string} mode (run, dry-run, inventory, init) et chemin de la configuration */
 function parse_args(array $args): array
 {
     $mode = 'run';
     $config = null;
     for ($i = 0; $i < \count($args); ++$i) {
         $arg = $args[$i];
-        if ($arg === '--dry-run' || $arg === '--init') {
+        if ($arg === '--dry-run' || $arg === '--inventory' || $arg === '--init') {
             if ($mode !== 'run') {
-                throw new UsageError('--dry-run et --init sont exclusifs.');
+                throw new UsageError('--dry-run, --inventory et --init sont exclusifs.');
             }
             $mode = substr($arg, 2);
         } elseif ($arg === '--config' && isset($args[$i + 1])) {
             $config = $args[++$i];
         } else {
-            throw new UsageError('Usage : php vigie-agent.php [--dry-run | --init] [--config <fichier>]');
+            throw new UsageError('Usage : php vigie-agent.php [--dry-run | --inventory | --init] [--config <fichier>]');
         }
     }
     if ($config === null) {
@@ -3059,6 +3078,141 @@ function inventory_digest(array $components): string
     usort($list, static fn (array $a, array $b): int => [$a['purl'], $a['properties'][0]['value']] <=> [$b['purl'], $b['properties'][0]['value']]);
 
     return hash('sha256', json_encode($list, \JSON_UNESCAPED_SLASHES | \JSON_UNESCAPED_UNICODE | \JSON_THROW_ON_ERROR));
+}
+
+// --- État et envoi de l'inventaire -----------------------------------------
+//
+// L'inventaire part signé sur `vigie-inventory-v1\n` à /r/v1/inventory quand
+// son empreinte change, et au moins toutes les 24 h ; après un refus ou un
+// échec réseau, pas de nouvel essai avant 1 h. Le relevé est économe : il
+// n'a lieu que si l'empreinte (chemin, mtime, taille) des dossiers listés et
+// des fichiers lus au relevé précédent a changé, si le dernier relevé date
+// d'une heure, ou si un renvoi est dû. L'état vit dans `inventory.json`, à
+// côté de la clé, sous `flock` de `inventory.lock` : un relevé lent ne fait
+// sauter ni les commandes ni les logs. `state.json` n'est jamais touché.
+
+const DOMAIN_INVENTORY = "vigie-inventory-v1\n";
+const INVENTORY_STATE = 'inventory.json';
+const INVENTORY_LOCK = 'inventory.lock';
+const INVENTORY_RESEND = 86400;
+const INVENTORY_RETRY = 3600;
+const INVENTORY_RESCAN = 3600;
+/** Chemins gardés pour le relevé économe, au plus ; au-delà, relevé horaire seul. */
+const INVENTORY_MAX_STAT = 4000;
+
+/** État vide : rien de relevé, rien d'envoyé. */
+function empty_inventory_state(): array
+{
+    return ['seq' => 0, 'sent_sha256' => '', 'sent_at' => 0, 'failed_at' => 0, 'scanned_at' => 0, 'stat_sha256' => '', 'stat_paths' => []];
+}
+
+/** Chemin relatif sans `.`, `..`, segment vide ni caractère de contrôle. */
+function valid_stat_path(mixed $path): bool
+{
+    try {
+        relative_path($path, 'stat_paths');
+    } catch (UsageError) {
+        return false;
+    }
+
+    return true;
+}
+
+function load_inventory_state(string $dir): array
+{
+    $path = $dir . '/' . INVENTORY_STATE;
+    clearstatcache(true, $path);
+    if (!file_exists($path) && !is_link($path)) {
+        return empty_inventory_state();
+    }
+    private_file($path, INVENTORY_STATE);
+    $raw = @file_get_contents($path, false, null, 0, READ_MAX_BYTES);
+    try {
+        $state = \is_string($raw) ? json_decode($raw, true, 8, \JSON_THROW_ON_ERROR) : null;
+    } catch (\JsonException) {
+        $state = null;
+    }
+    $sha = static fn (mixed $v): bool => \is_string($v) && ($v === '' || preg_match('/^[0-9a-f]{64}$/', $v) === 1);
+    $valid = \is_array($state) && sorted_keys($state) === sorted_keys(empty_inventory_state())
+        && \is_int($state['seq']) && $state['seq'] >= 0 && $sha($state['sent_sha256']) && $sha($state['stat_sha256'])
+        && \is_int($state['sent_at']) && \is_int($state['failed_at']) && \is_int($state['scanned_at'])
+        && \is_array($state['stat_paths']) && array_is_list($state['stat_paths']) && \count($state['stat_paths']) <= INVENTORY_MAX_STAT
+        && array_filter($state['stat_paths'], static fn (mixed $p): bool => !valid_stat_path($p)) === [];
+    if (!$valid) {
+        throw new UsageError("État de l'inventaire illisible ({$path}) : le supprimer refait un relevé et un envoi.");
+    }
+
+    return $state;
+}
+
+function save_inventory_state(string $dir, array $state): void
+{
+    save_private_json($dir, INVENTORY_STATE, $state);
+}
+
+/** Empreinte (chemin, mtime, taille) des chemins du relevé précédent, sans rien lire. */
+function stat_fingerprint(string $rootReal, array $paths): string
+{
+    $lines = '';
+    foreach ($paths as $relative) {
+        $path = $rootReal . \DIRECTORY_SEPARATOR . str_replace('/', \DIRECTORY_SEPARATOR, $relative);
+        clearstatcache(true, $path);
+        $stat = @lstat($path);
+        $lines .= $relative . "\t" . ($stat === false ? '-' : $stat['mtime'] . "\t" . $stat['size']) . "\n";
+    }
+
+    return hash('sha256', $lines);
+}
+
+/** Un passage d'inventaire, sous le verrou `inventory.lock`. */
+function send_inventory(Config $config, string $dir, int $now, ?int $deadline = null): void
+{
+    with_lock($dir, INVENTORY_LOCK, static function () use ($config, $dir, $now, $deadline): void {
+        inventory_pass($config, $dir, $now, $deadline ?? hrtime(true) + INVENTORY_SECONDS * 1_000_000_000);
+    }, "un autre passage relève l'inventaire : ce passage le saute");
+}
+
+function inventory_pass(Config $config, string $dir, int $now, int $deadline): void
+{
+    $state = load_inventory_state($dir);
+    $rootReal = realpath($config->root);
+    $due = $now - $state['sent_at'] >= INVENTORY_RESEND;
+    $changed = $rootReal !== false && $state['stat_paths'] !== [] && stat_fingerprint($rootReal, $state['stat_paths']) !== $state['stat_sha256'];
+    if (!$changed && !$due && $now - $state['scanned_at'] < INVENTORY_RESCAN) {
+        return;
+    }
+    $inventory = collect_inventory($config, $deadline);
+    $state['scanned_at'] = $now;
+    $state['stat_paths'] = \count($inventory['stat']) <= INVENTORY_MAX_STAT ? $inventory['stat'] : [];
+    $state['stat_sha256'] = $state['stat_paths'] === [] || $rootReal === false ? '' : stat_fingerprint($rootReal, $state['stat_paths']);
+    save_inventory_state($dir, $state);
+    // Un relevé devenu complet ou partiel change aussi l'empreinte.
+    $sha = hash('sha256', inventory_digest($inventory['components']) . ($inventory['complete'] ? "\ncomplet" : "\npartiel"));
+    if (($sha === $state['sent_sha256'] && !$due) || $now - $state['failed_at'] < INVENTORY_RETRY) {
+        return;
+    }
+    $serial = uuid_v4(random_bytes(16));
+    foreach ([load_secret($dir), pending_new_secret($dir)] as $secret) {
+        if ($secret === null) {
+            continue;
+        }
+        $state['seq'] = max($state['seq'] + 1, (int) floor(microtime(true) * 1000));
+        save_inventory_state($dir, $state);
+        $body = build_inventory_body($config, $inventory, $state['seq'], $now, $serial);
+        $signature = base64_encode(sodium_crypto_sign_detached(DOMAIN_INVENTORY . $body, $secret));
+        sodium_memzero($secret);
+        if (post_signed($config, (string) $config->inventoryEndpoint, $body, $signature)['status'] === 204) {
+            $state['sent_sha256'] = $sha;
+            $state['sent_at'] = $now;
+            $state['failed_at'] = 0;
+            save_inventory_state($dir, $state);
+
+            return;
+        }
+    }
+    $state['failed_at'] = $now;
+    save_inventory_state($dir, $state);
+    throw new SendError('inventaire refusé (raison dans journalctl -u vigie-serve) : nouvel essai dans 1 h');
 }
 
 // --- Logs (vigie/docs/logs.md) -----------------------------------------
