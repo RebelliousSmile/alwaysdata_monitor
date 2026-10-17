@@ -93,6 +93,8 @@ const banner = computed(() => {
 const reloads = ref(0)
 
 const DETAIL_SCREENS = new Set(['a-traiter', 'alerte', 'sante'])
+/** Écrans alimentés par l'analyse des logs (Trafic, Ressources). */
+const LOG_SCREENS = new Set(['trafic', 'blocages', 'ressources'])
 
 /** Lit les données de l'écran courant ; un échec garde les précédentes. */
 async function load(): Promise<void> {
@@ -109,6 +111,8 @@ async function load(): Promise<void> {
   if (!inSite.value || !site.value) return
   const jobs: Promise<boolean>[] = [sites.loadSite(site.value)]
   if (DETAIL_SCREENS.has(name)) jobs.push(sites.loadHistory(site.value))
+  if (LOG_SCREENS.has(name)) jobs.push(sites.loadLogs(site.value))
+  if (name === 'trafic') jobs.push(sites.loadIps(site.value))
   if (name === 'alerte') {
     const id = Number(route.params.id)
     if (Number.isSafeInteger(id) && id > 0) jobs.push(sites.loadIncident(id))

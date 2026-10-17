@@ -1,5 +1,5 @@
 ---
-status: pending
+status: done
 ---
 
 # Instruction: Jeton dans le trousseau, garde-fous verrouillés
