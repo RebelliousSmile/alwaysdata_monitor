@@ -31,12 +31,16 @@ bases complètes ──téléchargées──▶  rapprochement local
                                    constats `vulns`
 ```
 
-- Aucune API n'est jamais interrogée par composant : la liste des composants
-  d'un client ne sort jamais du VPS, pas même sous forme de requête.
+- L'inventaire d'un client ne sort jamais du VPS, pas même sous forme de
+  requête : aucune API n'est interrogée par composant d'un site. Cette règle
+  vise les inventaires des clients. Le contrôle des lockfiles de Vigie
+  elle-même (F8, CI) interroge `api.osv.dev` : ces dépendances sont publiques
+  dans le dépôt, la requête ne dit rien d'un client.
 - Une base se télécharge avec une requête conditionnelle (`If-None-Match`,
   `If-Modified-Since`) quand la source le permet : un 304 ne coûte rien.
 - Les tests n'appellent aucun hôte : ils lisent des fixtures locales, faites
-  de composants et de failles publics ou fictifs.
+  de composants et de failles publics ou fictifs (règles dans
+  [Redistribution, affichage et fixtures](#redistribution-affichage-et-fixtures)).
 
 ## Standards
 
@@ -56,8 +60,9 @@ bases complètes ──téléchargées──▶  rapprochement local
   type: 'wordpress' », ouverte le 2024-11-20, ajoutée le 2026-06-10 au projet
   « Register new PURL types » (colonne Todo). Syntaxe suggérée :
   `pkg:wordpress/{core|theme|plugin}/{slug}@{version}`.
-- [S] osv-scalibr définit déjà `TypeWordpress = "wordpress"` ; AWS Inspector
-  écrit `pkg:generic/wordpress/core/wordpress@6.0.0`.
+- [S] osv-scalibr définit déjà `TypeWordpress = "wordpress"`.
+- L'issue #14 proposait `pkg:wordpress-plugin/<slug>` ; Vigie suit la n° 347,
+  un seul type `wordpress` et la catégorie en namespace.
 - [V] Aucun type ni aucune proposition pour PrestaShop (aucun résultat dans les
   issues de purl-spec).
 
@@ -92,7 +97,7 @@ bases complètes ──téléchargées──▶  rapprochement local
 | Écosystèmes | `Packagist`, `npm`, `crates.io`, casse exacte de `ecosystems.txt` [V]. Aucun écosystème WordPress ni PrestaShop [V] |
 | Authentification | aucune [V] |
 | Licence | pas de licence globale : chaque enregistrement relève de sa source [V] (tableau ci-dessous) |
-| Attribution | celle de la source de l'enregistrement, lue dans son préfixe d'identifiant ; CC-BY 4.0 pour GHSA et EEF |
+| Attribution | celle de la source de l'enregistrement, lue dans son préfixe d'identifiant et conservée avec lui : CC-BY 4.0 pour GHSA et EEF, mention MIT pour DRUPAL, mention Apache-2.0 pour MAL ; rien n'est exigé pour RUSTSEC (CC0) |
 | Format | ZIP d'un JSON OSV par faille, `schema_version` 1.9.0 [V] |
 | Taille (2026-10-17) | Packagist 10 956 660 o (≈ 10,4 Mio), npm 218 455 616 o (≈ 208 Mio), crates.io 3 610 436 o (≈ 3,4 Mio) [V] |
 | Fréquence | export « continuously » ; mises à jour observées plusieurs fois par jour [V] |
@@ -167,7 +172,18 @@ comparateur Composer et se sert de `versions[]` comme contrôle croisé.
   `composer://vendor/package`, `branches.<nom>.versions` en contraintes
   Composer, `cve`), sans numéro de schéma.
 
-### Wordfence Intelligence v3
+### Wordfence Intelligence v3 (admis sous réserve)
+
+L'import Wordfence (#17) n'est pas branché avant que les conditions
+d'utilisation et la page v3 aient été relues depuis le VPS, et cette relecture
+consignée et datée ci-dessous. Tant que ces conditions ne disent pas si les
+failles peuvent être montrées aux clients d'un prestataire, l'usage reste
+interne à l'exploitant : aucune faille Wordfence n'entre dans un document
+transmis à un client.
+
+Relecture des conditions depuis le VPS : **non faite au 2026-10-17**. À
+consigner ici : date, URL relues, forme de l'en-tête d'authentification,
+conditions propres au jeton, réponse sur l'affichage aux clients.
 
 | Élément | Valeur |
 | --- | --- |
@@ -214,7 +230,7 @@ n'étant pas joignable du conteneur [NV] :
 | URL | archive `https://github.com/friends-of-presta/security-advisories/archive/refs/heads/main.tar.gz` [NV] (URL standard de GitHub, refusée dans le conteneur par la politique de la session) |
 | Authentification | aucune |
 | Licence | avis : **CC BY-SA 4.0**, d'après `_layouts/post.html` et `search.json` (« *This advisory and patch is licensed under https://creativecommons.org/licenses/by-sa/4.0/* ») [V]. Ambiguïté : `LICENSE.txt` à la racine est la licence MIT du thème minima, déclarée pour tout le dépôt [V]. Vigie retient CC BY-SA 4.0 pour les avis |
-| Usage | interne, affiché avec attribution ; aucune redistribution publique, ce qui écarte la clause de partage dans les mêmes conditions |
+| Usage | interne, affiché avec attribution ; aucune redistribution au sens de [Redistribution, affichage et fixtures](#redistribution-affichage-et-fixtures) : un document destiné à un client ne reprend que des faits, jamais le texte de l'avis |
 | Attribution | « Friends-Of-Presta, CC BY-SA 4.0 », avec un lien vers l'avis sur https://security.friendsofpresta.org |
 | Format | Markdown avec en-tête YAML, un fichier `_posts/AAAA-MM-JJ-<module>.md` par avis [V] |
 | Taille | non mesurée [NV] |
@@ -294,16 +310,26 @@ comparateur de l'écosystème.
 | Composant | purl | Règle |
 | --- | --- | --- |
 | paquet Composer | `pkg:composer/<vendor>/<nom>@<v>` | vendor et nom en minuscules [V] |
-| paquet npm | `pkg:npm/<nom>@<v>`, `pkg:npm/%40<scope>/<nom>@<v>` | scope en namespace, `@` encodé ; nom en minuscules (normalisation de la spec [NV]) |
-| crate | `pkg:cargo/<nom>@<v>` | pas de namespace ; nom tel que publié (normalisation de la spec [NV]) |
+| paquet npm | `pkg:npm/<nom>@<v>`, `pkg:npm/%40<scope>/<nom>@<v>` | scope en namespace, `@` encodé ; sensible à la casse (`case_sensitive: true` dans la définition officielle) : comparé tel quel |
+| crate | `pkg:cargo/<nom>@<v>` | pas de namespace ; sensible à la casse (`case_sensitive: true`) : comparé tel quel |
 | extension WordPress | `pkg:wordpress/plugin/<slug>@<v>` | proposition purl-spec n° 347 ; slug du répertoire wordpress.org, en minuscules |
 | thème WordPress | `pkg:wordpress/theme/<slug>@<v>` | idem |
-| noyau WordPress | `pkg:wordpress/core/wordpress@<v>` | la n° 347 suggère `core/core` ; Vigie écrit `core/wordpress`, comme AWS Inspector [S] |
+| noyau WordPress | `pkg:wordpress/core/core@<v>` | forme suggérée par la n° 347 |
 | module PrestaShop | `pkg:prestashop/module/<nom_technique>@<v>` | par symétrie, aucune proposition ; nom technique du module (nom de son dossier), en minuscules |
 | noyau PrestaShop | `pkg:prestashop/core/prestashop@<v>` | par symétrie |
 
-Les types `wordpress` et `prestashop` ne sont pas enregistrés : ces
+Seul `composer` passe en minuscules ; `npm` et `cargo` sont comparés tels
+quels. Les types `wordpress` et `prestashop` ne sont pas enregistrés : ces
 conventions sont à revoir si la spécification officialise autre chose.
+
+Bedrock : un site WordPress géré par Composer déclare ses extensions comme
+`wpackagist-plugin/<slug>` et ses thèmes comme `wpackagist-theme/<slug>`.
+Ces paquets sont traduits en `pkg:wordpress/plugin/<slug>` et
+`pkg:wordpress/theme/<slug>`, jamais rapprochés comme paquets Composer.
+Limite : WPackagist ne reflète que le répertoire wordpress.org. Une extension
+premium installée depuis un dépôt privé garde son propre vendor et n'est pas
+traduite ; son slug, déclaré par l'extension de Vigie, peut aussi coïncider
+avec celui d'une autre extension de wordpress.org.
 
 ## Correspondance source → purl
 
@@ -311,16 +337,114 @@ conventions sont à revoir si la spécification officialise autre chose.
 | --- | --- | --- |
 | OSV `Packagist` | `affected[].package.name` = `vendor/nom` (ou `package.purl`, déjà en `pkg:composer/…` [V]) | `pkg:composer/vendor/nom` |
 | OSV `Packagist`, `prestashop/prestashop` | idem | `pkg:prestashop/core/prestashop` (le noyau est déclaré ainsi par l'extension) |
+| OSV `Packagist`, `prestashop/<x>` avec x ≠ `prestashop` | idem | `pkg:prestashop/module/<x>` : les modules natifs ont des GHSA |
 | OSV `npm` | `affected[].package.name` (`@scope/nom` ou `nom`) | `pkg:npm/%40scope/nom` ou `pkg:npm/nom` |
 | OSV `crates.io` | `affected[].package.name` | `pkg:cargo/nom` |
 | Wordfence, `software[].type` = `plugin` | `software[].slug` | `pkg:wordpress/plugin/<slug>` |
 | Wordfence, `software[].type` = `theme` | `software[].slug` | `pkg:wordpress/theme/<slug>` |
-| Wordfence, `software[].type` = `core` | — | `pkg:wordpress/core/wordpress` |
+| Wordfence, `software[].type` = `core` | — | `pkg:wordpress/core/core` |
 | Friends-Of-Presta, catégorie `modules` | `**Product**` | `pkg:prestashop/module/<product>` |
-| Friends-Of-Presta, catégorie `core` | — | `pkg:prestashop/core/prestashop` (doublons avec GHSA rapprochés par CVE) |
+| Friends-Of-Presta, catégorie `core` | — | `pkg:prestashop/core/prestashop` |
 | Friends-Of-Presta, catégorie `dependancies` | `**Product**` | pas de règle fixée : point ouvert |
 | CISA KEV | `cveID` | aucun : enrichit les failles par CVE |
 | FIRST EPSS | `cve` | aucun : enrichit les failles par CVE |
+
+- Une faille présente dans GHSA et dans Friends-Of-Presta est fusionnée par
+  CVE : une seule faille, les deux sources et leurs attributions.
+- Côté extension (F5) : dans une boutique PrestaShop, un composant Composer de
+  type `prestashop-module` est remplacé par le module de même nom, avec la
+  version lue dans `modules/<x>/config.xml`, celle qui tourne réellement.
+- Côté WordPress : voir Bedrock ci-dessus.
+
+## Inventaire reçu (CycloneDX)
+
+Le veilleur accepte un sous-ensemble strict de CycloneDX 1.6 et 1.7, par
+liste blanche. Un inventaire qui porte `authors`, `supplier`, `licenses` ou
+une propriété hors de l'espace `vigie:*` est refusé : ces champs n'aident pas
+au rapprochement et peuvent porter des données du client.
+
+## Modèle interne et versions
+
+- Sous-ensemble du schéma OSV 1.9.x ; champs inconnus ignorés, champs retenus
+  validés et bornés ; une entrée invalide est écartée et comptée.
+- Entrées `withdrawn` ignorées.
+- Plages `ECOSYSTEM` et `SEMVER` évaluées ; plages `GIT` ignorées (aucun
+  composant n'est identifié par un commit).
+- `affected[].database_specific.last_known_affected_version_range` des GHSA
+  est lu quand aucun événement ne ferme la plage.
+- Le comparateur est choisi selon l'écosystème de la source
+  (`affected[].package.ecosystem`, ou le type de la source pour Wordfence et
+  Friends-Of-Presta), jamais selon le site : Composer, npm et Cargo selon
+  semver, WordPress et PrestaShop selon la sémantique de `version_compare`.
+- `versions[]` sert de contrôle croisé des `ranges`, toujours évaluées.
+- Une version non analysable donne le constat « version inconnue », une plage
+  libre de Friends-Of-Presta non reconnue le constat « plage inconnue », signalé
+  pour toute version du module. Les deux sont de gravité information.
+
+## Gravité
+
+Score CVSS lu dans cet ordre, le premier présent l'emporte :
+
+1. `cvss.score` de Wordfence ;
+2. score de la ligne `severity` de Friends-Of-Presta (`critical (9.8)` → 9,8) ;
+3. CVSS v3.1 calculé depuis le vecteur `CVSS_V3` de `severity[]` d'OSV ;
+4. sinon `database_specific.severity` des GHSA : `CRITICAL` = 9, `HIGH` = 7,
+   `MODERATE` = 5, `LOW` = 3.
+
+Aucun score n'est jamais calculé depuis un vecteur CVSS v4.
+
+| Gravité | Condition |
+| --- | --- |
+| critique | un CVE de la faille est dans KEV, ou entrée `MAL-` (paquet malveillant), ou CVSS ≥ 9,0 |
+| avertissement | CVSS ≥ 7,0, ou EPSS ≥ 0,1, ou gravité inconnue |
+| information | tout le reste, les entrées Wordfence `informational: true`, « version inconnue » et « plage inconnue » |
+
+« Aucun correctif » est toujours affiché et ne fait jamais baisser la gravité.
+
+## Dérogations
+
+- Par site, composant et faille, jamais globales ; motif obligatoire.
+- Expiration à 90 jours au plus. Ce plafond vaut pour les failles des sites ;
+  le contrôle des dépendances de Vigie (F8, CI) a sa propre règle de 92 jours.
+- Liée à la version du composant : une autre version la rend caduque.
+- Inscrite dans l'audit.
+- Interdite pour une faille dont un CVE est dans KEV.
+- Distincte de la **correction de plage** : pour une plage libre de
+  Friends-Of-Presta non reconnue, l'exploitant peut saisir sur le VPS la plage
+  machine équivalente. Cette correction est auditée et vaut pour tous les
+  sites, mais ne masque rien : elle remplace « plage inconnue » par une plage
+  évaluée.
+
+## Contrôle `vulns`
+
+- Déclaré dans le registre de capacités (#4).
+- Surveillé si le site a une source d'inventaire : agent PHP avec inventaire
+  activé, ou clé d'inventaire enregistrée (#20). Les sites `node` et `static`
+  sont donc couverts par la clé d'inventaire.
+- Sans inventaire reçu depuis plus de 7 jours : constat d'avertissement
+  « inventaire périmé ». Le contrôle reste surveillé : jamais de perte de
+  surveillance en silence.
+- Sources consultées : Wordfence pour un site `wordpress`, Friends-Of-Presta
+  pour un site `prestashop`, OSV pour tout composant `composer`, `npm` ou
+  `cargo`, quel que soit le site.
+- Conservation : dernier inventaire et 30 jours d'historique ; détails des
+  incidents `vulns` masqués 30 jours après leur clôture ; tout est purgé par
+  `site remove`.
+
+## Redistribution, affichage et fixtures
+
+- **Redistribution** : tout ce qui est publié ou transmis à un tiers, client
+  compris (e-mail, rapport, export, dépôt public).
+- Wordfence : usage interne à l'exploitant tant que la relecture des
+  conditions n'a pas tranché l'affichage aux clients (section Wordfence).
+- Friends-Of-Presta : un document destiné à un client ne reprend que des faits
+  (CVE, module, plage, vecteur CVSS, CWE, date), avec le lien vers l'avis,
+  jamais le texte de l'avis.
+- Fixtures Wordfence et Friends-Of-Presta : toujours fictives, de même
+  structure que les vraies.
+- Fixtures OSV et GHSA : de vrais enregistrements sont admis seulement avec un
+  fichier `NOTICE` dans leur dossier (source, licence, lien, modifications).
+- Aucune fixture ne reprend l'inventaire d'un client.
 
 ## Hôtes à joindre depuis le VPS
 
@@ -345,7 +469,9 @@ s'interrogent par composant ou par CVE.
    et https://www.wordfence.com/help/wordfence-intelligence/v3-accessing-and-consuming-the-vulnerability-data-feed/ ;
    forme exacte de l'en-tête (`Bearer <jeton>` ?), conditions propres au jeton
    « Integrations », ETag ou Last-Modified, compression gzip, format v3
-   identique au v2 sur un vrai téléchargement, texte réel de `copyrights`.
+   identique au v2 sur un vrai téléchargement, texte réel de `copyrights`,
+   affichage permis ou non aux clients d'un prestataire. Consigner le résultat,
+   daté, dans la section Wordfence.
 3. EPSS : URL finale après redirection, en-têtes (ETag, Last-Modified), poids
    du fichier, conditions sur https://www.first.org/epss/#Usage-Agreement.
 4. cisa.gov : ETag et 304 sur l'URL canonique.
