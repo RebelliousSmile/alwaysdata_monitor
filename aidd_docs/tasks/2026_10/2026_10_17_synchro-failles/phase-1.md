@@ -1,5 +1,5 @@
 ---
-status: pending
+status: done
 ---
 
 # Instruction: Téléchargement borné, dossier de travail et lecteur zip strict
