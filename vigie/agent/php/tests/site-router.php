@@ -9,7 +9,10 @@ declare(strict_types=1);
 // (site.json du dossier VIGIE_SITE_DIR) simule les pannes : 500 dans le bac
 // à sable, 200 sans la page témoin, horloge décalée, accueil en 500 une fois
 // le bloc posé, fichier modifié par un tiers.
-$state = (string) getenv('VIGIE_SITE_DIR');
+// Dossier du scénario : option `-d vigie.site_dir=…` de `php -S` (elle passe
+// aussi dans un conteneur, contrairement à l'environnement), sinon
+// VIGIE_SITE_DIR.
+$state = (string) (get_cfg_var('vigie.site_dir') ?: getenv('VIGIE_SITE_DIR'));
 $scenario = json_decode((string) file_get_contents($state . '/site.json'), true);
 $root = $_SERVER['DOCUMENT_ROOT'];
 $path = (string) parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
