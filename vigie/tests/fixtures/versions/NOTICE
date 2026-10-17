@@ -1,0 +1,53 @@
+Vecteurs de versions de Vigie
+=============================
+
+Les fichiers npm.json, cargo.json, wordpress.json et prestashop.json sont
+écrits pour Vigie. Les exemples de précédence de npm.json reprennent ceux de
+la spécification Semantic Versioning 2.0.0 (§9 à §11, https://semver.org/,
+CC BY 3.0).
+
+composer.json reprend des cas de test de composer/semver :
+
+- dépôt : https://github.com/composer/semver
+- fichier : https://github.com/composer/semver/blob/main/tests/VersionParserTest.php
+  (branche main lue le 2026-10-17 ; dernière version publiée : 3.5.1)
+- cas repris (entrées « normalize » dont le « why » cite VersionParserTest,
+  nom du cas entre guillemets) : successfulNormalizedVersions dans la
+  grammaire de Vigie (« none » à « keep zero-padding/4 », sauf les branches,
+  les alias, les drapeaux de stabilité et les espaces), les branches de ce
+  même jeu, refusées par Vigie (« parses date dev », « parses datetime dev »,
+  « parses dt Ym dev », « parses master », « parses master w/o dev »,
+  « parses trunk », « parses branches », « parses arbitrary »,
+  « parses arbitrary/2 », « parses arbitrary/4 », « keep zero-padding/5 »,
+  « keep zero-padding/6 »), et failingNormalizedVersions (« empty »,
+  « invalid chars », « invalid type », « too many bits »,
+  « non-dev arbitrary », « maven style release »,
+  « date versions with 4 bits », « date versions with 4 bits/earliest year »,
+  les quatre « invalid CalVer (as MAJOR) versions », « metadata w/ space »,
+  « any with spaces », « constraint », « constraint/2 », « constraint/3 »),
+  plus « space padding/2 » et « ignores aliases », refusés par la grammaire
+  de Vigie.
+- modifications : sorties des branches et des cas hors grammaire remplacées
+  par null (refus de Vigie) ; format JSON de Vigie.
+
+Licence de composer/semver :
+
+Copyright (C) 2015 Composer
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files (the "Software"), to deal in
+the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
+of the Software, and to permit persons to whom the Software is furnished to do
+so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

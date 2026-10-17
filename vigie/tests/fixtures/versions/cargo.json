@@ -1,0 +1,19 @@
+{
+  "cmp": [
+    {"a": "0.9.9", "b": "0.10.0", "order": -1, "why": "numérique"},
+    {"a": "1.0.0", "b": "1.0.0", "order": 0, "why": "égalité"},
+    {"a": "1.0.0-alpha.1", "b": "1.0.0", "order": -1, "why": "préversion"},
+    {"a": "1.0.0+20260101", "b": "1.0.0", "order": 0, "why": "build ignoré, au contraire de la crate semver"},
+    {"a": "0.3.17", "b": "0.4.0-rc.1", "order": -1, "why": "préversion d'une mineure suivante"},
+    {"a": "1.2.3-beta", "b": "1.2.3-alpha", "order": 1, "why": "ASCII"},
+    {"a": "123456789012345678.0.0", "b": "123456789012345677.0.0", "order": 1, "why": "18 chiffres"}
+  ],
+  "unparsable": [
+    {"v": "1.0", "why": "forme partielle"},
+    {"v": "^1.0.0", "why": "contrainte"},
+    {"v": "1.0.0-", "why": "préversion vide"},
+    {"v": "1.0.0.0", "why": "quatre composants"},
+    {"v": "1.0.0+a+b", "why": "+ dans le build"},
+    {"v": "1.0.0\u0000", "why": "octet nul"}
+  ]
+}
