@@ -59,7 +59,7 @@ journey
     cvss tableau non vide, cwe chaîne, references objet => champ retiré seul avec sa raison F1, faille gardée: 1: lib
     id nombre, software chaîne, software[].type ou slug de mauvais type => faille écartée seule, bad_record ; les suivantes sont lues: 1: lib
     Valeur de 5 Mio (compteur), erreur de syntaxe JSON ou racine tronquée => erreur de flux, chargement abandonné, génération active intacte (côté F2): 1: lib
-    Date 2099-13-45 ou absente partout => bad_date ; format AAAA-MM-JJ hh:mm:ss => lu en UTC: 1: lib
+    Date 2099-13-45 (ou absente) à la fois dans updated et dans published => faille écartée, bad_date ; format AAAA-MM-JJ hh:mm:ss => lu en UTC: 1: lib
     published illisible ("2026-01-10" sans heure) et updated valide => faille gardée, bad_published (is_drop faux), aucun écart compté dans le seuil: 1: lib
     cvss score 10.1, 6.15, 6e0 ou "6.1" => champ retiré seul, bad_severity ; vecteur v3.1 gardé ; score 10.0 => 100 dixièmes: 1: lib
     null, [] et {} pour cvss, cwe, references, copyrights, patched_versions, cve, dates => champ vide, faille gardée (copyrights => empty_copyrights): 1: lib
