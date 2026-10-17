@@ -23,6 +23,7 @@ est public.
 | Sortie IPv4 et IPv6 du site A | **Fait** le 2026-10-15 : `curl -4` et `curl -6` vers un site externe en 200 depuis le compte du site A |
 | `/health` en IPv4 et IPv6 depuis le poste | **Fait** le 2026-10-15 : `curl -4` et `curl -6` en 200 |
 | API de la console (schéma 6) | **Fait** le 2026-10-16 : déploiement du commit 0401e1c à 09:08 UTC (code 0), `/api/v1/overview` sans jeton en 401, `/health` en 200, rapport de l'agent du site A accepté à 09:10:08 par le nouveau binaire (`site list`). Incident : `[api]` posé avant le déploiement, le binaire c874f74 refuse toute section inconnue, aucun tick de 08:58 à 09:08 UTC et `/health` en 503 `late`, signalé par la sonde externe (voir l'ordre imposé dans [API de la console](#api-de-la-console)) |
+| Synchronisation des failles (migration 0017, issue #16) | **Non déployée** : timer installé par `provision.sh`, relevé de la première synchronisation réelle à faire après déploiement, voir [Synchronisation des failles](#synchronisation-des-failles-issue-16) |
 | Registre des capacités (schéma 14, issue #4) | **Non déployé** : relevés de la cible (binaire de la CI, `tick` à blanc) et de la configuration (aucune clé d'agent sur un site sans runtime `php`) à faire avant, voir [`audit-chemin-critique.md`](./audit-chemin-critique.md) |
 
 ## Installation
@@ -309,6 +310,61 @@ runtime effectif est `php` (`runtime = "php"`, implicite pour `wordpress` et
 Retour au binaire précédent : il refuse une base au schéma 14 (« binaire trop
 ancien ») ; le retour arrière demande la base sauvegardée avant le
 déploiement.
+
+## Synchronisation des failles (issue #16)
+
+Règles et plafonds : [`failles.md`](./failles.md#synchronisation-f2).
+
+- **Installation** : `provision.sh` installe `vigie-vulns-sync.service` et
+  `vigie-vulns-sync.timer` et active le timer (idempotent). Tant que
+  `[vulns] sources` est vide, la synchronisation ne fait rien et sort en
+  code 0. Déclarer les sources dans `config.toml` **après** le déploiement du
+  binaire qui les connaît : un binaire plus ancien refuse la section.
+- **Vérifier** : `systemctl list-timers vigie-vulns-sync.timer` (prochain
+  passage vers 03:40, décalé de 45 min au plus) ; lancement à la main :
+  `~/vigie/bin/vigie vulns sync`, puis `~/vigie/bin/vigie vulns sources` ;
+  journal : `journalctl -u vigie-vulns-sync`. Une source en échec rend
+  l'unité `failed` ; un constat `vulns-sync` s'ouvre au bout de 3 jours sans
+  réussite.
+- **Unité** : mêmes durcissements que `tick` (`ReadWritePaths` limité à
+  `data/`, où vivent la base et `vulns-work/`), `Nice=10`,
+  `IOSchedulingClass=best-effort`, `IOSchedulingPriority=7`,
+  `OOMScoreAdjust=500` (tuée avant `serve` et `tick`), `MemoryMax=512M`
+  provisoire, `TimeoutStartSec=3h`.
+- **Disque** : le dump compressé est transitoire (au plus le plafond
+  compressé, 640 Mio pour npm) et supprimé à la fin ; pendant un chargement,
+  la base porte deux générations de la source ; chaque synchronisation garde
+  1 Gio de réserve libre. Disque du VPS : 38 Go, 1,8 Go utilisés au
+  2026-10-16.
+- **Mémoire** : une entrée décompressée à la fois (4 Mio au plus), lots de
+  500 failles, répertoire central en mémoire (64 Mio au plus).
+- **Retour arrière** : un binaire antérieur refuse une base migrée
+  (« binaire trop ancien ») ; retirer d'abord la section `[vulns]`, puis
+  restaurer la base sauvegardée avant le déploiement.
+
+`systemd-analyze verify` des deux unités dans le conteneur de
+développement : seule erreur, le binaire absent
+(`/home/vigie/vigie/bin/vigie is not executable`), comme pour
+`vigie-tick.service`.
+
+### Relevé de la synchronisation réelle
+
+À faire sur le VPS après déploiement, valeurs masquées (aucun nom de site,
+domaine ni adresse réels ; ETag tronqués) : `vigie vulns sync` puis
+`vigie vulns sources` ; `du -sh data/`, `df -h ~` ;
+`systemctl show vigie-vulns-sync -p MemoryPeak` ; second lancement
+(`not_modified` ou `unchanged` attendu) ;
+`systemd-analyze security vigie-vulns-sync.service` (au plus le score de
+`vigie-tick.service`). Plafonds, `MemoryMax` et réserve de disque à ajuster
+si une mesure s'en approche à moins d'un facteur 2 ; durée npm à comparer au
+seuil de 30 min qui rouvrirait la mise à jour incrémentale.
+
+| Mesure | crates.io | Packagist | npm |
+| --- | --- | --- | --- |
+| durée | à relever | à relever | à relever |
+| dump compressé, décompressé | à relever | à relever | à relever |
+| entrées lues, retenues, écartées | à relever | à relever | à relever |
+| croissance de `data/`, mémoire maximale | à relever | | |
 
 ## Secrets
 

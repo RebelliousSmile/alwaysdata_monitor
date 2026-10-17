@@ -1,5 +1,5 @@
 ---
-status: pending
+status: done
 ---
 
 # Instruction: Constat vulns-sync, timer systemd, documentation et synchronisation réelle

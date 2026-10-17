@@ -178,6 +178,18 @@ pub struct Incident {
     pub close_reason: Option<CloseReason>,
 }
 
+impl Incident {
+    /// Clé du constat, sans le préfixe `<site>/<contrôle>/` (aucune découpe
+    /// sur `/` : une clé peut en contenir) ; `None` si le préfixe manque.
+    pub fn finding_key(&self) -> Option<&str> {
+        self.key
+            .strip_prefix(self.site.as_str())
+            .and_then(|k| k.strip_prefix('/'))
+            .and_then(|k| k.strip_prefix(self.check_name.as_str()))
+            .and_then(|k| k.strip_prefix('/'))
+    }
+}
+
 /// Pourquoi un incident a été clos : l'e-mail de clôture part plus tard
 /// (`pending_closes`), la raison est donc en base.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -708,6 +720,13 @@ impl Store {
             .optional()?)
     }
 
+    /// Supprime une clé de `meta` ; sans effet si elle manque.
+    pub fn delete_meta(&mut self, key: &str) -> Result<()> {
+        self.conn
+            .execute("DELETE FROM meta WHERE key = ?1", [key])?;
+        Ok(())
+    }
+
     pub fn set_meta(&mut self, key: &str, value: &str, now: i64) -> Result<()> {
         let tx = self
             .conn
@@ -802,19 +821,20 @@ impl Store {
         Ok(())
     }
 
-    /// Clôt les incidents ouverts dont le couple (site, contrôle) n'est plus
-    /// surveillé : site retiré de la configuration, typologie changée, ou
-    /// clé d'agent retirée. La raison `unwatched` choisit l'e-mail « plus
-    /// surveillé », jamais « rétabli ».
+    /// Clôt les incidents ouverts qui ne sont plus surveillés : site retiré
+    /// de la configuration, typologie changée, clé d'agent retirée, source
+    /// de failles retirée (le prédicat reçoit l'incident entier, clé
+    /// comprise). La raison `unwatched` choisit l'e-mail « plus surveillé »,
+    /// jamais « rétabli ».
     pub fn close_unwatched(
         &mut self,
-        is_watched: impl Fn(&str, &str) -> bool,
+        is_watched: impl Fn(&Incident) -> bool,
         now: i64,
     ) -> Result<usize> {
         let stale: Vec<i64> = self
             .open_incidents()?
             .into_iter()
-            .filter(|i| !is_watched(&i.site, &i.check_name))
+            .filter(|i| !is_watched(i))
             .map(|i| i.id)
             .collect();
         let tx = self
@@ -1866,10 +1886,7 @@ mod tests {
         );
 
         // L'incident d'une famille retirée est clos « plus surveillé ».
-        assert_eq!(
-            store.close_unwatched(|_, _| false, 1_000).expect("close"),
-            1
-        );
+        assert_eq!(store.close_unwatched(|_| false, 1_000).expect("close"), 1);
         let closed = store.incident(open[0].id).expect("lu").expect("présent");
         assert_eq!(closed.closed_at, Some(1_000));
         assert_eq!(closed.close_reason, Some(CloseReason::Unwatched));
@@ -2233,13 +2250,13 @@ mod tests {
             .expect("1");
         assert_eq!(
             store
-                .close_unwatched(|site, check| site == "site-a" && check == "exposed", 10)
+                .close_unwatched(|i| i.site == "site-a" && i.check_name == "exposed", 10)
                 .expect("kept"),
             0
         );
         assert_eq!(
             store
-                .close_unwatched(|site, check| site == "site-b" && check == "exposed", 10)
+                .close_unwatched(|i| i.site == "site-b" && i.check_name == "exposed", 10)
                 .expect("closed"),
             1
         );
@@ -2745,6 +2762,22 @@ mod tests {
         // Rejouées sans effet.
         let store = Store::open(&path).expect("réouverture");
         assert_eq!(store.schema_version().expect("version"), MIGRATIONS.len());
+    }
+
+    #[test]
+    fn finding_key_never_splits_on_slashes() {
+        let (_dir, mut store) = temp_store();
+        let finding = Finding::new("_veilleur", "vulns-sync", Severity::Warning, "a/b/c", "x");
+        store
+            .reconcile("_veilleur", "vulns-sync", &[finding], 10)
+            .expect("ouvert");
+        let mut incident = store.open_incidents().expect("lus").remove(0);
+        assert_eq!(incident.key, "_veilleur/vulns-sync/a/b/c");
+        assert_eq!(incident.finding_key(), Some("a/b/c"));
+        incident.key = "autre/vulns-sync/a".into();
+        assert_eq!(incident.finding_key(), None);
+        incident.key = "_veilleur/vulns-syncx/a".into();
+        assert_eq!(incident.finding_key(), None);
     }
 
     #[test]
