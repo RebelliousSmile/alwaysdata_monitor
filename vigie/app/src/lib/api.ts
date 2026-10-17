@@ -73,10 +73,85 @@ export interface SiteDetail {
   checks: Check[]
 }
 
+/** Une page des incidents clos ; `next_cursor` à `null` sur la dernière. */
 export interface SiteIncidents {
   site: string
   since: number
   incidents: Incident[]
+  next_cursor: string | null
+}
+
+// Analyse des logs (#8). Les textes (`name`, `publisher`, `purpose`, `rule`,
+// `ip`) viennent des logs : ils ne s'affichent qu'en interpolation de texte.
+
+/** Robot du catalogue vu sur 24 h. */
+export interface Bot {
+  name: string
+  publisher: string
+  purpose: string
+  honours_robots: boolean
+  /** `search_engine`, `ai_training`… */
+  class: string
+  /** Jamais visé par une action robots.txt ou user-agent. */
+  protected: boolean
+  requests: number
+}
+
+/** Règle de l'analyse sur sa fenêtre ; aucune IP. */
+export interface Rule {
+  rule: string
+  scope: 'ip' | 'site' | string
+  severity: Severity
+  window_secs: number
+  min_count: number
+  count: number
+  distinct_ips: number
+  exceeded: boolean
+}
+
+/** Charge d'une heure ; `hour` vaut `timestamp_ms / 3 600 000`. */
+export interface LoadHour {
+  hour: number
+  requests: number
+  refused: number
+  /** Requêtes dont le log porte une durée. */
+  timed: number
+  service_us: number
+  /** Requêtes de robots du catalogue. */
+  bots: number
+}
+
+export interface Analysis {
+  generated_at: number
+  bots: Bot[]
+  scored: number
+  unscored: number
+  rules: Rule[]
+  load: LoadHour[]
+  load_threshold_us: number
+}
+
+/** `analysis` à `null` : source déclarée, aucune analyse encore. */
+export interface SiteLogs {
+  analysis: Analysis | null
+}
+
+/** Verdict d'une IP : codes de raison, jamais de user-agent ni de chemin. */
+export interface Verdict {
+  ip: string
+  score: number
+  level: 'moyen' | 'eleve' | string
+  reasons: string[]
+  class: string
+}
+
+/** Une page des verdicts d'IP d'un instantané. */
+export interface LogIps {
+  site: string
+  /** `null` : aucun instantané de moins de 48 h. */
+  generated_at: number | null
+  items: Verdict[]
+  next_cursor: string | null
 }
 
 export interface SettingsSite {
@@ -134,6 +209,10 @@ export type ErrorKind =
   | 'unauthorized'
   | 'not_found'
   | 'conflict'
+  | 'cursor_expired'
+  | 'bad_request'
+  | 'unsupported_media_type'
+  | 'too_many_requests'
   | 'server'
   | 'invalid_link'
   | 'not_paired'
@@ -188,7 +267,11 @@ export const api = {
   unpair: () => call<Unpaired>('unpair'),
   overview: () => call<Overview>('overview'),
   site: (id: string) => call<SiteDetail>('site', { id }),
-  incidents: (site: string) => call<SiteIncidents>('incidents', { site }),
+  /** Une page ; sans `cursor`, la première. */
+  incidents: (site: string, cursor: string | null = null) => call<SiteIncidents>('incidents', { site, cursor }),
+  logs: (site: string) => call<SiteLogs>('logs', { site }),
+  /** Une page ; sans `cursor`, la première. */
+  logIps: (site: string, cursor: string | null = null) => call<LogIps>('log_ips', { site, cursor }),
   incident: (id: number) => call<Incident>('incident', { id }),
   ack: (id: number) => call<Incident>('ack', { id }),
   settings: () => call<Settings>('settings'),
