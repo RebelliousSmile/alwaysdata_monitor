@@ -1,5 +1,5 @@
 ---
-status: pending
+status: done
 ---
 
 # Instruction: Lecture des lockfiles et construction du BOM (bibliothèque, sans réseau)

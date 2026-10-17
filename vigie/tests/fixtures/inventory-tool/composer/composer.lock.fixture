@@ -1,0 +1,226 @@
+{
+    "_readme": [
+        "This file locks the dependencies of your project to a known state",
+        "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
+        "This file is @generated automatically"
+    ],
+    "content-hash": "942dbd5195a0c99e2c095f11c0ada75d",
+    "packages": [
+        {
+            "name": "exemple/lib-git",
+            "version": "dev-main",
+            "source": {
+                "type": "git",
+                "url": "https://git.example.org/exemple/lib.git",
+                "reference": "0123456789abcdef0123456789abcdef01234567"
+            },
+            "type": "library",
+            "time": "2026-09-01T10:00:00+00:00"
+        },
+        {
+            "name": "exemple/lib-locale",
+            "version": "1.0.0",
+            "dist": {
+                "type": "path",
+                "url": "packages/lib-locale",
+                "reference": "f3c52adff09e19dda789f84f2270d6c0af5bf463"
+            },
+            "type": "library",
+            "transport-options": {
+                "relative": true
+            }
+        },
+        {
+            "name": "prestashop/blockreassurance",
+            "version": "v5.1.4",
+            "require": {
+                "php": ">=5.6.0"
+            },
+            "require-dev": {
+                "prestashop/php-dev-tools": "^4.3"
+            },
+            "type": "prestashop-module",
+            "autoload": {
+                "psr-4": {
+                    "PrestaShop\\Module\\BlockReassurance\\": "src/"
+                },
+                "classmap": [
+                    "blockreassurance.php",
+                    "classes/ReassuranceActivity.php"
+                ],
+                "exclude-from-classmap": []
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "AFL-3.0"
+            ],
+            "time": "2023-11-08T09:53:12+00:00"
+        },
+        {
+            "name": "psr/container",
+            "version": "dev-master",
+            "require": {
+                "php": ">=7.4.0"
+            },
+            "default-branch": true,
+            "type": "library",
+            "extra": {
+                "branch-alias": {
+                    "dev-master": "2.0.x-dev"
+                }
+            },
+            "autoload": {
+                "psr-4": {
+                    "Psr\\Container\\": "src/"
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "keywords": [
+                "PSR-11",
+                "container",
+                "container-interface",
+                "container-interop",
+                "psr"
+            ],
+            "time": "2023-09-22T11:11:30+00:00"
+        },
+        {
+            "name": "psr/log",
+            "version": "3.0.2",
+            "require": {
+                "php": ">=8.0.0"
+            },
+            "type": "library",
+            "extra": {
+                "branch-alias": {
+                    "dev-master": "3.x-dev"
+                }
+            },
+            "autoload": {
+                "psr-4": {
+                    "Psr\\Log\\": "src"
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "keywords": [
+                "log",
+                "psr",
+                "psr-3"
+            ],
+            "time": "2024-09-11T13:17:53+00:00"
+        },
+        {
+            "name": "symfony/polyfill-ctype",
+            "version": "v1.37.0",
+            "require": {
+                "php": ">=7.2"
+            },
+            "provide": {
+                "ext-ctype": "*"
+            },
+            "suggest": {
+                "ext-ctype": "For best performance"
+            },
+            "type": "library",
+            "extra": {},
+            "autoload": {
+                "files": [
+                    "bootstrap.php"
+                ],
+                "psr-4": {
+                    "Symfony\\Polyfill\\Ctype\\": ""
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "keywords": [
+                "compatibility",
+                "ctype",
+                "polyfill",
+                "portable"
+            ],
+            "time": "2026-04-10T16:19:22+00:00"
+        },
+        {
+            "name": "wpackagist-plugin/wp-native-php-sessions",
+            "version": "1.2.4",
+            "source": {
+                "type": "svn",
+                "url": "https://plugins.svn.wordpress.org/wp-native-php-sessions/",
+                "reference": "tags/1.2.4"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://downloads.wordpress.org/plugin/wp-native-php-sessions.1.2.4.zip"
+            },
+            "require": {
+                "composer/installers": "~1.0 || ~2.0"
+            },
+            "type": "wordpress-plugin",
+            "homepage": "https://wordpress.org/plugins/wp-native-php-sessions/"
+        },
+        {
+            "name": "wpackagist-theme/twentynineteen",
+            "version": "1.9",
+            "source": {
+                "type": "svn",
+                "url": "https://themes.svn.wordpress.org/twentynineteen/",
+                "reference": "1.9"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://downloads.wordpress.org/theme/twentynineteen.1.9.zip"
+            },
+            "require": {
+                "composer/installers": "~1.0 || ~2.0"
+            },
+            "type": "wordpress-theme",
+            "homepage": "https://wordpress.org/themes/twentynineteen/"
+        }
+    ],
+    "packages-dev": [
+        {
+            "name": "psr/clock",
+            "version": "1.0.0",
+            "require": {
+                "php": "^7.0 || ^8.0"
+            },
+            "type": "library",
+            "autoload": {
+                "psr-4": {
+                    "Psr\\Clock\\": "src/"
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "keywords": [
+                "clock",
+                "now",
+                "psr",
+                "psr-20",
+                "time"
+            ],
+            "time": "2022-11-25T14:36:26+00:00"
+        }
+    ],
+    "aliases": [],
+    "minimum-stability": "dev",
+    "stability-flags": {
+        "psr/container": 20
+    },
+    "prefer-stable": true,
+    "prefer-lowest": false,
+    "platform": {},
+    "platform-dev": {},
+    "plugin-api-version": "2.6.0"
+}
