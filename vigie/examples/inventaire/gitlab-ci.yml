@@ -1,0 +1,71 @@
+# Exemple GitLab CI pour vigie-inventory (issue #20, vigie/docs/inventaire.md),
+# à fusionner dans le .gitlab-ci.yml du projet avec vigie-inventory-push.sh à
+# la racine du dépôt.
+#
+# - VIGIE_INVENTORY_KEY : variable CI/CD protégée et masquée, lue seulement
+#   sur une ref protégée.
+# - deploy : le job de déploiement (environnement production) envoie
+#   l'inventaire de ce qu'il déploie ; il exclut les pipelines planifiés.
+# - vigie-inventaire-hebdo : job séparé, sans environment: (il ne crée aucun
+#   déploiement), lancé par un pipeline planifié hebdomadaire sur une ref
+#   protégée ; renvoie l'inventaire du SHA du dernier déploiement réussi de
+#   production (péremption de la source ci : 35 jours), jamais celui de la
+#   branche. Lecture de l'API des déploiements par VIGIE_GITLAB_READ_TOKEN
+#   (jeton de projet en lecture seule, read_api, variable protégée et
+#   masquée) : l'accès de CI_JOB_TOKEN à cette API n'a pas été vérifié.
+#
+# Valeurs factices à remplacer : VIGIE_INVENTORY_VERSION,
+# VIGIE_INVENTORY_SHA256 (ligne x86_64-unknown-linux-musl de SHA256SUMS de la
+# release), site-a, https://vigie.example.org.
+
+variables:
+  VIGIE_INVENTORY_VERSION: "0.1.0" # factice : version publiée choisie
+  VIGIE_INVENTORY_SHA256: "<empreinte de SHA256SUMS>" # factice : à remplacer
+
+stages:
+  - deploy
+  - inventaire
+
+# Téléchargement et empreinte, à part (before_script) : une empreinte fausse
+# arrête le job avant l'envoi.
+.vigie-inventory-install:
+  before_script:
+    - >-
+      curl -sSfL -o vigie-inventory
+      "https://github.com/RebelliousSmile/alwaysdata_monitor/releases/download/inventory-v${VIGIE_INVENTORY_VERSION}/vigie-inventory-${VIGIE_INVENTORY_VERSION}-x86_64-unknown-linux-musl"
+    - echo "${VIGIE_INVENTORY_SHA256}  vigie-inventory" | sha256sum -c -
+    - chmod +x vigie-inventory
+    - mkdir -p "$HOME/.local/bin" && mv vigie-inventory "$HOME/.local/bin/"
+    - export PATH="$HOME/.local/bin:$PATH"
+
+deploy:
+  stage: deploy
+  extends: .vigie-inventory-install
+  environment: production
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+      when: never
+    - if: $CI_COMMIT_REF_PROTECTED == "true"
+  script:
+    - echo "build et déploiement du projet (à compléter)"
+    - sh vigie-inventory-push.sh --site site-a --endpoint https://vigie.example.org
+
+vigie-inventaire-hebdo:
+  stage: inventaire
+  extends: .vigie-inventory-install
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+  script:
+    - >-
+      SHA=$(curl -sSf --header "PRIVATE-TOKEN: ${VIGIE_GITLAB_READ_TOKEN}"
+      "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/deployments?environment=production&status=success&order_by=finished_at&sort=desc&per_page=1"
+      | jq -r '.[0].sha // empty')
+    - |
+      if [ -z "$SHA" ]; then
+        echo "aucun déploiement réussi de production : rien n'est envoyé" >&2
+        exit 2
+      fi
+    - echo "SHA du dernier déploiement réussi de production : $SHA"
+    - git fetch --depth 1 origin "$SHA"
+    - git checkout --detach "$SHA"
+    - sh vigie-inventory-push.sh --site site-a --endpoint https://vigie.example.org

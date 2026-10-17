@@ -423,3 +423,46 @@ fn messages_name_no_component() {
     assert_clean(&out);
     assert!(stderr(&out).contains("composants : 1"), "{out:?}");
 }
+
+/// Enveloppe shell des exemples de CI, avec un faux `vigie-inventory` qui
+/// sort en 0, 1 ou 2 : codes 0, 0 (avertissement) et 2.
+#[cfg(unix)]
+#[test]
+fn the_ci_wrapper_turns_only_code_1_into_a_warning() {
+    use std::os::unix::fs::PermissionsExt;
+    let script =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/inventaire/vigie-inventory-push.sh");
+    for (code, expected, github) in [(0, 0, true), (1, 0, true), (1, 0, false), (2, 2, true)] {
+        let bin = tempfile::tempdir().expect("tempdir");
+        let fake = bin.path().join("vigie-inventory");
+        std::fs::write(&fake, format!("#!/bin/sh\nexit {code}\n")).expect("faux binaire");
+        std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+        let path = format!(
+            "{}:{}",
+            bin.path().display(),
+            std::env::var("PATH").unwrap_or_default()
+        );
+        let out = Command::new("sh")
+            .arg(&script)
+            .args([
+                "--site",
+                "site-a",
+                "--endpoint",
+                "https://vigie.example.org",
+            ])
+            .env("PATH", path)
+            .env("GITHUB_ACTIONS", if github { "true" } else { "" })
+            .output()
+            .expect("sh");
+        assert_eq!(out.status.code(), Some(expected), "{code} : {out:?}");
+        let all = format!("{}{}", stdout(&out), stderr(&out));
+        match (code, github) {
+            (1, true) => assert!(all.contains("::warning::inventaire non envoyé"), "{all}"),
+            (1, false) => assert!(
+                all.contains("avertissement : inventaire non envoyé"),
+                "{all}"
+            ),
+            _ => assert!(!all.contains("non envoyé"), "{all}"),
+        }
+    }
+}

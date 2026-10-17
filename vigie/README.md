@@ -22,7 +22,7 @@ Sur le veilleur, toujours appeler le binaire par son chemin complet.
 | `~/vigie/bin/vigie tick` | Lancé chaque minute par `vigie-tick.timer` : lance les contrôles dus, ouvre ou clôt les incidents, envoie les e-mails |
 | `~/vigie/bin/vigie check <site> --once` | Lance tous les contrôles d'un site et affiche les constats, sans écrire dans la base ni envoyer d'e-mail ; code 1 si un constat est à traiter |
 | `~/vigie/bin/vigie status` | Dernier passage, sites et dernier contrôle, incidents ouverts avec leur âge, état de l'agent de chaque site, informations (en-têtes manquants), notifications en attente ; code 1 si `tick` est en retard |
-| `~/vigie/bin/vigie site list` | Sites de la configuration, état de leur agent (sans agent, clé sans rapport, âge du dernier rapport accepté) et, en dernière colonne, leur runtime effectif (`-` sans runtime) |
+| `~/vigie/bin/vigie site list` | Sites de la configuration, état de leur agent (sans agent, clé sans rapport, âge du dernier rapport accepté), sources d'inventaire prêtes (`inventaire : agent`, `ci`, `agent+ci` ou `—`) et, en dernière colonne, leur runtime effectif (`-` sans runtime) |
 | `~/vigie/bin/vigie commands init-keys` | Crée la clé de commandes et la clé d'audit de `[commands]` (jamais écrasées) et affiche la clé publique à épingler par les agents (`docs/protocole-commandes.md`) |
 | `~/vigie/bin/vigie site commands <site> enable\|disable` | Kill-switch du canal de commandes d'un site, coupé par défaut |
 | `~/vigie/bin/vigie site command <site> <commande> [--apply] [--force]` | Aperçu d'une commande, puis mise en file avec `--apply` |
@@ -30,7 +30,8 @@ Sur le veilleur, toujours appeler le binaire par son chemin complet.
 | `~/vigie/bin/vigie site add <site> --pubkey <base64>` | Enregistre la clé publique Ed25519 (32 octets) de l'agent d'un site de la configuration ; refusé si le site a déjà une clé ou n'a pas le runtime effectif `php` |
 | `~/vigie/bin/vigie site rotate-key <site> --pubkey <base64>` | Remplace la clé : un rapport signé par l'ancienne est refusé dès maintenant |
 | `~/vigie/bin/vigie site accept <site>` | Prend les empreintes du dernier rapport comme référence et clôt les incidents d'intégrité : à lancer après une modification voulue d'un fichier critique |
-| `~/vigie/bin/vigie site remove <site> [--yes]` | Retire la clé, l'état des rapports et la référence des empreintes ; sans `--yes`, demande de retaper l'identifiant |
+| `~/vigie/bin/vigie site inventory-key <site> add\|rotate --pubkey <base64>` | Clé d'inventaire de `vigie-inventory` (#20) : exige `ci` dans `[sites.inventory]` ; une clé déjà enregistrée (agent ou inventaire, tout site) est refusée en code 2 ; `remove [--yes]` la retire, l'inventaire reçu reste |
+| `~/vigie/bin/vigie site remove <site> [--yes]` | Retire les clés (agent et inventaire), l'état des rapports, la référence des empreintes, les logs et les inventaires ; sans `--yes`, demande de retaper l'identifiant |
 | `~/vigie/bin/vigie ack <id>` | Acquitte un incident : plus de rappel, la clôture automatique reste active |
 | `~/vigie/bin/vigie device pair --name <nom>` | Crée un code d'appairage de la console, valable 10 min et une seule fois : l'affiche en QR code (terminal à fond sombre) et en lien `vigie://pair` ; exige la section `[api]` |
 | `~/vigie/bin/vigie device list` | Appareils (actif, vu il y a…, révoqué) et codes en attente, sans aucun secret |
@@ -86,6 +87,14 @@ déclare `[sites.inventory]` (refus avant toute lecture du corps sinon). Liste
 blanche stricte, 240 s entre deux inventaires acceptés, 24 nouveaux par jour
 UTC, dernier inventaire et 30 jours d'historique ; un inventaire n'est pas une
 preuve de vie. Contrat : [`docs/protocole-agent.md`](./docs/protocole-agent.md#inventaire-des-composants-issue-19).
+
+Les projets sans agent PHP (sites `node`, `static`, projets déployés par CI)
+ont le second binaire du crate, **`vigie-inventory`** (issue #20) : il lit
+`composer.lock`, `package-lock.json`, `pnpm-lock.yaml`, `yarn.lock` et
+`Cargo.lock` au déploiement, écrit le BOM (`sbom`) ou le signe avec une clé
+d'inventaire dédiée et le pousse (`push`, source `ci`, `[sites.inventory]
+sources = ["ci"]`). Installation, clé, exemples de CI et limites :
+[`docs/inventaire.md`](./docs/inventaire.md).
 
 ## Contrôles
 

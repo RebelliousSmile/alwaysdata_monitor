@@ -1,6 +1,6 @@
 ---
 objective: "Un outil autonome vigie-inventory (binaire du crate vigie, Rust, rustls, musl pour Linux) lit composer.lock, package-lock.json v2/v3, pnpm-lock.yaml, yarn.lock (v1 et berry) et Cargo.lock d'un projet, en produit le CycloneDX 1.7 de F5 (même liste blanche, mêmes purl de la grammaire commune, mêmes bornes), l'écrit sans rien envoyer (sbom, push --dry-run) ou le signe avec une clé d'inventaire dédiée et le pousse à POST /r/v1/inventory ; le veilleur admet la source ci par [sites.inventory], vérifie cette clé à part de la clé de rapport (une clé publique n'est jamais enregistrée deux fois, toutes tables confondues), garde le dernier inventaire par source, et l'outil est publié par GitHub Releases (tag inventory-v*) avec ses empreintes SHA-256."
-status: pending
+status: done
 issue_number: 20
 ---
 
