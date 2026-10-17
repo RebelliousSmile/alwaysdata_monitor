@@ -1277,6 +1277,7 @@ fn vulns_cli(config: &config::Config, action: VulnsAction, now: i64) -> anyhow::
                 if !s.attribution.is_empty() {
                     println!("  attribution : {}", clean(&s.attribution));
                 }
+                println!("  redistribution : {}", redistribution_label(&s.id));
             }
             Ok(())
         }
@@ -1349,7 +1350,15 @@ fn vulns_cli(config: &config::Config, action: VulnsAction, now: i64) -> anyhow::
                     line.push_str("  [informational]");
                 }
                 line.push_str(&format!("  source {}", clean(&c.source)));
+                let level = vulns::sync::registry::redistribution(&c.source)
+                    .unwrap_or(vulns::sources::Redistribution::Internal);
+                if level != vulns::sources::Redistribution::Free {
+                    line.push_str(&format!("  [{}]", redistribution_label(&c.source)));
+                }
                 println!("{line}");
+                if level != vulns::sources::Redistribution::Free {
+                    println!("  attribution : {}", clean(&a.attribution));
+                }
                 shown += 1;
             }
             if shown == 0 {
@@ -1361,6 +1370,15 @@ fn vulns_cli(config: &config::Config, action: VulnsAction, now: i64) -> anyhow::
             }
             Ok(())
         }
+    }
+}
+
+/// Niveau de redistribution d'une source ; inconnu du binaire : interne.
+fn redistribution_label(source: &str) -> &'static str {
+    match vulns::sync::registry::redistribution(source) {
+        Some(vulns::sources::Redistribution::Internal) | None => "usage interne",
+        Some(vulns::sources::Redistribution::FactsOnly) => "faits seulement",
+        Some(vulns::sources::Redistribution::Free) => "libre",
     }
 }
 
@@ -1388,6 +1406,9 @@ fn print_sync_state(state: &vulns_store::SyncState, now: i64) {
             .loader_version
             .map_or("-".to_owned(), |v| v.to_string())
     );
+    if let Some(revision) = &state.revision {
+        println!("  révision : {}", clean(revision));
+    }
     if let Some(until) = state.retry_after_until.filter(|u| *u > now) {
         println!(
             "  Retry-After : pas de requête avant {} (dans {})",
@@ -1449,5 +1470,6 @@ fn print_advisory(s: &vulns_store::Stored) {
     }
     println!("  licence : {}", clean(&a.license));
     println!("  attribution : {}", clean(&a.attribution));
+    println!("  redistribution : {}", redistribution_label(&s.source));
     println!("  lien : {}", clean(&a.source_url));
 }

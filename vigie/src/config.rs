@@ -62,6 +62,24 @@ pub struct Config {
 pub struct Vulns {
     #[serde(default)]
     pub sources: Vec<String>,
+    /// `[vulns.wordfence]` : exigée si `wordfence` est dans `sources`, et
+    /// réciproquement.
+    #[serde(default)]
+    pub wordfence: Option<WordfenceConfig>,
+}
+
+/// `[vulns.wordfence]` (#17). La configuration reste valide même si le
+/// binaire n'a pas consigné la relecture des conditions : le refus vient de
+/// la source, à chaque synchronisation, sans arrêter `serve` ni `tick`.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WordfenceConfig {
+    /// Jeton « Integrations », fichier 0600 dans un dossier 0700, chemin
+    /// absolu ; lu à chaque synchronisation, jamais copié.
+    pub token_file: PathBuf,
+    /// Date (`AAAA-MM-JJ`) de la relecture des conditions consignée dans
+    /// `docs/failles.md` : doit égaler celle du binaire.
+    pub terms_reviewed: String,
 }
 
 /// `[logs]` : règles par défaut à désactiver et règles ajoutées
@@ -585,6 +603,34 @@ impl Config {
                 if !seen.insert(id.as_str()) {
                     return Err(format!("vulns.sources : « {id} » déclarée deux fois"));
                 }
+            }
+            let declared = seen.contains("wordfence");
+            match (&vulns.wordfence, declared) {
+                (None, true) => {
+                    return Err(
+                        "vulns.sources : « wordfence » exige [vulns.wordfence] (token_file, terms_reviewed)".into(),
+                    );
+                }
+                (Some(_), false) => {
+                    return Err(
+                        "[vulns.wordfence] sans « wordfence » dans vulns.sources : section sans effet refusée".into(),
+                    );
+                }
+                (Some(wf), true) => {
+                    let shown = wf.token_file.to_string_lossy();
+                    if !(wf.token_file.is_absolute() || shown.starts_with('/')) {
+                        return Err(format!(
+                            "vulns.wordfence.token_file doit être un chemin absolu (reçu : {shown})"
+                        ));
+                    }
+                    let date = &wf.terms_reviewed;
+                    if date.len() != 10 || date.parse::<jiff::civil::Date>().is_err() {
+                        return Err(format!(
+                            "vulns.wordfence.terms_reviewed doit être une date AAAA-MM-JJ (reçu : {date})"
+                        ));
+                    }
+                }
+                (None, false) => {}
             }
         }
         let mut seen = HashSet::new();

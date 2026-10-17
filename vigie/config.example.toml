@@ -43,10 +43,22 @@ password_file = "/home/vigie/vigie/smtp-password"
 
 # Bases de failles synchronisées chaque jour par vigie-vulns-sync.timer
 # (`vigie vulns sync`, docs/failles.md) : liste fermée parmi osv-crates-io,
-# osv-packagist et osv-npm. Sans cette section ou avec une liste vide, aucune
-# synchronisation ni constat `vulns-sync`. Aucune URL n'est configurable.
+# osv-packagist, friends-of-presta, wordfence et osv-npm. Sans cette section
+# ou avec une liste vide, aucune synchronisation ni constat `vulns-sync`.
+# Aucune URL n'est configurable.
 # [vulns]
-# sources = ["osv-crates-io", "osv-packagist", "osv-npm"]
+# sources = ["osv-crates-io", "osv-packagist", "friends-of-presta", "osv-npm"]
+
+# Wordfence Intelligence (#17) : usage interne à l'exploitant. « wordfence »
+# dans [vulns] sources exige cette section, et réciproquement. La source reste
+# refusée (vulns sync en code 1) tant que la relecture des conditions n'est
+# pas consignée dans docs/failles.md ET dans le binaire déployé
+# (WORDFENCE_TERMS_REVIEWED) ; terms_reviewed doit en reprendre la date. Ne
+# déclarer la source qu'avec un tel binaire (docs/hebergement.md).
+# Jeton « Integrations » : fichier 0600 dans un dossier 0700 du veilleur.
+# [vulns.wordfence]
+# token_file = "/home/vigie/vigie/keys/wordfence-token"
+# terms_reviewed = "AAAA-MM-JJ"
 
 # Identifiant : [a-z0-9-], 64 caractères au plus. URL en https, finie par /
 # quand le site vit dans un sous-dossier (les chemins sondés y sont joints).

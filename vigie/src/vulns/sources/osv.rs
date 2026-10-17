@@ -7,6 +7,7 @@
 use std::time::{Duration, Instant};
 
 use crate::vulns::advisory::{Tally, from_osv};
+use crate::vulns::sources::Redistribution;
 use crate::vulns::sync::download::{Download, Fetched, Request};
 use crate::vulns::sync::zip::{Body, ZipReader};
 use crate::vulns::sync::{Dumped, FetchOutcome, Limits, Sink, SourceMeta, SyncError, VulnSource};
@@ -57,6 +58,7 @@ impl VulnSource for OsvSource {
             limits: Limits::osv(self.ecosystem),
             min_interval: Duration::ZERO,
             loader_version: LOADER_VERSION,
+            redistribution: Redistribution::Free,
         }
     }
 
@@ -109,6 +111,7 @@ impl VulnSource for OsvSource {
             bytes: dump.bytes,
             unpacked_bytes: zip.declared_unpacked(),
             entries,
+            revision: None,
         }))
     }
 }

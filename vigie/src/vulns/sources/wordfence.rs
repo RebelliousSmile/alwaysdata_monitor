@@ -24,7 +24,7 @@
 
 use std::collections::BTreeMap;
 use std::io::Read;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use serde::Deserialize;
 use serde::de::{DeserializeOwned, MapAccess, Visitor};
@@ -32,12 +32,17 @@ use serde_json::value::RawValue;
 
 use super::Redistribution;
 use crate::api::log_text::MAX_ATTRIBUTION_CHARS;
+use crate::config::WordfenceConfig;
+use crate::secret::{Token, read_token};
 use crate::vulns::advisory::{
     Advisory, Draft, DraftAffected, DraftEvent, DraftRange, MAX_ENTRY_BYTES, Reason, Score,
     ScoreOrigin, Seen, Tally, parse_tenths,
 };
 use crate::vulns::purl::{Purl, PurlType};
-use crate::vulns::sync::{Sink, SyncError};
+use crate::vulns::sync::download::{Download, Fetched, Request};
+use crate::vulns::sync::{
+    Dumped, FetchOutcome, Limits, NotReady, Sink, SourceMeta, SyncContext, SyncError, VulnSource,
+};
 use crate::vulns::version::{Scheme, parse};
 
 /// Date de la relecture des conditions Wordfence depuis le VPS, consignée
@@ -641,6 +646,154 @@ pub fn check_review(doc: &str, constant: Option<&str>) -> Result<(), String> {
         ));
     }
     Ok(())
+}
+
+/// Identifiant de la source (`[vulns] sources`).
+pub const SOURCE_ID: &str = "wordfence";
+/// Flux `production` (porte `cve` et `cvss`).
+pub const URL: &str = "https://www.wordfence.com/api/intelligence/v3/vulnerabilities/production";
+/// Seule origine admise : le jeton ne part vers aucun autre hôte.
+pub const ORIGIN: (&str, u16) = ("www.wordfence.com", 443);
+/// Version du lecteur : à incrémenter dans le commit de tout changement de
+/// lecture ou de conversion qui change les failles produites à partir des
+/// mêmes octets.
+pub const LOADER_VERSION: u32 = 1;
+/// Une requête toutes les 30 minutes au plus (limite de la source, tenue
+/// par le débit de F2).
+pub const MIN_INTERVAL: Duration = Duration::from_secs(30 * 60);
+/// Refus tant que la relecture n'est pas consignée dans le binaire.
+pub const DISABLED: &str =
+    "source wordfence désactivée : relecture des conditions non consignée dans docs/failles.md";
+
+const MIB: u64 = 1024 * 1024;
+
+/// Source Wordfence, avec sa section `[vulns.wordfence]`.
+#[derive(Debug, Clone)]
+pub struct Wordfence {
+    config: Option<WordfenceConfig>,
+    /// Relecture consignée dans le binaire : [`WORDFENCE_TERMS_REVIEWED`],
+    /// sauf pour les tests ([`Wordfence::with_binary_review`]).
+    reviewed: Option<&'static str>,
+}
+
+impl Wordfence {
+    /// Source de production : la relecture vient de la constante.
+    pub fn new(config: Option<WordfenceConfig>) -> Self {
+        Self {
+            config,
+            reviewed: WORDFENCE_TERMS_REVIEWED,
+        }
+    }
+
+    /// Point d'injection des tests du verrou, construit par le code
+    /// seulement (jamais par la configuration) : la constante réelle reste
+    /// intacte, aucun `cfg(test)` ne modifie le verrou.
+    pub fn with_binary_review(mut self, reviewed: Option<&'static str>) -> Self {
+        self.reviewed = reviewed;
+        self
+    }
+
+    /// Verrou à deux clés puis jeton : relecture consignée dans le binaire
+    /// (`reviewed`), égale à `terms_reviewed` de la configuration, puis
+    /// jeton lisible. Aucune requête n'est faite ici.
+    pub fn ready_with(&self, reviewed: Option<&str>) -> Result<Token, NotReady> {
+        let Some(reviewed) = reviewed else {
+            return Err(NotReady(DISABLED.to_owned()));
+        };
+        let Some(config) = &self.config else {
+            return Err(NotReady(
+                "source wordfence : [vulns.wordfence] absente (token_file, terms_reviewed)".into(),
+            ));
+        };
+        if config.terms_reviewed != reviewed {
+            return Err(NotReady(format!(
+                "source wordfence désactivée : terms_reviewed {} différente de la relecture consignée dans le binaire ({reviewed})",
+                crate::api::log_text::LogText::new(&config.terms_reviewed, 16).as_str()
+            )));
+        }
+        read_token(&config.token_file)
+            .map_err(|e| NotReady(format!("jeton Wordfence illisible : {e}")))
+    }
+}
+
+impl VulnSource for Wordfence {
+    fn id(&self) -> &'static str {
+        SOURCE_ID
+    }
+
+    fn meta(&self) -> SourceMeta {
+        SourceMeta {
+            url: URL,
+            origins: &[ORIGIN],
+            license: LICENSE,
+            attribution: "Wordfence Intelligence, © Defiant Inc. ; mention `copyrights` de chaque enregistrement",
+            limits: Limits {
+                compressed: 512 * MIB,
+                unpacked: 512 * MIB,
+                entries: MAX_ENTRIES,
+                entry: MAX_ENTRY_BYTES as u64,
+                central_directory: 0,
+                duration: Duration::from_secs(15 * 60),
+                max_dropped_ratio: 0.01,
+            },
+            min_interval: MIN_INTERVAL,
+            loader_version: LOADER_VERSION,
+            redistribution: REDISTRIBUTION,
+        }
+    }
+
+    fn ready(&self, _ctx: &SyncContext) -> Result<(), NotReady> {
+        self.ready_with(self.reviewed).map(|_| ())
+    }
+
+    fn fetch(
+        &self,
+        dl: &mut Download,
+        sink: &mut dyn Sink,
+        tally: &mut Tally,
+    ) -> Result<FetchOutcome, SyncError> {
+        // Revérifié juste avant la requête : un appel direct sans `ready`
+        // ne contourne pas le verrou.
+        let token = self
+            .ready_with(self.reviewed)
+            .map_err(|e| SyncError::NotReady(e.0))?;
+        let url = dl.url().cloned().ok_or(SyncError::OriginRefused)?;
+        let request = Request {
+            url,
+            sensitive_headers: vec![("Authorization".to_owned(), token.header())],
+        };
+        drop(token);
+        let dump = match dl.get_to_file(&request)? {
+            Fetched::NotModified => {
+                return Ok(FetchOutcome::Unchanged {
+                    not_modified: true,
+                    validators: None,
+                });
+            }
+            Fetched::SameDigest { validators, .. } => {
+                return Ok(FetchOutcome::Unchanged {
+                    not_modified: false,
+                    validators: Some(validators),
+                });
+            }
+            Fetched::Dump(dump) => dump,
+        };
+        let file =
+            std::fs::File::open(&dump.path).map_err(|e| SyncError::io("lecture du flux", &e))?;
+        let limits = FeedLimits {
+            entries: dl.limits().entries,
+            deadline: Some(dl.deadline()),
+        };
+        let entries = parse_feed(file, &limits, sink, tally)?;
+        Ok(FetchOutcome::Loaded(Dumped {
+            sha256: dump.sha256,
+            validators: dump.validators,
+            bytes: dump.bytes,
+            unpacked_bytes: dump.bytes,
+            entries,
+            revision: None,
+        }))
+    }
 }
 
 #[cfg(test)]
