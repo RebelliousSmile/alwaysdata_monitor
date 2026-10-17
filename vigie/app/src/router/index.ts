@@ -6,7 +6,8 @@ import {
 } from 'vue-router'
 import type { FeatureKey } from '@/lib/features'
 
-// Écrans du HANDOFF §3, plus /appairage et /reglages/emails.
+// Écrans du HANDOFF §3, plus /appairage, /reglages/emails, et les écrans des
+// failles (#21) : /s/:site/failles et /reglages/sources.
 
 export type NavKey = 'a-traiter' | 'trafic' | 'erreurs' | 'sante'
 export type SegmentGroup = 'trafic' | 'sante'
@@ -85,6 +86,12 @@ export const routes: RouteRecordRaw[] = [
     meta: { site: true, nav: 'sante', segments: 'sante' },
   },
   {
+    path: '/s/:site/failles',
+    name: 'failles',
+    component: () => import('@/views/Failles.vue'),
+    meta: { site: true, feature: 'wordpress' },
+  },
+  {
     path: '/s/:site/parametres',
     name: 'parametres',
     component: () => import('@/views/Parametres.vue'),
@@ -101,6 +108,12 @@ export const routes: RouteRecordRaw[] = [
     name: 'emails',
     component: NotYetView,
     meta: { title: 'E-mails', back: 'reglages', feature: 'emails' },
+  },
+  {
+    path: '/reglages/sources',
+    name: 'sources-failles',
+    component: () => import('@/views/SourcesFailles.vue'),
+    meta: { title: 'Sources de failles', back: 'reglages' },
   },
   {
     path: '/ajouter',
@@ -128,6 +141,7 @@ export const SITE_SCREENS: readonly string[] = [
   'sante',
   'ressources',
   'controles',
+  'failles',
 ]
 
 export function makeRouter(history: RouterHistory = createWebHistory()) {

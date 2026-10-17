@@ -659,7 +659,7 @@ fn site_remove_purges_the_analysis_of_the_site() {
     ] {
         assert!(rows(&store, table) > 0, "{table}");
     }
-    assert!(store.remove_key("site-a").expect("retrait"));
+    assert!(store.remove_key("site-a", 0).expect("retrait"));
     for table in tables {
         assert_eq!(rows(&store, table), 0, "{table}");
     }

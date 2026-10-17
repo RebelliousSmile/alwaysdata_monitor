@@ -650,3 +650,216 @@ fn an_epss_load_in_contention_with_serve_tick_and_a_reader() {
     let tables = StoreTables::open(&store).expect("tables");
     assert_eq!(tables.epss(&last).map(|e| e.epss_ppm), Some(1_000));
 }
+
+/// Rapprochement (#21) : deux `tick` concurrents sur le même run, pendant
+/// les écritures de `serve` (lots de logs) et un chargement de failles (F1) :
+/// aucun `SQLITE_BUSY`, aucun lot écrit deux fois, un seul run actif complet
+/// à la fin.
+#[test]
+fn two_match_passes_in_contention_with_serve_and_a_vulns_load() {
+    let _heavy = HEAVY.lock().unwrap_or_else(|e| e.into_inner());
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    use vigie::clock::SystemClock;
+    use vigie::inventory::{Component, ComponentType, Inventory, Scope, Source};
+    use vigie::store::InventoryDoc;
+    use vigie::vulns::advisory::Tally;
+    use vigie::vulns::exploit::MemoryTables;
+    use vigie::vulns::matching::pass::{self, Budget};
+    use vigie::vulns::purl::Purl;
+    use vigie::vulns::store::{LEASE, Load, SyncMeta};
+
+    const COMPONENTS: usize = 1_200;
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("vigie.db");
+    let raw = format!(
+        "database = '{}'\n[alerts]\nto = \"alertes@example.org\"\nfrom = \"vigie@example.org\"\nsmtp_host = \"smtp.example.org\"\npassword_file = '{}'\n[vulns]\nsources = [\"osv-packagist\"]\n[[sites]]\nid = \"site-a\"\nurl = \"https://site-a.example.org/\"\nruntime = \"php\"\n[sites.inventory]\nsources = [\"ci\"]\n",
+        path.display(),
+        path.with_file_name("smtp-password").display()
+    );
+    let config = config::parse(std::path::Path::new("config.toml"), &raw).expect("configuration");
+    let key = agent().verifying_key().to_bytes();
+    let ci = SigningKey::from_bytes(&[11; 32]);
+    let ci_public = ci.verifying_key().to_bytes();
+    {
+        let mut store = Store::open(&path).expect("open");
+        store.add_key("site-a", &key, 0).expect("add_key");
+        store
+            .add_inventory_key("site-a", &ci_public, 0)
+            .expect("clé d'inventaire");
+        vulns_data::source(&mut store, vulns_data::SOURCE);
+        let clock = SystemClock;
+        let mut load = Load::begin(&mut store, vulns_data::SOURCE, &clock, LEASE).expect("bail");
+        let first: Vec<_> = (0..2_000)
+            .map(|i| vulns_data::fictive(i, "avant"))
+            .collect();
+        load.push(&first).expect("failles");
+        load.commit(&Tally::default(), &SyncMeta::default())
+            .expect("bascule");
+        let mut components: Vec<Component> = (0..COMPONENTS)
+            .map(|i| Component {
+                purl: Purl::parse(&format!("pkg:composer/exemple/p{}@1.1.{i}", i % 50))
+                    .expect("purl"),
+                name: format!("p{}", i % 50),
+                ty: ComponentType::Library,
+                scope: Scope::Required,
+                path: format!("vendor/{i}"),
+                parent: None,
+                config_version: None,
+            })
+            .collect();
+        components
+            .sort_by(|a, b| (a.purl.canonical(), &a.path).cmp(&(b.purl.canonical(), &b.path)));
+        let inventory = Inventory {
+            site: "site-a".into(),
+            source: Source::Ci,
+            seq: 1,
+            sent_at: 100,
+            agent: "vigie-inventory/0.1.0".into(),
+            complete: true,
+            skipped: 0,
+            spec_version: "1.7".into(),
+            serial: "urn:uuid:00000000-0000-4000-8000-000000000001".into(),
+            generated_at: 100,
+            digest: vigie::inventory::bom::digest(&components),
+            components,
+            dropped: Default::default(),
+        };
+        store
+            .accept_inventory(
+                &InventoryDoc {
+                    site: "site-a",
+                    source: Source::Ci,
+                    pubkey: &ci_public,
+                    inventory: &inventory,
+                },
+                100,
+            )
+            .expect("inventaire");
+    }
+    let next: Vec<_> = (0..2_000)
+        .map(|i| vulns_data::fictive(i, "apres"))
+        .collect();
+    let done = Arc::new(AtomicBool::new(false));
+    let start = Arc::new(Barrier::new(4));
+    let passes: Vec<_> = (0..2)
+        .map(|_| {
+            let (path, start, done, config) = (
+                path.clone(),
+                Arc::clone(&start),
+                Arc::clone(&done),
+                config.clone(),
+            );
+            std::thread::spawn(move || -> Result<usize> {
+                let mut store = Store::open(&path)?;
+                let reader = Store::open_read(&path)?.expect("base");
+                let tables = MemoryTables::default();
+                start.wait();
+                let mut commits = 0;
+                let mut round = 0;
+                while !done.load(Ordering::SeqCst) || round < 20 {
+                    round += 1;
+                    let far = Instant::now() + Duration::from_secs(60);
+                    let report = pass::run(
+                        &mut store,
+                        &reader,
+                        &config,
+                        &tables,
+                        200 + round,
+                        &Budget {
+                            deadline: far,
+                            hard_stop: far,
+                            max_batches: 1,
+                        },
+                    );
+                    ensure!(report.errors == 0, "passage en erreur : {report:?}");
+                    commits += report.commits;
+                }
+                Ok(commits)
+            })
+        })
+        .collect();
+    let loader = {
+        let (path, start) = (path.clone(), Arc::clone(&start));
+        std::thread::spawn(move || -> Result<()> {
+            let mut store = Store::open(&path)?;
+            start.wait();
+            let clock = SystemClock;
+            let mut load = Load::begin(&mut store, vulns_data::SOURCE, &clock, LEASE)?;
+            load.push(&next)?;
+            load.commit(&Tally::default(), &SyncMeta::default())?;
+            Ok(())
+        })
+    };
+    let batches = {
+        let (path, start, done) = (path.clone(), Arc::clone(&start), Arc::clone(&done));
+        std::thread::spawn(move || -> Result<i64> {
+            let mut store = Store::open(&path)?;
+            start.wait();
+            let mut round = 0;
+            let until = Instant::now() + DURATION;
+            while Instant::now() < until || round == 0 {
+                round += 1;
+                let outcome = accept_batch(&mut store, round, round, &key)?;
+                ensure!(
+                    outcome == LogsOutcome::Accepted { gap: 0 },
+                    "lot {outcome:?}"
+                );
+            }
+            done.store(true, Ordering::SeqCst);
+            Ok(round)
+        })
+    };
+    loader
+        .join()
+        .expect("thread")
+        .unwrap_or_else(|e| panic!("chargement : {e:#}"));
+    let batches = batches.join().expect("thread").expect("lots");
+    let mut commits = 0;
+    for p in passes {
+        commits += p
+            .join()
+            .expect("thread")
+            .unwrap_or_else(|e| panic!("passage : {e:#}"));
+    }
+    assert!(commits >= 1);
+    // Un passage de plus, seul, pour finir ce qui restait dû.
+    let mut store = Store::open(&path).expect("open");
+    let reader = Store::open_read(&path).expect("lecteur").expect("base");
+    let far = Instant::now() + Duration::from_secs(60);
+    pass::run(
+        &mut store,
+        &reader,
+        &config,
+        &MemoryTables::default(),
+        10_000,
+        &Budget {
+            deadline: far,
+            hard_stop: far,
+            max_batches: usize::MAX,
+        },
+    );
+    drop(store);
+    let conn = rusqlite::Connection::open(&path).expect("base");
+    let (active, pending): (Option<i64>, Option<i64>) = conn
+        .query_row(
+            "SELECT active_run, pending_run FROM vuln_match_state WHERE site = 'site-a'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .expect("état");
+    assert_eq!(pending, None);
+    let rows: i64 = conn
+        .query_row(
+            "SELECT count(*) FROM vuln_match_components WHERE run = ?1",
+            [active.expect("run actif")],
+            |r| r.get(0),
+        )
+        .expect("composants");
+    assert_eq!(rows, COMPONENTS as i64, "un seul run complet");
+    let store = Store::open(&path).expect("open");
+    let logged = store
+        .log_entries_after("site-a", 0, 10_000_000)
+        .expect("entrées");
+    assert_eq!(logged.len() as i64, batches * ENTRIES as i64);
+}

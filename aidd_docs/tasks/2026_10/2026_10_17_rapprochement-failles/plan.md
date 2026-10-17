@@ -1,6 +1,6 @@
 ---
 objective: "Le veilleur confronte localement chaque composant de chaque site, vu par chaque source d'inventaire (agent PHP de F5, CI de F6), aux failles connues de F1 à F4 : rapprochement par l'index purl de F1 et le comparateur de l'écosystème, au passage de tick qui suit un nouvel inventaire, une synchronisation, une dérogation ajoutée, retirée ou échue, ou une péremption, par lots sous un budget borné qui réserve le temps des envois, sites à tour de rôle, une erreur de site n'arrêtant jamais le passage ; failles fusionnées par alias, gravité par la seule règle de F4, version ou plage inconnue jamais silencieuse ; un constat par (site, composant sans version), à clé tirée de la base de failles, ouvert à partir de l'avertissement, jamais un incident par faille, jamais « rétabli » sans preuve ; e-mail de synthèse au-delà de 5 ouvertures sur un site ; dérogations par site, composant, faille, source et version, motivées, de 90 jours au plus, auditées par empreinte du motif, interdites pour KEV ; contrôle vulns déclaré au registre, « inventaire périmé » par source ; lecture par l'API /api/v1, un écran « Failles » de la console sans action d'écriture et la CLI, attributions affichées partout."
-status: pending
+status: done
 issue_number: 21
 ---
 
@@ -52,6 +52,25 @@ issue_number: 21
 | Chaîne d'audit signée par site, `Entry`, `append` | `vigie/src/command/audit.rs` l. 26-39 et l. 89 | Dérogations, motif par empreinte |
 | Un seul destinataire d'e-mail, jamais un client ; objet = détail entier | `vigie/src/alert.rs` l. 1-2, l. 188-193 | Usage interne ; objet propre à `vulns` |
 | Test de contrat de la console contre le routeur en processus | `vigie/app/src-tauri/tests/contract.rs` | Routes de F7 |
+
+### Écarts au code livré (relevés à l'implémentation, 2026-10-17)
+
+| Plan | Code de F7 | Raison |
+| --- | --- | --- |
+| `InventorySide { Agent, Ci }` | `inventory::Source` de F6, réutilisé | Mêmes valeurs stockées (`agent`, `ci`) ; un seul type |
+| `Needs::InventorySource` à créer | Existait (F6) ; seul `Control::Vulns` est ajouté (`Control::ALL` à 15) | Livré par F6 |
+| Migration « 0020 » | Fichier `0021.sql`, `SCHEMA_VULNS_MATCH = version_of(..)` | F6 a pris `0020.sql` |
+| `remove_key(site)` | `remove_key(site, now)` | `lost_view_at` = date du retrait, sans lire l'horloge dans `store.rs` |
+| Fixtures JSON sous `tests/fixtures/vulns/matching/` | `tests/support/matching_data.rs` : `Draft` construits en Rust, passés par `Advisory::build` | `Draft` n'est pas désérialisable ; mêmes règles (fictif, `example.org`, `CVE-2099-…`) |
+| `source_carries` dans `matching/store.rs` | Dans `matching/mod.rs` | Fonction pure, testée avec la phase 1 |
+| `GroupFacts` | `GroupResult` entier en JSON dans `vuln_match_items.facts` (`MemberFacts` par membre) | Réévaluation et relecture sans autre jointure |
+| Colonnes de `vuln_match_components` | + `candidates` (provenance), `rank` (tri) ; état + `pending_enrich_epoch` | Provenance limitée aux clés à candidate ; pagination par gravité |
+| `next_stale_check` = péremption | Plus proche de toutes les échéances (péremption, fin de report, perte de vue) | Un site sans nouvel inventaire doit être dû à chacune |
+| Méta de déclaration écrite par `tick.rs` | Écrite par `matching/pass.rs` (appelé par `tick`) | Même passage, même effet |
+| Réévaluation par lots reprenables | Copie en lots IMMEDIATE de 500 dans un même passage, comptée pour un lot ; abandonnée si la bascule échoue | Aucune plage relue : coût faible, mesuré par le test de volume |
+| — | Erreur d'un site : `match_epoch` oubliée, rapprochement complet au passage suivant | Une ligne illisible d'un run se remplace par un run neuf (erreur comptée, visible) |
+| `StoreTables::open(&Store)` sur l'écrivain | Sur une connexion de lecture (`Store::open_read`) ouverte par `tick` ; candidates et composants lus par elle | `StoreTables` emprunte le `Store` ; l'écrivain écrit pendant le passage |
+| Test de volume par `tick::run_with` | `pass::run` appelé directement avec son `Budget` | Mesure du passage seul, sans envois |
 
 ## Phases
 

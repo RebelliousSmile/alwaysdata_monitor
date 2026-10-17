@@ -186,6 +186,74 @@ impl VerdictCursor {
     }
 }
 
+/// Curseur des listes du rapprochement (#21) : les runs actifs de chaque
+/// source (`agent`, `ci`) lus pour la première page, et le nombre
+/// d'éléments déjà servis. Un run ne change jamais en place (une
+/// réévaluation écrit un run neuf) : la liste est figée tant que ses runs
+/// sont actifs, sans doublon ni trou ; un run basculé entre deux pages rend
+/// 409 `cursor_expired`. Le rang évite de porter une clé qui citerait un
+/// chemin du site.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MatchCursor {
+    pub agent: Option<i64>,
+    pub ci: Option<i64>,
+    pub offset: usize,
+}
+
+impl MatchCursor {
+    fn fields(self) -> [String; 3] {
+        let run = |r: Option<i64>| r.map_or_else(|| "-".to_owned(), |r| r.to_string());
+        [run(self.agent), run(self.ci), self.offset.to_string()]
+    }
+
+    fn parse(fields: &[String]) -> Result<Self, ApiError> {
+        let run = |f: &str| -> Result<Option<i64>, ApiError> {
+            if f == "-" {
+                Ok(None)
+            } else {
+                number(f).map(Some)
+            }
+        };
+        Ok(Self {
+            agent: run(&fields[0])?,
+            ci: run(&fields[1])?,
+            offset: number(&fields[2])?,
+        })
+    }
+}
+
+/// Curseur de `/api/v1/sites/{id}/components`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ComponentCursor(pub MatchCursor);
+
+impl ComponentCursor {
+    const TAG: &str = "c1";
+
+    pub fn encode(self) -> String {
+        encode(Self::TAG, &self.0.fields())
+    }
+
+    pub fn decode(cursor: &str) -> Result<Self, ApiError> {
+        MatchCursor::parse(&decode(Self::TAG, cursor, 3)?).map(Self)
+    }
+}
+
+/// Curseur de `/api/v1/sites/{id}/vulns`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VulnCursor(pub MatchCursor);
+
+impl VulnCursor {
+    const TAG: &str = "f1";
+
+    pub fn encode(self) -> String {
+        encode(Self::TAG, &self.0.fields())
+    }
+
+    pub fn decode(cursor: &str) -> Result<Self, ApiError> {
+        MatchCursor::parse(&decode(Self::TAG, cursor, 3)?).map(Self)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -285,6 +353,35 @@ mod tests {
         ] {
             assert_eq!(
                 VerdictCursor::decode(&bad),
+                Err(ApiError::BAD_REQUEST),
+                "{bad}"
+            );
+        }
+    }
+
+    #[test]
+    fn match_cursors_carry_the_runs_and_belong_to_their_route() {
+        let cursor = MatchCursor {
+            agent: Some(12),
+            ci: None,
+            offset: 50,
+        };
+        let text = ComponentCursor(cursor).encode();
+        assert_eq!(ComponentCursor::decode(&text), Ok(ComponentCursor(cursor)));
+        assert_eq!(VulnCursor::decode(&text), Err(ApiError::BAD_REQUEST));
+        let text = VulnCursor(cursor).encode();
+        assert_eq!(VulnCursor::decode(&text), Ok(VulnCursor(cursor)));
+        assert_eq!(ComponentCursor::decode(&text), Err(ApiError::BAD_REQUEST));
+        let forge = |plain: &str| URL_SAFE_NO_PAD.encode(plain);
+        for bad in [
+            forge("c1|1|2"),
+            forge("c1|x|-|0"),
+            forge("c1|1|-|-1"),
+            forge("c1|+1|-|0"),
+            forge("c1|1|-|0|9"),
+        ] {
+            assert_eq!(
+                ComponentCursor::decode(&bad),
                 Err(ApiError::BAD_REQUEST),
                 "{bad}"
             );

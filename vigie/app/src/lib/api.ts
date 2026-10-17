@@ -154,6 +154,84 @@ export interface LogIps {
   next_cursor: string | null
 }
 
+// Failles des composants (#21). Identifiants, liens et attributions viennent
+// de sources tierces : ils ne s'affichent qu'en interpolation de texte.
+
+/** Runs actifs de chaque source d'inventaire, servis avec chaque page. */
+export interface Runs {
+  agent: number | null
+  ci: number | null
+}
+
+/** Composant du dernier inventaire d'une source ; jamais son chemin. */
+export interface Component {
+  source: 'agent' | 'ci' | string
+  purl: string
+  version: string | null
+  scope: string
+  vulns: number
+  severity: Severity | null
+}
+
+export interface SiteComponents {
+  site: string
+  runs: Runs
+  items: Component[]
+  next_cursor: string | null
+}
+
+export type VulnVerdict = 'affected' | 'version_unknown' | 'range_unknown'
+
+export type Redistribution = 'internal' | 'facts_only' | 'free'
+
+/** Faille d'un composant, fusionnée par alias. */
+export interface Vuln {
+  group: string
+  ids: string[]
+  component: string
+  versions: { source: string; version: string | null }[]
+  verdict: VulnVerdict | string
+  corrected: boolean
+  fixed: string[]
+  severity: Severity
+  rule: string
+  kev: { date_added: string; ransomware: boolean } | null
+  /** Millionièmes. */
+  epss: { score: number; percentile: number } | null
+  /** CVSS en dixièmes. */
+  score: number | null
+  redistribution: Redistribution | string
+  /** Jamais le motif ni l'auteur. */
+  waiver: { source: string; until: number; state: string } | null
+  links: { source: string; url: string }[]
+  attributions: string[]
+}
+
+export interface SiteVulns {
+  site: string
+  runs: Runs
+  items: Vuln[]
+  next_cursor: string | null
+}
+
+/** Source de failles (`vulns`) ou table d'enrichissement (`enrichment`). */
+export interface VulnSource {
+  id: string
+  kind: 'vulns' | 'enrichment' | string
+  last_success_at: number | null
+  last_outcome: string | null
+  entries: number
+  license: string
+  attribution: string
+  redistribution: Redistribution | string
+  dataset: { version: string; released: number } | null
+  incident: { id: number; severity: Severity; opened_at: number } | null
+}
+
+export interface VulnSources {
+  sources: VulnSource[]
+}
+
 export interface SettingsSite {
   id: string
   url: string
@@ -272,6 +350,11 @@ export const api = {
   logs: (site: string) => call<SiteLogs>('logs', { site }),
   /** Une page ; sans `cursor`, la première. */
   logIps: (site: string, cursor: string | null = null) => call<LogIps>('log_ips', { site, cursor }),
+  /** Une page ; sans `cursor`, la première. */
+  components: (site: string, cursor: string | null = null) => call<SiteComponents>('components', { site, cursor }),
+  /** Une page ; sans `cursor`, la première. */
+  vulns: (site: string, cursor: string | null = null) => call<SiteVulns>('vulns', { site, cursor }),
+  vulnSources: () => call<VulnSources>('vuln_sources'),
   incident: (id: number) => call<Incident>('incident', { id }),
   ack: (id: number) => call<Incident>('ack', { id }),
   settings: () => call<Settings>('settings'),

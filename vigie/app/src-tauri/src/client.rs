@@ -292,6 +292,156 @@ pub struct LogIps {
     pub next_cursor: Option<String>,
 }
 
+// Failles des composants (#21). Les identifiants, liens et attributions
+// viennent de sources tierces : le webview ne les affiche qu'en texte.
+
+/// Runs actifs de chaque source d'inventaire, servis avec chaque page.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Runs {
+    #[serde(deserialize_with = "nullable")]
+    pub agent: Option<i64>,
+    #[serde(deserialize_with = "nullable")]
+    pub ci: Option<i64>,
+}
+
+/// Composant du dernier inventaire d'une source ; jamais son chemin.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Component {
+    /// `agent` ou `ci`.
+    pub source: String,
+    pub purl: String,
+    #[serde(deserialize_with = "nullable")]
+    pub version: Option<String>,
+    pub scope: String,
+    pub vulns: u64,
+    #[serde(deserialize_with = "nullable")]
+    pub severity: Option<Severity>,
+}
+
+/// Une page des composants d'un site.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SiteComponents {
+    pub site: String,
+    pub runs: Runs,
+    pub items: Vec<Component>,
+    #[serde(deserialize_with = "nullable")]
+    pub next_cursor: Option<String>,
+}
+
+/// Version d'un composant vue par une source.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct VulnVersion {
+    pub source: String,
+    #[serde(deserialize_with = "nullable")]
+    pub version: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Kev {
+    pub date_added: String,
+    pub ransomware: bool,
+}
+
+/// Score EPSS et percentile, en millionièmes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Epss {
+    pub score: u32,
+    pub percentile: u32,
+}
+
+/// Dérogation d'une faille : jamais son motif ni son auteur.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Waiver {
+    pub source: String,
+    pub until: i64,
+    /// `valid`, `expired`, `version_changed`, `group_changed`, `kev`.
+    pub state: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Link {
+    pub source: String,
+    pub url: String,
+}
+
+/// Faille d'un composant, fusionnée par alias, avec son composant et la
+/// version vue par chaque source.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Vuln {
+    pub group: String,
+    pub ids: Vec<String>,
+    pub component: String,
+    pub versions: Vec<VulnVersion>,
+    /// `affected`, `version_unknown` ou `range_unknown`.
+    pub verdict: String,
+    pub corrected: bool,
+    pub fixed: Vec<String>,
+    pub severity: Severity,
+    pub rule: String,
+    #[serde(deserialize_with = "nullable")]
+    pub kev: Option<Kev>,
+    #[serde(deserialize_with = "nullable")]
+    pub epss: Option<Epss>,
+    /// CVSS en dixièmes.
+    #[serde(deserialize_with = "nullable")]
+    pub score: Option<u8>,
+    /// `internal`, `facts_only` ou `free`.
+    pub redistribution: String,
+    #[serde(deserialize_with = "nullable")]
+    pub waiver: Option<Waiver>,
+    pub links: Vec<Link>,
+    pub attributions: Vec<String>,
+}
+
+/// Une page des failles d'un site.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SiteVulns {
+    pub site: String,
+    pub runs: Runs,
+    pub items: Vec<Vuln>,
+    #[serde(deserialize_with = "nullable")]
+    pub next_cursor: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Dataset {
+    pub version: String,
+    pub released: i64,
+}
+
+/// Constat `vulns-sync` ouvert d'une source.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SourceIncident {
+    pub id: i64,
+    pub severity: Severity,
+    pub opened_at: i64,
+}
+
+/// Source de failles ou table d'enrichissement du veilleur.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct VulnSource {
+    pub id: String,
+    /// `vulns` ou `enrichment`.
+    pub kind: String,
+    #[serde(deserialize_with = "nullable")]
+    pub last_success_at: Option<i64>,
+    #[serde(deserialize_with = "nullable")]
+    pub last_outcome: Option<String>,
+    pub entries: i64,
+    pub license: String,
+    pub attribution: String,
+    pub redistribution: String,
+    #[serde(deserialize_with = "nullable")]
+    pub dataset: Option<Dataset>,
+    #[serde(deserialize_with = "nullable")]
+    pub incident: Option<SourceIncident>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct VulnSources {
+    pub sources: Vec<VulnSource>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SettingsSite {
     pub id: String,
@@ -538,6 +688,29 @@ impl Client {
     pub async fn log_ips(&self, site: &str, cursor: Option<&str>) -> Result<LogIps, ApiError> {
         self.read(Method::GET, &["sites", site, "logs", "ips"], cursor)
             .await
+    }
+
+    /// Une page des composants d'un site. 404 : site sans source
+    /// d'inventaire, jamais rapproché, ou veilleur antérieur à cette route ;
+    /// `CursorExpired` : un run a basculé, reprendre sans curseur.
+    pub async fn components(
+        &self,
+        site: &str,
+        cursor: Option<&str>,
+    ) -> Result<SiteComponents, ApiError> {
+        self.read(Method::GET, &["sites", site, "components"], cursor)
+            .await
+    }
+
+    /// Une page des failles d'un site ; mêmes erreurs que `components`.
+    pub async fn vulns(&self, site: &str, cursor: Option<&str>) -> Result<SiteVulns, ApiError> {
+        self.read(Method::GET, &["sites", site, "vulns"], cursor)
+            .await
+    }
+
+    /// Sources de failles déclarées du veilleur.
+    pub async fn vuln_sources(&self) -> Result<VulnSources, ApiError> {
+        self.read(Method::GET, &["vulns", "sources"], None).await
     }
 
     pub async fn incident(&self, id: i64) -> Result<Incident, ApiError> {

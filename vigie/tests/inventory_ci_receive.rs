@@ -587,7 +587,7 @@ async fn rotate_resets_the_ci_seq_and_keeps_the_inventory() {
     assert_eq!(h.rows("site-a", Source::Ci), 2);
 
     // `site remove` d'un site static sans clé d'agent : tout part.
-    assert!(h.store().remove_key("site-a").expect("retrait"));
+    assert!(h.store().remove_key("site-a", 0).expect("retrait"));
     assert_eq!(
         h.count("SELECT count(*) FROM site_inventory WHERE site = 'site-a'"),
         0

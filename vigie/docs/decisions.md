@@ -395,6 +395,30 @@ règles détaillées dans [`failles.md`](./failles.md#priorisation-f4).
 | Âge du catalogue KEV affiché, avertissement au-delà de 14 jours, sans constat | Distinct de la fraîcheur de synchronisation ; F7 le reprendra s'il le juge utile |
 | Critères transmis à F7 (#21) : rapprochement déclenché par une issue `loaded` de KEV ou EPSS (`SyncReport::loaded`), constat ouvert passé en critique au passage suivant, gravité d'un groupe par `assess_group`, inconnues par `assess_unknown` et maximum par composant | F7 seul possède les constats |
 
+### Rapprochement inventaire × failles (issue #21)
+
+Plan : `aidd_docs/tasks/2026_10/2026_10_17_rapprochement-failles/plan.md` ;
+règles détaillées dans [`failles.md`](./failles.md#rapprochement-f7).
+
+| Décision du 2026-10-17 | Raison |
+| --- | --- |
+| **Le rapprochement tourne dans `tick`, au passage qui suit** un inventaire, une synchronisation, une dérogation ou une échéance (écart de forme à l'issue, qui disait « à la réception » et « après chaque synchronisation ») ; jamais dans `serve` ni `vulns sync` | `serve` n'a qu'un écrivain ; un état comparé est idempotent : un passage interrompu se reprend, aucun signal ne se perd ; une minute de délai au plus |
+| État comparé par (site, source) : inventaire, `seen_at`, `match_epoch` (sources de failles **déclarées**, corrections de plage), `enrich_epoch` (KEV, EPSS), `waiver_epoch` (avec `count(revoked_at)`), sources d'inventaire déclarées, échéances gardées | Tout changement est vu au passage suivant, sans déclencheur entre processus ; deux retraits de suite aussi |
+| Ce qui est refait selon ce qui a changé ; KEV ou EPSS seuls → réévaluation sur les faits gardés dans un run neuf, sans plage relue ; constats du site toujours reconstruits en entier puis **une** réconciliation | Une faille entrée dans KEV monte sans relire 400 000 plages ; aucune réconciliation partielle ne clôt ce qu'une autre source voit |
+| Runs à séquence globale, lots IMMEDIATE de 500 à curseur en compare-and-swap, constats construits hors transaction puis revérifiés, bascule et réconciliation dans la même transaction IMMEDIATE | Un run actif et ses incidents ne divergent jamais ; aucun calcul ne tient le verrou ; mesuré : bascule la plus longue 24 ms sur un site de 2 000 composants |
+| Budget : `min(maintenant + 10 s, start + send_budget − send_reserve)`, un lot obligatoire sauf après `start + send_budget − send_reserve / 2` ; l'analyse de logs bornée de même | Le rapprochement ne gèle jamais et les envois gardent au moins `send_reserve / 2` |
+| Erreurs isolées par site, comptées, visibles dans `vigie status` ; l'époque des failles du site est oubliée pour repartir d'un run neuf | Une donnée cassée ne prive ni les autres sites ni les envois ; une ligne illisible se remplace |
+| **Contrôle `vulns` surveillé selon la seule source d'inventaire déclarée** (écart à l'issue, « inventaire reçu depuis moins de 7 jours ») ; absence d'inventaire = « inventaire périmé » par source (7 j `agent`, 35 j `ci`) | F0 fait foi : jamais de perte de surveillance en silence |
+| Deux sources en union ; absence jugée par source, seulement dans un inventaire complet ; report borné d'un composant absent d'un relevé partiel | Règles écrites par F6 ; un déploiement raté ne fait pas croire une faille corrigée |
+| Un constat par (site, purl sans version), clé tirée de la base de failles ; **ouvert à l'avertissement seulement** (écart à l'issue, qui ouvrait toute faille) ; gardé ouvert en information tant qu'un groupe subsiste | 30 failles d'une extension font un incident ; pas de battement autour d'un seuil EPSS ; une faille d'information se lit dans `site vulns --all`, l'API et la console |
+| « Rétabli » seulement sur verdict non touché de toutes les vues, ou preuve d'absence de chaque source requise (provenance ∩ déclarées ∩ `source_carries`, toutes les sources déclarées si la provenance est perdue) ; sinon « plus surveillé » à l'échéance de la source manquante | L'issue : « pas en aucune faille » ; retirer une source n'est pas corriger |
+| **Dérogation = groupe sorti de la gravité, incident gardé en information** (écart à l'issue, qui la voyait clore) ; relevé à l'échéance avec l'e-mail d'ouverture ; par site, source, composant, faille et version ; 90 jours ; jamais KEV ; `covered_ids` (caduque dès qu'un identifiant ou alias nouveau rejoint le groupe) | Clore annoncerait « rétabli » ; pas de raison de clôture `waived`, donc pas de reconstruction de `incidents` |
+| Audit des dérogations par **empreinte SHA-256 du motif** dans la chaîne du site ; le texte ne vit que dans `vuln_waivers`, purgée par `site remove` | Rien de ce qu'a écrit l'exploitant ne survit au retrait du site |
+| **E-mails groupés, question tranchée 1** : « un même passage » se lit « e-mails **en attente pour le site** » ; au-delà de cinq ouvertures (gravités montées et KEV comprises), un seul e-mail, puis tous marqués dans une transaction ; **même règle pour les rappels et les clôtures** ; un groupe redescendu de six à cinq donne cinq e-mails (accepté) ; doublon possible si le marquage échoue après l'envoi (accepté) | Le regroupement se décide sur l'état en base au moment de l'envoi : il survit à un envoi raté et couvre montées KEV, rappels et clôtures |
+| Minimisation : détail **et clé** des incidents `vulns` clos depuis 30 jours masqués ; `/components` sert tous les composants à la console appairée, sans chemin (limite écrite) | La clé nomme un composant du client ; même règle que `logs` |
+| Lecture par l'API (curseurs figés sur les runs actifs, 409 au basculement), la CLI (`site components`, `site vulns`, `vulns report`, `status`) et deux écrans de console **sans action d'écriture** ; seule écriture : `site vulns-ack` (aperçu puis `--apply`) | Contrat de #5 ; l'exploitant décide sur le VPS |
+| Migration en fichier `0021.sql` (F6 a pris `0020.sql`), `SCHEMA_VULNS_MATCH` calculé par sa place | Une migration publiée ne se modifie jamais |
+
 ## Dépendances (issue #22)
 
 Plan : `aidd_docs/tasks/2026_10/2026_10_17_osv-scanner/plan.md`. Job `deps`

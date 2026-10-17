@@ -3,6 +3,20 @@
 Versions de la console (`vigie/app`), publiées par les tags `console-vX.Y.Z`.
 Le veilleur a son propre historique.
 
+## Non publiée
+
+Prérequis de publication : le veilleur du VPS sert les routes `components`,
+`vulns` et `vulns/sources` de l'API (#21, phase 4). Face à un veilleur en
+retard, les deux écrans restent « pas encore disponible » (404).
+
+- Failles (#21) : composants du site et failles connues rapprochées, par
+  groupe d'alias, avec gravité, KEV, EPSS, versions corrigées, dérogation
+  en cours et source de l'inventaire ; « Afficher plus » sur un passage
+  figé. Le contrôle « Failles des composants » remplace « pas encore
+  disponible » dans Contrôles.
+- Sources de failles (Réglages) : jeux de données chargés, date de la
+  dernière synchronisation et incidents de synchronisation en cours.
+
 ## 0.2.0
 
 Prérequis de publication : le veilleur du VPS sert la pagination et les
