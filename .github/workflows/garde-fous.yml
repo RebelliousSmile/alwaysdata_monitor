@@ -2,10 +2,14 @@ name: garde-fous
 
 # Sur tout le dépôt, sans filtre de chemin : un secret peut être committé
 # n'importe où, et le lockfile de la console est hors du workflow vigie.
+# Chaque semaine aussi : une faille se publie sans qu'aucun commit ne change
+# (cron du lundi 05:17 UTC, minute décalée de l'heure pleine).
 on:
   push:
   pull_request:
   workflow_dispatch:
+  schedule:
+    - cron: "17 5 * * 1"
 
 permissions:
   contents: read
