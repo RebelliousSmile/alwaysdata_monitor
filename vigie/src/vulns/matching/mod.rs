@@ -21,14 +21,20 @@
 //! - [`store`] : état par (site, source), runs, bascule et réconciliation
 //!   dans une transaction ;
 //! - [`pass`] : l'étape F7 de `tick`, sous un budget qui réserve les envois.
+//!
+//! CLI : [`waiver_store`] (dérogations auditées, seule écriture hors de
+//! `tick`) et [`report`] (rendu de `site components`, `site vulns`, `vulns
+//! report`).
 
 pub mod assess;
 pub mod epoch;
 pub mod finding;
 pub mod group;
 pub mod pass;
+pub mod report;
 pub mod store;
 pub mod waiver;
+pub mod waiver_store;
 
 use sha2::{Digest, Sha256};
 

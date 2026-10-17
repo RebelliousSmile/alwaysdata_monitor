@@ -28,6 +28,7 @@ use vigie::store::{
     SCHEMA_INCIDENTS, SCHEMA_META, Store,
 };
 use vigie::vulns::exploit::{Cve, Exploitation, ppm_text};
+use vigie::vulns::matching::report as matching_report;
 use vigie::vulns::matching::store as matching_store;
 use vigie::vulns::{self, enrich_store, store as vulns_store};
 use vigie::{human_age, iso_utc, recommend, serve, tick};
@@ -145,6 +146,9 @@ enum VulnsAction {
         #[arg(long)]
         reason: String,
     },
+    /// Rapport interne des failles des sites : critiques d'abord, âge des
+    /// sources et constats vulns-sync ouverts
+    Report,
     /// Corrections de plage et leur état (active, sans objet, orpheline,
     /// illisible, retirée)
     Corrections {
@@ -283,6 +287,52 @@ enum SiteAction {
         #[command(subcommand)]
         action: InventoryKeyAction,
     },
+    /// Composants du dernier inventaire de chaque source, rapprochés des
+    /// failles connues (#21)
+    Components {
+        /// Identifiant du site
+        id: String,
+    },
+    /// Failles des composants du site : groupes touchés ou inconnus, de
+    /// l'avertissement au critique, hors dérogation
+    Vulns {
+        /// Identifiant du site
+        id: String,
+        /// Ajoute les groupes d'information, ceux sous dérogation et toutes
+        /// les dérogations (expirées, caduques, retirées)
+        #[arg(long)]
+        all: bool,
+    },
+    /// Dérogation à une faille d'un composant, pour la version vue par une
+    /// source : aperçu sans rien écrire, puis --apply ; 90 jours au plus,
+    /// jamais pour une faille exploitée (KEV) ; inscrite dans l'audit du site
+    /// par l'empreinte du motif (exige [commands])
+    VulnsAck {
+        /// Identifiant du site
+        id: String,
+        /// purl sans version (pkg:wordpress/plugin/<slug>…)
+        #[arg(required_unless_present = "revoke")]
+        purl: Option<String>,
+        /// Identifiant ou alias de la faille (CVE-…, GHSA-…)
+        #[arg(required_unless_present = "revoke")]
+        advisory: Option<String>,
+        /// Source d'inventaire : une dérogation par source citée ;
+        /// obligatoire si le site en déclare deux
+        #[arg(long = "source", value_enum)]
+        sources: Vec<InventorySourceArg>,
+        /// Motif, obligatoire (500 caractères au plus)
+        #[arg(long)]
+        reason: String,
+        /// Échéance AAAA-MM-JJ (00:00 UTC), 90 jours au plus
+        #[arg(long, required_unless_present = "revoke")]
+        until: Option<String>,
+        /// Retire la dérogation n° <id> au lieu d'en saisir une
+        #[arg(long, conflicts_with_all = ["purl", "advisory", "until", "sources"])]
+        revoke: Option<i64>,
+        /// Écrit la dérogation (ou le retrait)
+        #[arg(long)]
+        apply: bool,
+    },
     /// Retire les clés du site (agent et inventaire), l'état de ses rapports
     /// et tout ce qu'il a envoyé
     Remove {
@@ -292,6 +342,22 @@ enum SiteAction {
         #[arg(long)]
         yes: bool,
     },
+}
+
+/// Source d'inventaire d'une dérogation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+enum InventorySourceArg {
+    Agent,
+    Ci,
+}
+
+impl From<InventorySourceArg> for vigie::inventory::Source {
+    fn from(arg: InventorySourceArg) -> Self {
+        match arg {
+            InventorySourceArg::Agent => Self::Agent,
+            InventorySourceArg::Ci => Self::Ci,
+        }
+    }
 }
 
 #[derive(Debug, Subcommand)]
@@ -597,6 +663,31 @@ fn site(config: &config::Config, action: SiteAction, now: i64) -> anyhow::Result
         }
         SiteAction::Audit { id, verify, head } => audit(config, &id, verify, head.as_deref())?,
         SiteAction::InventoryKey { id, action } => inventory_key(config, &id, action, now)?,
+        SiteAction::Components { id } => site_components(config, &id)?,
+        SiteAction::Vulns { id, all } => site_vulns(config, &id, all, now)?,
+        SiteAction::VulnsAck {
+            id,
+            purl,
+            advisory,
+            sources,
+            reason,
+            until,
+            revoke,
+            apply,
+        } => vulns_ack(
+            config,
+            &id,
+            AckArgs {
+                purl,
+                advisory,
+                sources: sources.into_iter().map(Into::into).collect(),
+                reason,
+                until,
+                revoke,
+                apply,
+            },
+            now,
+        )?,
         SiteAction::Remove { id, yes } => {
             if !config.database.is_file() {
                 bail!("{id} n'a pas de clé (base absente)");
@@ -618,6 +709,246 @@ fn site(config: &config::Config, action: SiteAction, now: i64) -> anyhow::Result
                 "clés et inventaires de {id} retirés : ses incidents seront clos au prochain tick"
             );
         }
+    }
+    Ok(())
+}
+
+/// Site surveillé par le contrôle `vulns`, sinon refus (code 2).
+fn vulns_site<'a>(config: &'a config::Config, id: &str) -> anyhow::Result<&'a config::Site> {
+    let Some(site) = config.sites.iter().find(|s| s.id == id) else {
+        return Err(vulns::UsageError(format!(
+            "aucun site « {} » dans la configuration",
+            clean(id)
+        ))
+        .into());
+    };
+    if capability::inventory_sources(site).is_empty() {
+        return Err(vulns::UsageError(format!(
+            "{id} n'est pas surveillé par le contrôle vulns : déclarer [sites.inventory]"
+        ))
+        .into());
+    }
+    Ok(site)
+}
+
+/// Base du rapprochement lisible, sinon `None` (« aucune base de failles »).
+fn match_store_read(config: &config::Config) -> anyhow::Result<Option<Store>> {
+    Ok(Store::open_read(&config.database)?
+        .filter(|s| matching_store::available(s).unwrap_or(false)))
+}
+
+fn site_components(config: &config::Config, id: &str) -> anyhow::Result<()> {
+    let site = vulns_site(config, id)?;
+    let Some(store) = match_store_read(config)? else {
+        println!("aucune base de failles");
+        return Ok(());
+    };
+    let results = matching_report::site_results(&store, &site.id)?;
+    if results.is_empty() {
+        println!("{id} : aucun composant rapproché (aucun inventaire, ou pas encore de tick)");
+    }
+    for line in matching_report::components_lines(&results) {
+        println!("{line}");
+    }
+    Ok(())
+}
+
+fn site_vulns(config: &config::Config, id: &str, all: bool, now: i64) -> anyhow::Result<()> {
+    let site = vulns_site(config, id)?;
+    let Some(store) = match_store_read(config)? else {
+        println!("aucune base de failles");
+        return Ok(());
+    };
+    let results = matching_report::site_results(&store, &site.id)?;
+    let rows = vulns::matching::waiver_store::rows(&store, &site.id)?;
+    let attribution = matching_report::attribution_of(&store);
+    let lines = matching_report::vulns_lines(&results, &rows, &attribution, all, now);
+    if lines.is_empty() {
+        println!(
+            "{id} : aucune faille à traiter{}",
+            if all {
+                ""
+            } else {
+                " (--all : information et dérogations)"
+            }
+        );
+    }
+    for line in lines {
+        println!("{line}");
+    }
+    Ok(())
+}
+
+/// Arguments de `site vulns-ack`.
+struct AckArgs {
+    purl: Option<String>,
+    advisory: Option<String>,
+    sources: Vec<vigie::inventory::Source>,
+    reason: String,
+    until: Option<String>,
+    revoke: Option<i64>,
+    apply: bool,
+}
+
+/// Échéance `AAAA-MM-JJ`, à 00:00 UTC.
+fn parse_until(raw: &str) -> Result<i64, vulns::UsageError> {
+    raw.parse::<jiff::civil::Date>()
+        .ok()
+        .and_then(|d| d.to_zoned(jiff::tz::TimeZone::UTC).ok())
+        .map(|z| z.timestamp().as_second())
+        .ok_or_else(|| vulns::UsageError("--until : date AAAA-MM-JJ attendue".into()))
+}
+
+/// `site vulns-ack` : échéance et motif validés avant toute ouverture de
+/// la base ; aperçu, puis `--apply`.
+fn vulns_ack(config: &config::Config, id: &str, args: AckArgs, now: i64) -> anyhow::Result<()> {
+    use vigie::vulns::matching::{waiver, waiver_store};
+    let usage = |text: String| -> anyhow::Error { vulns::UsageError(text).into() };
+    if let Some(revoke) = args.revoke {
+        let n = args.reason.trim().chars().count();
+        if n == 0 || n > waiver::MAX_REASON_CHARS {
+            return Err(usage(format!(
+                "motif obligatoire, {} caractères au plus (reçu : {n})",
+                waiver::MAX_REASON_CHARS
+            )));
+        }
+        let site = vulns_site(config, id)?;
+        if config.commands.is_none() {
+            return Err(usage(
+                "[commands] absent de la configuration : sans clé d'audit, aucune dérogation"
+                    .into(),
+            ));
+        }
+        let Some(store) = match_store_read(config)? else {
+            return Err(usage("aucune base de failles".into()));
+        };
+        let Some(row) = waiver_store::rows(&store, &site.id)?
+            .into_iter()
+            .find(|r| r.id == revoke)
+        else {
+            return Err(usage(format!("aucune dérogation {revoke} pour {id}")));
+        };
+        drop(store);
+        println!(
+            "retrait de la dérogation n° {} : {} {} {} ({}) jusqu'au {}",
+            row.id,
+            row.source.as_str(),
+            clean(&row.base),
+            clean(&row.advisory_ref),
+            clean(&row.version),
+            vulns::matching::finding::day(row.until)
+        );
+        println!("audit : inscrit dans le journal de {id} par l'empreinte du motif");
+        if !args.apply {
+            println!("aperçu seulement : rien n'est écrit ; relancer avec --apply");
+            return Ok(());
+        }
+        let key = audit_key(config)?.context("clé d'audit")?;
+        let mut store = Store::open(&config.database)?;
+        waiver_store::revoke(
+            &mut store,
+            &key,
+            &site.id,
+            revoke,
+            &args.reason,
+            &vulns::corrections::operator(),
+            now,
+        )?;
+        println!("dérogation n° {revoke} retirée : la gravité revient au prochain tick");
+        return Ok(());
+    }
+    // Avant toute lecture : échéance, motif, purl, faille.
+    let until = parse_until(args.until.as_deref().unwrap_or_default())?;
+    waiver::validate(until, &args.reason, now)?;
+    let purl = vulns::Purl::parse(args.purl.as_deref().unwrap_or_default())
+        .map_err(|e| usage(format!("{e}")))?;
+    if purl.version().is_some() {
+        return Err(usage("purl sans version attendu".into()));
+    }
+    let advisory = vulns::advisory::normalize_alias(args.advisory.as_deref().unwrap_or_default())
+        .ok_or_else(|| {
+        usage("identifiant mal formé : [A-Za-z0-9][A-Za-z0-9._:-]{0,63} attendu".into())
+    })?;
+    let site = vulns_site(config, id)?;
+    if config.commands.is_none() {
+        return Err(usage(
+            "[commands] absent de la configuration : sans clé d'audit, aucune dérogation".into(),
+        ));
+    }
+    let declared = vulns::matching::epoch::declared_sources(site);
+    let mut sources = args.sources.clone();
+    sources.sort();
+    sources.dedup();
+    if sources.is_empty() {
+        match declared.as_slice() {
+            [only] => sources.push(*only),
+            _ => {
+                return Err(usage(
+                    "deux sources d'inventaire déclarées : préciser --source agent ou --source ci (répétable)".into(),
+                ));
+            }
+        }
+    }
+    if let Some(missing) = sources.iter().find(|s| !declared.contains(s)) {
+        return Err(usage(format!(
+            "source {} non déclarée dans [sites.inventory] de {id}",
+            missing.as_str()
+        )));
+    }
+    let Some(store) = match_store_read(config)? else {
+        return Err(usage("aucune base de failles".into()));
+    };
+    let request = waiver_store::Request {
+        site: site.id.clone(),
+        sources,
+        base: vulns::matching::key(&purl),
+        advisory,
+        reason: args.reason.clone(),
+        until,
+    };
+    let previews = {
+        let tables = enrich_store::StoreTables::open(&store)?;
+        waiver_store::preview(&store, &tables, &request)?
+    };
+    drop(store);
+    println!("site : {id} ({})", site.url);
+    for p in &previews {
+        println!(
+            "dérogation : source {}  {}  version {}  groupe {}",
+            p.source.as_str(),
+            clean(&request.base),
+            clean(&p.version),
+            clean(&p.group.key)
+        );
+        let covered: Vec<String> = p.group.ids.iter().map(|i| clean(i)).collect();
+        println!("  identifiants couverts : {}", covered.join(", "));
+        println!(
+            "  gravité hors dérogation : {} ({})",
+            p.group.severity.label(),
+            vulns::matching::finding::rule_label(&p.group.rule)
+        );
+    }
+    println!(
+        "échéance : {} (00:00 UTC)",
+        vulns::matching::finding::day(until)
+    );
+    println!("audit : inscrit dans le journal de {id} par l'empreinte du motif");
+    if !args.apply {
+        println!("aperçu seulement : rien n'est écrit ; relancer avec --apply");
+        return Ok(());
+    }
+    let key = audit_key(config)?.context("clé d'audit")?;
+    let mut store = Store::open(&config.database)?;
+    let ids = waiver_store::add(
+        &mut store,
+        &key,
+        &request,
+        &previews,
+        &vulns::corrections::operator(),
+        now,
+    )?;
+    for id in ids {
+        println!("dérogation n° {id} enregistrée : prise en compte au prochain tick");
     }
     Ok(())
 }
@@ -982,7 +1313,8 @@ fn status(config: &config::Config, now: i64) -> anyhow::Result<()> {
 }
 
 /// Ligne « failles » d'un site surveillé par le contrôle `vulns` (#21) :
-/// rapprochement en échec, s'il l'est.
+/// constats ouverts par gravité, date du dernier inventaire de chaque
+/// source, « inventaire périmé », rapprochement en échec.
 fn print_site_vulns(store: Option<&Store>, site: &config::Site) -> anyhow::Result<()> {
     if capability::inventory_sources(site).is_empty() {
         return Ok(());
@@ -990,6 +1322,40 @@ fn print_site_vulns(store: Option<&Store>, site: &config::Site) -> anyhow::Resul
     let Some(store) = store.filter(|s| matching_store::available(s).unwrap_or(false)) else {
         return Ok(());
     };
+    let open: Vec<_> = store
+        .open_incidents()?
+        .into_iter()
+        .filter(|i| i.site == site.id && i.check_name == vulns::matching::finding::CHECK)
+        .collect();
+    let stale_keys = [
+        vulns::matching::finding::KEY_STALE_AGENT,
+        vulns::matching::finding::KEY_STALE_CI,
+    ];
+    let components: Vec<_> = open
+        .iter()
+        .filter(|i| i.finding_key().is_none_or(|k| !stale_keys.contains(&k)))
+        .collect();
+    let count = |s: Severity| components.iter().filter(|i| i.severity == s).count();
+    let mut parts = vec![format!(
+        "{} critique(s), {} avertissement(s)",
+        count(Severity::Critical),
+        count(Severity::Warning)
+    )];
+    for source in vulns::matching::epoch::declared_sources(site) {
+        match store.last_inventory(&site.id, source)? {
+            Some(head) => parts.push(format!(
+                "inventaire {} du {}",
+                source.as_str(),
+                vulns::matching::finding::day(head.seen_at)
+            )),
+            None => parts.push(format!("aucun inventaire {}", source.as_str())),
+        }
+        let stale = vulns::matching::finding::stale_key(source);
+        if open.iter().any(|i| i.finding_key() == Some(stale)) {
+            parts.push(format!("inventaire {} périmé", source.as_str()));
+        }
+    }
+    println!("    failles : {}", parts.join(" ; "));
     let errors = matching_store::site_errors(store, &site.id)?;
     if errors > 0 {
         println!("    failles : avertissement, rapprochement en échec depuis {errors} passage(s)");
@@ -1517,6 +1883,7 @@ fn vulns_cli(config: &config::Config, action: VulnsAction, now: i64) -> anyhow::
             }
             Ok(())
         }
+        VulnsAction::Report => vulns_report(config, now),
         VulnsAction::Show { id } => {
             if vulns::advisory::normalize_alias(&id).is_none() {
                 return Err(vulns::UsageError(
@@ -1741,6 +2108,87 @@ fn vulns_cli(config: &config::Config, action: VulnsAction, now: i64) -> anyhow::
             Ok(())
         }
     }
+}
+
+/// `vulns report` : document interne, sites critiques d'abord, puis âge
+/// de chaque source et constats `vulns-sync` ouverts.
+fn vulns_report(config: &config::Config, now: i64) -> anyhow::Result<()> {
+    let Some(store) = match_store_read(config)? else {
+        println!("aucune base de failles");
+        return Ok(());
+    };
+    println!(
+        "document interne : failles des composants des sites, relevé du {} ; à ne pas transmettre tel quel à un client",
+        iso_utc(now)
+    );
+    let mut sites = Vec::new();
+    let mut restricted = false;
+    for site in config
+        .sites
+        .iter()
+        .filter(|s| !capability::inventory_sources(s).is_empty())
+    {
+        let results = matching_report::site_results(&store, &site.id)?;
+        let rows = vulns::matching::waiver_store::rows(&store, &site.id)?;
+        let (critical, warning, info, other) = matching_report::counts(&results, &rows, now);
+        restricted |= other;
+        let errors = matching_store::site_errors(&store, &site.id)?;
+        sites.push((critical, warning, info, site, results, rows, errors));
+    }
+    if restricted {
+        println!(
+            "contient des failles de sources non redistribuables (usage interne, faits seulement)"
+        );
+    }
+    if sites.is_empty() {
+        println!("aucun site surveillé par le contrôle vulns ([sites.inventory])");
+    }
+    sites.sort_by(|a, b| {
+        (b.0, b.1, b.2)
+            .cmp(&(a.0, a.1, a.2))
+            .then(a.3.id.cmp(&b.3.id))
+    });
+    let attribution = matching_report::attribution_of(&store);
+    for (critical, warning, info, site, results, rows, errors) in &sites {
+        println!();
+        let mut line = format!(
+            "{}  {critical} critique(s), {warning} avertissement(s), {info} information(s)",
+            site.id
+        );
+        if *errors > 0 {
+            line.push_str(&format!(
+                " ; rapprochement en échec depuis {errors} passage(s)"
+            ));
+        }
+        println!("{line}");
+        for text in matching_report::vulns_lines(results, rows, &attribution, false, now) {
+            println!("  {text}");
+        }
+    }
+    println!();
+    println!("sources :");
+    let states = if vulns_store::sync_available(&store)? {
+        vulns_store::sync_states(&store)?
+    } else {
+        Vec::new()
+    };
+    for id in vulns::sync::registry::declared(config) {
+        let state = states.iter().find(|(s, _)| s == id).map(|(_, st)| st);
+        match state.and_then(|s| s.last_success_at) {
+            Some(t) => println!("  {id} : synchronisée il y a {}", human_age(now - t)),
+            None => println!("  {id} : jamais synchronisée"),
+        }
+    }
+    let open: Vec<_> = store
+        .open_incidents()?
+        .into_iter()
+        .filter(|i| i.site == capability::WATCHER_SITE && i.check_name == capability::VULNS_SYNC)
+        .collect();
+    println!("constats vulns-sync ouverts : {}", open.len());
+    for i in open {
+        println!("  #{} {} : {}", i.id, i.severity, clean(&i.detail));
+    }
+    Ok(())
 }
 
 /// Niveau de redistribution d'une source ; inconnu du binaire : interne.
