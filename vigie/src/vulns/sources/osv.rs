@@ -59,6 +59,7 @@ impl VulnSource for OsvSource {
             min_interval: Duration::ZERO,
             loader_version: LOADER_VERSION,
             redistribution: Redistribution::Free,
+            raw_content_encodings: &[],
         }
     }
 
@@ -69,17 +70,21 @@ impl VulnSource for OsvSource {
         tally: &mut Tally,
     ) -> Result<FetchOutcome, SyncError> {
         let url = dl.url().cloned().ok_or(SyncError::OriginRefused)?;
-        let dump = match dl.get_to_file(&Request::get(url))? {
+        let dump = match dl.get_to_file(&Request::get(url.clone()))? {
             Fetched::NotModified => {
                 return Ok(FetchOutcome::Unchanged {
                     not_modified: true,
                     validators: None,
+                    stale: false,
+                    served: Some(url.to_string()),
                 });
             }
             Fetched::SameDigest { validators, .. } => {
                 return Ok(FetchOutcome::Unchanged {
                     not_modified: false,
                     validators: Some(validators),
+                    stale: false,
+                    served: Some(url.to_string()),
                 });
             }
             Fetched::Dump(dump) => dump,
@@ -112,6 +117,7 @@ impl VulnSource for OsvSource {
             unpacked_bytes: zip.declared_unpacked(),
             entries,
             revision: None,
+            served: Some(url.to_string()),
         }))
     }
 }

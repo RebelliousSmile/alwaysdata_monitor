@@ -1,0 +1,115 @@
+{
+  "title": "Catalogue fictif des tests de Vigie",
+  "catalogVersion": "2099.01.15",
+  "dateReleased": "2099-01-15T17:15:48Z",
+  "count": 99,
+  "vulnerabilities": [
+    {
+      "cveID": "CVE-2099-10001",
+      "vendorProject": "Exemple",
+      "product": "Produit fictif 10001",
+      "vulnerabilityName": "Exemple Produit fictif 10001 : faille inventée",
+      "dateAdded": "2099-01-02",
+      "shortDescription": "Description inventée pour les tests de Vigie.",
+      "requiredAction": "Action inventée.",
+      "dueDate": "2099-02-01",
+      "knownRansomwareCampaignUse": "Known",
+      "notes": "https://example.org/kev/10001",
+      "cwes": [
+        "CWE-20"
+      ]
+    },
+    {
+      "cveID": "CVE-2099-10002",
+      "vendorProject": "Exemple",
+      "product": "Produit fictif 10002",
+      "vulnerabilityName": "Exemple Produit fictif 10002 : faille inventée",
+      "dateAdded": "2099-01-05",
+      "shortDescription": "Description inventée pour les tests de Vigie.",
+      "requiredAction": "Action inventée.",
+      "dueDate": "2099-02-01",
+      "knownRansomwareCampaignUse": "Peut-être",
+      "notes": "https://example.org/kev/10002",
+      "cwes": [
+        "CWE-20"
+      ]
+    },
+    {
+      "cveID": "CVE-2099-10003",
+      "vendorProject": "Exemple",
+      "product": "Produit fictif 10003",
+      "vulnerabilityName": "Exemple Produit fictif 10003 : faille inventée",
+      "dateAdded": "2099-01-09",
+      "shortDescription": "Description inventée pour les tests de Vigie.",
+      "requiredAction": "Action inventée.",
+      "dueDate": "2099-02-01",
+      "knownRansomwareCampaignUse": "Unknown",
+      "notes": "https://example.org/kev/10003",
+      "cwes": [
+        "CWE-20"
+      ],
+      "champFutur": {
+        "x": 1
+      }
+    },
+    {
+      "cveID": "CVE-99-1",
+      "vendorProject": "Exemple",
+      "product": "Produit fictif 1",
+      "vulnerabilityName": "Exemple Produit fictif 1 : faille inventée",
+      "dateAdded": "2099-01-09",
+      "shortDescription": "Description inventée pour les tests de Vigie.",
+      "requiredAction": "Action inventée.",
+      "dueDate": "2099-02-01",
+      "knownRansomwareCampaignUse": "Unknown",
+      "notes": "https://example.org/kev/1",
+      "cwes": [
+        "CWE-20"
+      ]
+    },
+    {
+      "cveID": "CVE-2099-10004",
+      "vendorProject": "Exemple",
+      "product": "Produit fictif 10004",
+      "vulnerabilityName": "Exemple Produit fictif 10004 : faille inventée",
+      "dateAdded": "09/01/2099",
+      "shortDescription": "Description inventée pour les tests de Vigie.",
+      "requiredAction": "Action inventée.",
+      "dueDate": "2099-02-01",
+      "knownRansomwareCampaignUse": "Unknown",
+      "notes": "https://example.org/kev/10004",
+      "cwes": [
+        "CWE-20"
+      ]
+    },
+    {
+      "cveID": "CVE-2099-10005",
+      "vendorProject": "Exemple",
+      "product": "Produit fictif 10005",
+      "vulnerabilityName": "Exemple Produit fictif 10005 : faille inventée",
+      "dateAdded": "2099-01-09",
+      "shortDescription": "Description inventée pour les tests de Vigie.",
+      "dueDate": "2099-02-01",
+      "knownRansomwareCampaignUse": "Unknown",
+      "notes": "https://example.org/kev/10005",
+      "cwes": [
+        "CWE-20"
+      ]
+    },
+    {
+      "cveID": "CVE-2099-10001",
+      "vendorProject": "Exemple",
+      "product": "Produit fictif 10001",
+      "vulnerabilityName": "Exemple Produit fictif 10001 : faille inventée",
+      "dateAdded": "2099-01-03",
+      "shortDescription": "Description inventée pour les tests de Vigie.",
+      "requiredAction": "Action inventée.",
+      "dueDate": "2099-02-01",
+      "knownRansomwareCampaignUse": "Unknown",
+      "notes": "https://example.org/kev/10001",
+      "cwes": [
+        "CWE-20"
+      ]
+    }
+  ]
+}

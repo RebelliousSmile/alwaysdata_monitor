@@ -1,13 +1,16 @@
 //! Sources de failles branchées sur le cadre de synchronisation
 //! (`vulns/sync`) : chacune lit son format et pousse des failles validées
 //! par `Advisory::build`. F2 : exports OSV ; F3 : Wordfence,
-//! Friends-Of-Presta.
+//! Friends-Of-Presta. Tables d'enrichissement de F4, poussées en lignes
+//! typées : CISA KEV, FIRST EPSS.
 //!
 //! Les convertisseurs de F3 sont purs : octets de la source → failles du
 //! modèle de F1, chaque écart compté par raison. Ni réseau ni base : le
 //! cadre de F2 télécharge, les convertisseurs lisent.
 
+pub mod epss;
 pub mod friends_of_presta;
+pub mod kev;
 pub mod osv;
 pub mod release;
 pub mod tar;

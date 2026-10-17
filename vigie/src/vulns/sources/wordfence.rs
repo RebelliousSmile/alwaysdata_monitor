@@ -739,6 +739,7 @@ impl VulnSource for Wordfence {
             min_interval: MIN_INTERVAL,
             loader_version: LOADER_VERSION,
             redistribution: REDISTRIBUTION,
+            raw_content_encodings: &[],
         }
     }
 
@@ -758,6 +759,9 @@ impl VulnSource for Wordfence {
             .ready_with(self.reviewed)
             .map_err(|e| SyncError::NotReady(e.0))?;
         let url = dl.url().cloned().ok_or(SyncError::OriginRefused)?;
+        // URL qui sert les validateurs (F4 : requête conditionnelle vers elle
+        // seule).
+        let served = Some(url.to_string());
         let request = Request {
             url,
             sensitive_headers: vec![("Authorization".to_owned(), token.header())],
@@ -768,12 +772,16 @@ impl VulnSource for Wordfence {
                 return Ok(FetchOutcome::Unchanged {
                     not_modified: true,
                     validators: None,
+                    stale: false,
+                    served: served.clone(),
                 });
             }
             Fetched::SameDigest { validators, .. } => {
                 return Ok(FetchOutcome::Unchanged {
                     not_modified: false,
                     validators: Some(validators),
+                    stale: false,
+                    served: served.clone(),
                 });
             }
             Fetched::Dump(dump) => dump,
@@ -792,6 +800,7 @@ impl VulnSource for Wordfence {
             unpacked_bytes: dump.bytes,
             entries,
             revision: None,
+            served,
         }))
     }
 }

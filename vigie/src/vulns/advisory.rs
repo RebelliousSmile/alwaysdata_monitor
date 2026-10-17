@@ -111,6 +111,20 @@ pub enum Reason {
     UnknownCategory,
     /// Friends-Of-Presta : membre de l'archive ignoré.
     BadArchiveMember,
+    /// Tables KEV et EPSS (F4) : identifiant hors de la grammaire CVE du
+    /// schéma KEV.
+    BadCve,
+    /// Tables KEV et EPSS : nombre illisible ou hors de `[0, 1]`.
+    BadValue,
+    /// Tables KEV et EPSS : champ requis absent.
+    MissingField,
+    /// Tables KEV et EPSS : CVE déjà vu dans le même chargement.
+    Duplicate,
+    /// KEV : `knownRansomwareCampaignUse` ni `Known` ni `Unknown`, lu
+    /// « non ».
+    UnknownRansomware,
+    /// KEV : `count` différent du nombre d'entrées.
+    CountMismatch,
 }
 
 impl Reason {
@@ -144,6 +158,12 @@ impl Reason {
             Self::BadFrontMatter => "bad_front_matter",
             Self::UnknownCategory => "unknown_category",
             Self::BadArchiveMember => "bad_archive_member",
+            Self::BadCve => "bad_cve",
+            Self::BadValue => "bad_value",
+            Self::MissingField => "missing_field",
+            Self::Duplicate => "duplicate",
+            Self::UnknownRansomware => "unknown_ransomware",
+            Self::CountMismatch => "count_mismatch",
         }
     }
 
@@ -151,7 +171,10 @@ impl Reason {
     /// d'écart de F2 est la somme de ces raisons. Sinon, simple note : ligne
     /// ou entrée écartée seule, ou exclusion normale (`withdrawn`, faille
     /// d'un autre écosystème `no_affected_out_of_scope`). Sans joker : une
-    /// raison ajoutée (F3) ne compile pas sans son classement.
+    /// raison ajoutée (F3) ne compile pas sans son classement. Pour KEV et
+    /// EPSS (F4), une ligne perdue est un écart (`bad_cve`, `bad_date`,
+    /// `bad_value`, `missing_field`, `duplicate`) ; `unknown_ransomware` et
+    /// `count_mismatch` ne sont que des notes.
     pub fn is_drop(self) -> bool {
         match self {
             Self::TooLarge
@@ -163,7 +186,11 @@ impl Reason {
             | Self::BadEntryName
             | Self::BadRecord
             | Self::BadFrontMatter
-            | Self::UnknownCategory => true,
+            | Self::UnknownCategory
+            | Self::BadCve
+            | Self::BadValue
+            | Self::MissingField
+            | Self::Duplicate => true,
             Self::Withdrawn
             | Self::NoAffectedOutOfScope
             | Self::BadPurl
@@ -181,12 +208,14 @@ impl Reason {
             | Self::EmptyCopyrights
             | Self::NoCopyrights
             | Self::AttributionOverflow
-            | Self::BadArchiveMember => false,
+            | Self::BadArchiveMember
+            | Self::UnknownRansomware
+            | Self::CountMismatch => false,
         }
     }
 
     /// Toutes les raisons, dans l'ordre d'affichage.
-    pub const ALL: [Reason; 28] = [
+    pub const ALL: [Reason; 34] = [
         Self::TooLarge,
         Self::BadJson,
         Self::BadId,
@@ -215,6 +244,12 @@ impl Reason {
         Self::BadFrontMatter,
         Self::UnknownCategory,
         Self::BadArchiveMember,
+        Self::BadCve,
+        Self::BadValue,
+        Self::MissingField,
+        Self::Duplicate,
+        Self::UnknownRansomware,
+        Self::CountMismatch,
     ];
 }
 
@@ -1184,7 +1219,11 @@ mod tests {
                 "bad_entry_name",
                 "bad_record",
                 "bad_front_matter",
-                "unknown_category"
+                "unknown_category",
+                "bad_cve",
+                "bad_value",
+                "missing_field",
+                "duplicate"
             ]
         );
         for r in Reason::ALL {
