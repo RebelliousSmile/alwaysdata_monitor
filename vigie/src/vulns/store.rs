@@ -27,7 +27,10 @@
 //!    orpheline.
 //!
 //! La purge ([`purge`]) retire par lots tout sauf la génération active et
-//! celle sous bail en cours, enfants d'abord. Les lecteurs ne lisent que la
+//! celle sous bail en cours, enfants d'abord. Les tables KEV et EPSS de F4
+//! (`vulns/enrich_store.rs`) reprennent ces primitives : [`reserve`],
+//! [`switch`], [`check_lease`], [`finish_unchanged`] et [`purge_batches`]
+//! selon la forme de leur clé ([`KeyShape`]). Les lecteurs ne lisent que la
 //! génération active, dans une transaction de lecture : ils voient l'ancien
 //! jeu complet ou le nouveau, jamais un mélange.
 
@@ -37,7 +40,7 @@ use anyhow::Context;
 use rusqlite::{OptionalExtension, TransactionBehavior, params};
 
 use crate::clock::Clock;
-use crate::store::{SCHEMA_VULNS, SCHEMA_VULNS_SYNC, Store};
+use crate::store::{SCHEMA_ENRICHMENT, SCHEMA_VULNS, SCHEMA_VULNS_SYNC, Store};
 use crate::vulns::advisory::{
     Advisory, Affected, LastKnown, Range, Reason, Reference, Score, ScoreOrigin, Seen, Severity,
     Tally, normalize_alias,
@@ -180,13 +183,16 @@ impl Outcome {
 }
 
 /// Validateurs HTTP écrits par [`finish_unchanged`] : gardés tels quels
-/// (304) ou remplacés par ceux de la réponse (même empreinte).
+/// (304, jeu périmé) ou remplacés par ceux de la réponse (même empreinte),
+/// avec l'URL demandée qui les a servis (`validator_url`, F4).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Validators {
     Keep,
     Set {
         etag: Option<String>,
         last_modified: Option<String>,
+        /// URL demandée ; `None` efface `validator_url`.
+        url: Option<String>,
     },
 }
 
@@ -206,15 +212,20 @@ pub struct SyncMeta {
     /// `--accept-shrink` : la référence de la garde repart de ce chargement
     /// (`recent_entries` = `[retenues]`).
     pub accept_shrink: bool,
+    /// URL demandée qui a servi `etag` et `http_last_modified` (F4).
+    pub validator_url: Option<String>,
 }
 
 /// Rend le bail d'un dump inchangé et date le succès, en **une seule
 /// instruction** compare-and-swap : bail détenu par `generation` et
 /// génération active toujours `expected_active`, sinon rien n'est écrit et
-/// la fonction rend `false`. Validateurs écrits seulement avec
-/// [`Validators::Set`]. Primitive générique de bail : [`Load`] (F1, F2, F3)
-/// et l'enrichissement de F4 s'en servent ; `outcome` vaut
-/// [`Outcome::NotModified`] ou [`Outcome::Unchanged`].
+/// la fonction rend `false`. Validateurs et `validator_url` écrits
+/// seulement avec [`Validators::Set`] ; `stale` (jeu reçu plus ancien que
+/// l'actif, KEV) ajoute 1 à `stale_count` dans la même instruction.
+/// Primitive générique de bail : [`Load`] (F1, F2, F3) et l'enrichissement
+/// de F4 s'en servent ; `outcome` vaut [`Outcome::NotModified`] ou
+/// [`Outcome::Unchanged`].
+#[allow(clippy::too_many_arguments)]
 pub fn finish_unchanged(
     conn: &rusqlite::Connection,
     source: &str,
@@ -222,6 +233,7 @@ pub fn finish_unchanged(
     expected_active: i64,
     validators: &Validators,
     outcome: Outcome,
+    stale: bool,
     now: i64,
 ) -> anyhow::Result<bool> {
     anyhow::ensure!(
@@ -233,19 +245,24 @@ pub fn finish_unchanged(
         "UPDATE vuln_sources SET loading_generation = NULL, loading_since = NULL,
              last_success_at = ?4, last_attempt_at = ?4, last_outcome = ?5, last_error = NULL",
     );
-    let (etag, last_modified) = match validators {
-        Validators::Keep => (None, None),
+    let (etag, last_modified, url) = match validators {
+        Validators::Keep => (None, None, None),
         Validators::Set {
             etag,
             last_modified,
+            url,
         } => {
-            sql.push_str(", etag = ?6, http_last_modified = ?7");
+            sql.push_str(", etag = ?6, http_last_modified = ?7, validator_url = ?8");
             (
                 clean_etag(etag.as_deref()),
                 clean_date(last_modified.as_deref()),
+                clean_url(url.as_deref()),
             )
         }
     };
+    if stale {
+        sql.push_str(", stale_count = stale_count + 1");
+    }
     sql.push_str(" WHERE id = ?1 AND loading_generation = ?2 AND active_generation = ?3");
     let mut stmt = conn.prepare(&sql)?;
     let name = outcome.as_str();
@@ -254,6 +271,7 @@ pub fn finish_unchanged(
     if matches!(validators, Validators::Set { .. }) {
         values.push(&etag);
         values.push(&last_modified);
+        values.push(&url);
     }
     Ok(stmt.execute(values.as_slice())? == 1)
 }
@@ -267,6 +285,13 @@ fn clean_etag(etag: Option<&str>) -> Option<String> {
 /// Date HTTP gardée en base : ASCII imprimable, 64 caractères au plus.
 fn clean_date(date: Option<&str>) -> Option<String> {
     date.filter(|d| (1..=64).contains(&d.len()) && d.bytes().all(|b| (0x20..0x7f).contains(&b)))
+        .map(str::to_owned)
+}
+
+/// URL d'un validateur gardée en base : ASCII imprimable sans espace,
+/// 2 048 caractères au plus.
+fn clean_url(url: Option<&str>) -> Option<String> {
+    url.filter(|u| (1..=2048).contains(&u.len()) && u.bytes().all(|b| (0x21..0x7f).contains(&b)))
         .map(str::to_owned)
 }
 
@@ -345,12 +370,28 @@ pub struct SyncState {
     pub dump_bytes: Option<i64>,
     pub unpacked_bytes: Option<i64>,
     pub last_duration_ms: Option<i64>,
+    /// URL demandée qui a servi `etag` et `http_last_modified` (F4) : une
+    /// requête n'est conditionnelle que vers cette URL.
+    pub validator_url: Option<String>,
+    /// Synchronisations réussies sur un jeu reçu plus ancien que l'actif.
+    pub stale_count: i64,
 }
 
-const STATE_COLUMNS: &str = "active_generation, dump_sha256, entries, etag, http_last_modified,
-    loader_version, recent_entries, last_success_at, last_attempt_at, last_request_at,
-    retry_after_until, loading_since, last_outcome, last_error, dump_bytes, unpacked_bytes,
-    last_duration_ms";
+/// Colonnes de [`SyncState`] ; celles de F4 valent `NULL` et 0 sur une
+/// base pas encore migrée (lecteur de la CLI).
+fn state_columns(store: &Store) -> anyhow::Result<&'static str> {
+    Ok(if store.schema_version()? >= SCHEMA_ENRICHMENT {
+        "active_generation, dump_sha256, entries, etag, http_last_modified,
+         loader_version, recent_entries, last_success_at, last_attempt_at, last_request_at,
+         retry_after_until, loading_since, last_outcome, last_error, dump_bytes, unpacked_bytes,
+         last_duration_ms, validator_url, stale_count"
+    } else {
+        "active_generation, dump_sha256, entries, etag, http_last_modified,
+         loader_version, recent_entries, last_success_at, last_attempt_at, last_request_at,
+         retry_after_until, loading_since, last_outcome, last_error, dump_bytes, unpacked_bytes,
+         last_duration_ms, NULL, 0"
+    })
+}
 
 fn state_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<SyncState> {
     let recent: String = r.get(6)?;
@@ -374,6 +415,8 @@ fn state_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<SyncState> {
         dump_bytes: r.get(14)?,
         unpacked_bytes: r.get(15)?,
         last_duration_ms: r.get(16)?,
+        validator_url: r.get(17)?,
+        stale_count: r.get(18)?,
     })
 }
 
@@ -382,7 +425,10 @@ pub fn sync_state(store: &Store, source: &str) -> anyhow::Result<Option<SyncStat
     Ok(store
         .conn
         .query_row(
-            &format!("SELECT {STATE_COLUMNS} FROM vuln_sources WHERE id = ?1"),
+            &format!(
+                "SELECT {} FROM vuln_sources WHERE id = ?1",
+                state_columns(store)?
+            ),
             [source],
             state_row,
         )
@@ -392,10 +438,11 @@ pub fn sync_state(store: &Store, source: &str) -> anyhow::Result<Option<SyncStat
 /// État de chaque source, par identifiant.
 pub fn sync_states(store: &Store) -> anyhow::Result<Vec<(String, SyncState)>> {
     let mut stmt = store.conn.prepare(&format!(
-        "SELECT {STATE_COLUMNS}, id FROM vuln_sources ORDER BY id"
+        "SELECT {}, id FROM vuln_sources ORDER BY id",
+        state_columns(store)?
     ))?;
     Ok(stmt
-        .query_map([], |r| Ok((r.get(17)?, state_row(r)?)))?
+        .query_map([], |r| Ok((r.get(19)?, state_row(r)?)))?
         .collect::<rusqlite::Result<_>>()?)
 }
 
@@ -438,39 +485,14 @@ impl<'a> Load<'a> {
     ) -> Result<Load<'a>, LoadError> {
         let lease = lease.clamp(1, LEASE);
         let now = clock.unix();
-        let tx = store
-            .conn
-            .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let row: Option<(i64, i64, Option<i64>, Option<i64>)> = tx
-            .query_row(
-                "SELECT active_generation, next_generation, loading_generation, loading_since
-                 FROM vuln_sources WHERE id = ?1",
-                [source],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
-            )
-            .optional()?;
-        let Some((active, next, loading, since)) = row else {
-            return Err(LoadError::UnknownSource(source.to_owned()));
-        };
-        if let (Some(_), Some(since)) = (loading, since)
-            && now - since < lease
-        {
-            return Err(LoadError::Busy { since });
-        }
-        tx.execute(
-            "UPDATE vuln_sources SET next_generation = ?2, loading_generation = ?3,
-                 loading_since = ?4, last_attempt_at = ?4
-             WHERE id = ?1",
-            params![source, next + 1, next, now],
-        )?;
-        tx.commit()?;
+        let (generation, expected_active) = reserve(store, source, now, lease)?;
         purge(store, source, now)?;
         Ok(Load {
             store,
             clock,
             source: source.to_owned(),
-            generation: next,
-            expected_active: active,
+            generation,
+            expected_active,
             since: now,
             lease,
             seen: Seen::default(),
@@ -551,64 +573,20 @@ impl<'a> Load<'a> {
             .store
             .conn
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        check_lease(
+        switch(
             &tx,
-            &self.source,
-            self.generation,
-            self.expected_active,
-            now,
-            self.lease,
-        )?;
-        let recent: String = tx.query_row(
-            "SELECT recent_entries FROM vuln_sources WHERE id = ?1",
-            [&self.source],
-            |r| r.get(0),
-        )?;
-        let mut recent: Vec<u64> = if meta.accept_shrink {
-            Vec::new()
-        } else {
-            serde_json::from_str(&recent).unwrap_or_default()
-        };
-        recent.push(self.entries);
-        let skip = recent.len().saturating_sub(RECENT_LOADS);
-        let recent = json(&recent[skip..].to_vec())?;
-        let detail = serde_json::to_string(&self.tally).context("compteurs")?;
-        let sha256 = meta
-            .sha256
-            .as_deref()
-            .filter(|h| h.len() == 64 && h.bytes().all(|b| b.is_ascii_hexdigit()));
-        let changed = tx.execute(
-            "UPDATE vuln_sources SET active_generation = ?2, loading_generation = NULL,
-                 loading_since = NULL, last_success_at = ?3, dump_sha256 = ?4, entries = ?5,
-                 dropped = ?6, dropped_detail = ?7, out_of_scope = ?8, last_error = NULL,
-                 etag = ?11, http_last_modified = ?12, dump_bytes = ?13, unpacked_bytes = ?14,
-                 last_duration_ms = ?15, loader_version = ?16, recent_entries = ?17,
-                 last_outcome = 'loaded', last_attempt_at = ?3
-             WHERE id = ?1 AND active_generation = ?9 AND loading_generation = ?2
-                 AND loading_since = ?10",
-            params![
-                self.source,
-                self.generation,
+            &Switch {
+                source: &self.source,
+                generation: self.generation,
+                expected_active: self.expected_active,
+                since: self.since,
+                lease: self.lease,
                 now,
-                sha256,
-                self.entries as i64,
-                self.tally.dropped() as i64,
-                detail,
-                self.tally.get(Reason::OutOfScope) as i64,
-                self.expected_active,
-                self.since,
-                clean_etag(meta.etag.as_deref()),
-                clean_date(meta.http_last_modified.as_deref()),
-                i64::try_from(meta.dump_bytes).unwrap_or(i64::MAX),
-                i64::try_from(meta.unpacked_bytes).unwrap_or(i64::MAX),
-                i64::try_from(meta.duration_ms).unwrap_or(i64::MAX),
-                meta.loader_version,
-                recent,
-            ],
+                entries: self.entries,
+                tally: &self.tally,
+            },
+            meta,
         )?;
-        if changed != 1 {
-            return Err(LoadError::Supplanted);
-        }
         tx.commit()?;
         purge(self.store, &self.source, now)?;
         // PASSIVE : n'attend aucun lecteur ; le WAL est réutilisé ensuite.
@@ -629,6 +607,16 @@ impl<'a> Load<'a> {
         validators: &Validators,
         outcome: Outcome,
     ) -> Result<bool, LoadError> {
+        self.finish(validators, outcome, false)
+    }
+
+    /// [`Load::finish_unchanged`], jeu reçu périmé compris (`stale`).
+    pub fn finish(
+        self,
+        validators: &Validators,
+        outcome: Outcome,
+        stale: bool,
+    ) -> Result<bool, LoadError> {
         Ok(finish_unchanged(
             &self.store.conn,
             &self.source,
@@ -636,6 +624,7 @@ impl<'a> Load<'a> {
             self.expected_active,
             validators,
             outcome,
+            stale,
             self.clock.unix(),
         )?)
     }
@@ -678,7 +667,129 @@ impl<'a> Load<'a> {
     }
 }
 
-fn check_lease(
+/// Réserve `g = next_generation`, jamais réutilisée, et prend le bail
+/// (IMMEDIATE) ; rend `g` et la génération active attendue à la bascule.
+/// Primitive partagée par [`Load`] et l'enrichissement de F4.
+pub(crate) fn reserve(
+    store: &mut Store,
+    source: &str,
+    now: i64,
+    lease: i64,
+) -> Result<(i64, i64), LoadError> {
+    let tx = store
+        .conn
+        .transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let row: Option<(i64, i64, Option<i64>, Option<i64>)> = tx
+        .query_row(
+            "SELECT active_generation, next_generation, loading_generation, loading_since
+             FROM vuln_sources WHERE id = ?1",
+            [source],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+        )
+        .optional()?;
+    let Some((active, next, loading, since)) = row else {
+        return Err(LoadError::UnknownSource(source.to_owned()));
+    };
+    if let (Some(_), Some(since)) = (loading, since)
+        && now - since < lease
+    {
+        return Err(LoadError::Busy { since });
+    }
+    tx.execute(
+        "UPDATE vuln_sources SET next_generation = ?2, loading_generation = ?3,
+             loading_since = ?4, last_attempt_at = ?4
+         WHERE id = ?1",
+        params![source, next + 1, next, now],
+    )?;
+    tx.commit()?;
+    Ok((next, active))
+}
+
+/// Chargement à basculer ([`switch`]).
+pub(crate) struct Switch<'s> {
+    pub source: &'s str,
+    pub generation: i64,
+    pub expected_active: i64,
+    pub since: i64,
+    pub lease: i64,
+    pub now: i64,
+    /// Lignes retenues.
+    pub entries: u64,
+    pub tally: &'s Tally,
+}
+
+/// Bascule en compare-and-swap dans `tx`, bail revérifié, avec dans la même
+/// instruction les compteurs, les validateurs, leur URL et l'état de
+/// synchronisation ; zéro ligne touchée : [`LoadError::Supplanted`].
+/// Primitive partagée par [`Load::commit`] et l'enrichissement de F4.
+pub(crate) fn switch(
+    tx: &rusqlite::Transaction<'_>,
+    load: &Switch<'_>,
+    meta: &SyncMeta,
+) -> Result<(), LoadError> {
+    check_lease(
+        tx,
+        load.source,
+        load.generation,
+        load.expected_active,
+        load.now,
+        load.lease,
+    )?;
+    let recent: String = tx.query_row(
+        "SELECT recent_entries FROM vuln_sources WHERE id = ?1",
+        [load.source],
+        |r| r.get(0),
+    )?;
+    let mut recent: Vec<u64> = if meta.accept_shrink {
+        Vec::new()
+    } else {
+        serde_json::from_str(&recent).unwrap_or_default()
+    };
+    recent.push(load.entries);
+    let skip = recent.len().saturating_sub(RECENT_LOADS);
+    let recent = json(&recent[skip..].to_vec())?;
+    let detail = serde_json::to_string(load.tally).context("compteurs")?;
+    let sha256 = meta
+        .sha256
+        .as_deref()
+        .filter(|h| h.len() == 64 && h.bytes().all(|b| b.is_ascii_hexdigit()));
+    let changed = tx.execute(
+        "UPDATE vuln_sources SET active_generation = ?2, loading_generation = NULL,
+             loading_since = NULL, last_success_at = ?3, dump_sha256 = ?4, entries = ?5,
+             dropped = ?6, dropped_detail = ?7, out_of_scope = ?8, last_error = NULL,
+             etag = ?11, http_last_modified = ?12, dump_bytes = ?13, unpacked_bytes = ?14,
+             last_duration_ms = ?15, loader_version = ?16, recent_entries = ?17,
+             validator_url = ?18, last_outcome = 'loaded', last_attempt_at = ?3
+         WHERE id = ?1 AND active_generation = ?9 AND loading_generation = ?2
+             AND loading_since = ?10",
+        params![
+            load.source,
+            load.generation,
+            load.now,
+            sha256,
+            load.entries as i64,
+            load.tally.dropped() as i64,
+            detail,
+            load.tally.get(Reason::OutOfScope) as i64,
+            load.expected_active,
+            load.since,
+            clean_etag(meta.etag.as_deref()),
+            clean_date(meta.http_last_modified.as_deref()),
+            i64::try_from(meta.dump_bytes).unwrap_or(i64::MAX),
+            i64::try_from(meta.unpacked_bytes).unwrap_or(i64::MAX),
+            i64::try_from(meta.duration_ms).unwrap_or(i64::MAX),
+            meta.loader_version,
+            recent,
+            clean_url(meta.validator_url.as_deref()),
+        ],
+    )?;
+    if changed != 1 {
+        return Err(LoadError::Supplanted);
+    }
+    Ok(())
+}
+
+pub(crate) fn check_lease(
     tx: &rusqlite::Transaction<'_>,
     source: &str,
     generation: i64,
@@ -766,41 +877,126 @@ fn insert_advisory(
     Ok(())
 }
 
+/// Forme de la clé d'une table par génération, pour la purge.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KeyShape {
+    /// Tables de F1 (colonne `source`, rowid) : `DELETE … WHERE rowid IN
+    /// (SELECT rowid … LIMIT n)`.
+    RowidBySource,
+    /// Tables `WITHOUT ROWID` de F4, propres à une source, clé
+    /// `(generation, cve)` : génération orpheline par génération orpheline
+    /// (trouvée par la clé, sans parcourir l'active), `DELETE … WHERE
+    /// generation = g AND cve IN (SELECT cve … WHERE generation = g LIMIT
+    /// n)` rejoué jusqu'à zéro ligne.
+    GenerationCve,
+}
+
+/// Générations à épargner : l'active et celle sous bail en cours (l'active
+/// deux fois si aucun bail ne court : jamais `NULL`, qui viderait
+/// `NOT IN`). `None` si la source n'existe pas.
+fn kept(
+    tx: &rusqlite::Transaction<'_>,
+    source: &str,
+    now: i64,
+) -> anyhow::Result<Option<[i64; 2]>> {
+    let keep: Option<(i64, Option<i64>, Option<i64>)> = tx
+        .query_row(
+            "SELECT active_generation, loading_generation, loading_since
+             FROM vuln_sources WHERE id = ?1",
+            [source],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .optional()?;
+    Ok(keep.map(|(active, loading, since)| {
+        // Une génération sous bail expiré n'est plus épargnée.
+        let leased = match (loading, since) {
+            (Some(g), Some(since)) if now - since < LEASE => g,
+            _ => active,
+        };
+        [active, leased]
+    }))
+}
+
+/// Première génération orpheline d'une table `(generation, cve)`, par
+/// recherches successives sur la clé.
+fn first_orphan(
+    tx: &rusqlite::Transaction<'_>,
+    table: &str,
+    keep: [i64; 2],
+) -> anyhow::Result<Option<i64>> {
+    let mut stmt = tx.prepare_cached(&format!(
+        "SELECT generation FROM {table} WHERE generation > ?1 ORDER BY generation LIMIT 1"
+    ))?;
+    let mut after = i64::MIN;
+    loop {
+        let next: Option<i64> = stmt.query_row([after], |r| r.get(0)).optional()?;
+        match next {
+            Some(g) if keep.contains(&g) => after = g,
+            other => return Ok(other),
+        }
+    }
+}
+
 /// Purge par lots tout sauf la génération active et celle sous bail en
 /// cours ; rend le nombre de lignes retirées. Une transaction par lot.
 pub fn purge(store: &mut Store, source: &str, now: i64) -> anyhow::Result<u64> {
+    purge_batches(
+        store,
+        source,
+        now,
+        &[
+            ("vuln_aliases", KeyShape::RowidBySource),
+            ("vuln_affected", KeyShape::RowidBySource),
+            ("vuln_advisories", KeyShape::RowidBySource),
+        ],
+    )
+}
+
+/// Purge de `tables`, dans l'ordre, selon la forme de leur clé : jamais
+/// plus de [`PURGE_BATCH`] lignes par transaction, générations à épargner
+/// relues dans chacune.
+pub fn purge_batches(
+    store: &mut Store,
+    source: &str,
+    now: i64,
+    tables: &[(&str, KeyShape)],
+) -> anyhow::Result<u64> {
     let mut removed = 0;
-    for table in ["vuln_aliases", "vuln_affected", "vuln_advisories"] {
+    for &(table, shape) in tables {
         loop {
             let tx = store
                 .conn
                 .transaction_with_behavior(TransactionBehavior::Immediate)?;
-            let keep: Option<(i64, Option<i64>, Option<i64>)> = tx
-                .query_row(
-                    "SELECT active_generation, loading_generation, loading_since
-                     FROM vuln_sources WHERE id = ?1",
-                    [source],
-                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
-                )
-                .optional()?;
-            let Some((active, loading, since)) = keep else {
+            let Some(keep) = kept(&tx, source, now)? else {
                 return Ok(removed);
             };
-            // Une génération sous bail expiré n'est plus épargnée.
-            let leased = match (loading, since) {
-                (Some(g), Some(since)) if now - since < LEASE => g,
-                _ => active,
+            let n = match shape {
+                KeyShape::RowidBySource => tx.execute(
+                    &format!(
+                        "DELETE FROM {table} WHERE rowid IN (SELECT rowid FROM {table}
+                             WHERE source = ?1 AND generation NOT IN (?2, ?3) LIMIT ?4)"
+                    ),
+                    params![source, keep[0], keep[1], PURGE_BATCH as i64],
+                )?,
+                KeyShape::GenerationCve => match first_orphan(&tx, table, keep)? {
+                    None => 0,
+                    Some(g) => tx.execute(
+                        &format!(
+                            "DELETE FROM {table} WHERE generation = ?1 AND cve IN
+                                 (SELECT cve FROM {table} WHERE generation = ?1 LIMIT ?2)"
+                        ),
+                        params![g, PURGE_BATCH as i64],
+                    )?,
+                },
             };
-            let n = tx.execute(
-                &format!(
-                    "DELETE FROM {table} WHERE rowid IN (SELECT rowid FROM {table}
-                         WHERE source = ?1 AND generation NOT IN (?2, ?3) LIMIT ?4)"
-                ),
-                params![source, active, leased, PURGE_BATCH as i64],
-            )?;
             tx.commit()?;
             removed += n as u64;
-            if n < PURGE_BATCH {
+            let done = match shape {
+                KeyShape::RowidBySource => n < PURGE_BATCH,
+                // Plus aucune génération orpheline.
+                KeyShape::GenerationCve => n == 0,
+            };
+            if done {
                 break;
             }
         }

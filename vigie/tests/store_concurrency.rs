@@ -26,6 +26,11 @@ use vigie::store::{
     AcceptedReport, LogBatch, LogsOutcome, REPORT_MIN_GAP, ReportOutcome, RunRecord, Store,
 };
 
+/// Les chargements de failles et d'EPSS, lourds, ne tournent pas en même
+/// temps : chacun mesure sa propre contention, pas la famine de CPU de
+/// l'autre (sinon un `busy_timeout` de 5 s peut expirer en build debug).
+static HEAVY: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// Durée pendant laquelle chaque thread écrit en boucle.
 const DURATION: Duration = Duration::from_secs(3);
 
@@ -382,6 +387,7 @@ mod vulns_data;
 /// `SQLITE_BUSY`, aucune écriture perdue, aucun jeu partiel vu du lecteur.
 #[test]
 fn a_vulns_load_in_contention_with_serve_tick_and_a_reader() {
+    let _heavy = HEAVY.lock().unwrap_or_else(|e| e.into_inner());
     use std::sync::atomic::{AtomicBool, Ordering};
 
     use vigie::clock::SystemClock;
@@ -496,4 +502,151 @@ fn a_vulns_load_in_contention_with_serve_tick_and_a_reader() {
         active_count(&store, vulns_data::SOURCE).expect("failles"),
         ADVISORIES as i64
     );
+}
+
+#[test]
+fn an_epss_load_in_contention_with_serve_tick_and_a_reader() {
+    let _heavy = HEAVY.lock().unwrap_or_else(|e| e.into_inner());
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    use vigie::clock::SystemClock;
+    use vigie::vulns::advisory::Tally;
+    use vigie::vulns::enrich_store::{
+        DatasetHeader, ENRICH_BATCH, EnrichLoad, EnrichSource, EpssRow, StoreTables,
+    };
+    use vigie::vulns::exploit::{Cve, Exploitation};
+    use vigie::vulns::store::{LEASE, SourceMeta, SyncMeta, upsert_source};
+
+    const ROWS: usize = 400_000;
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("vigie.db");
+    let key = agent().verifying_key().to_bytes();
+    {
+        let mut store = Store::open(&path).expect("open");
+        store.add_key("site-a", &key, 0).expect("add_key");
+        upsert_source(
+            &mut store,
+            &SourceMeta {
+                id: "epss".into(),
+                url: "https://epss.example.org/".into(),
+                license: "fictive".into(),
+                attribution: "fictive".into(),
+            },
+        )
+        .expect("source");
+    }
+    let cve = |n: usize| Cve::parse(&format!("CVE-2099-{n:06}")).expect("cve");
+    // Préparées hors de la fenêtre mesurée.
+    let rows: Vec<(Cve, EpssRow)> = (0..ROWS)
+        .map(|n| {
+            (
+                cve(n),
+                EpssRow {
+                    epss_ppm: 1_000,
+                    percentile_ppm: 500,
+                },
+            )
+        })
+        .collect();
+    let (first, last) = (cve(0), cve(ROWS - 1));
+    let done = Arc::new(AtomicBool::new(false));
+    let start = Arc::new(Barrier::new(4));
+
+    let loader = {
+        let (path, start, done) = (path.clone(), Arc::clone(&start), Arc::clone(&done));
+        std::thread::spawn(move || -> Result<(u64, Duration)> {
+            let mut store = Store::open(&path)?;
+            start.wait();
+            let clock = SystemClock;
+            let mut load = EnrichLoad::begin(&mut store, EnrichSource::Epss, &clock, LEASE)?;
+            let mut slowest = Duration::ZERO;
+            for chunk in rows.chunks(ENRICH_BATCH) {
+                let t = Instant::now();
+                load.push_epss(chunk)?;
+                slowest = slowest.max(t.elapsed());
+            }
+            let header = DatasetHeader {
+                version: "v2099.01.01".into(),
+                released: "2099-01-15T00:00:00Z".parse()?,
+            };
+            let committed = load.commit(&header, &Tally::default(), &SyncMeta::default())?;
+            done.store(true, Ordering::SeqCst);
+            Ok((committed.entries, slowest))
+        })
+    };
+    let ticks = {
+        let (path, start, done) = (path.clone(), Arc::clone(&start), Arc::clone(&done));
+        std::thread::spawn(move || -> Result<i64> {
+            let mut store = Store::open(&path)?;
+            start.wait();
+            let mut round = 0;
+            while !done.load(Ordering::SeqCst) || round == 0 {
+                round += 1;
+                store.record_tick(1_000 + round)?;
+            }
+            Ok(round)
+        })
+    };
+    let batches = {
+        let (path, start, done) = (path.clone(), Arc::clone(&start), Arc::clone(&done));
+        std::thread::spawn(move || -> Result<i64> {
+            let mut store = Store::open(&path)?;
+            start.wait();
+            let mut round = 0;
+            while !done.load(Ordering::SeqCst) || round == 0 {
+                round += 1;
+                let outcome = accept_batch(&mut store, round, round, &key)?;
+                ensure!(
+                    outcome == LogsOutcome::Accepted { gap: 0 },
+                    "lot {outcome:?}"
+                );
+            }
+            Ok(round)
+        })
+    };
+    let reader = {
+        let (path, start, done) = (path.clone(), Arc::clone(&start), Arc::clone(&done));
+        let (first, last) = (first, last.clone());
+        std::thread::spawn(move || -> Result<i64> {
+            let store = Store::open_read(&path)?.expect("base");
+            start.wait();
+            let mut reads = 0;
+            while !done.load(Ordering::SeqCst) || reads == 0 {
+                reads += 1;
+                let tables = StoreTables::open(&store)?;
+                // Le premier CVE lu présent et le dernier absent serait un
+                // jeu partiel.
+                let a = tables.epss_checked(&first)?;
+                let b = tables.epss_checked(&last)?;
+                ensure!(!(a.is_some() && b.is_none()), "jeu partiel vu");
+                if let (Some(a), Some(b)) = (a, b) {
+                    ensure!(a.generation == b.generation, "générations mélangées");
+                }
+            }
+            Ok(reads)
+        })
+    };
+
+    let (entries, slowest) = loader
+        .join()
+        .expect("thread")
+        .unwrap_or_else(|e| panic!("chargement : {e:#}"));
+    assert_eq!(entries, ROWS as u64);
+    eprintln!("lot de {ENRICH_BATCH} lignes EPSS le plus lent : {slowest:?}");
+    // Borne en release seulement : le build debug est trop lent pour elle.
+    #[cfg(not(debug_assertions))]
+    assert!(slowest < Duration::from_millis(100), "{slowest:?}");
+    let ticks = ticks.join().expect("thread").expect("ticks");
+    let batches = batches.join().expect("thread").expect("lots");
+    let reads = reader.join().expect("thread").expect("lecteur");
+    assert!(reads > 0);
+
+    let store = Store::open(&path).expect("open");
+    assert_eq!(store.last_tick().expect("tick"), Some(1_000 + ticks));
+    let logged = store
+        .log_entries_after("site-a", 0, 10_000_000)
+        .expect("entrées");
+    assert_eq!(logged.len() as i64, batches * ENTRIES as i64);
+    let tables = StoreTables::open(&store).expect("tables");
+    assert_eq!(tables.epss(&last).map(|e| e.epss_ppm), Some(1_000));
 }

@@ -85,6 +85,13 @@ const MIGRATIONS: &[&str] = &[
     // Le numéro 16 revient à l'inventaire (#19), fusionné en parallèle : la
     // version réelle est la place dans cette liste ([`SCHEMA_VULNS_SYNC`]).
     include_str!("../migrations/0017.sql"),
+    // 19 : priorisation des failles (`vulns/enrich_store.rs`, issue #18) :
+    // tables CISA KEV et FIRST EPSS par génération (`WITHOUT ROWID`),
+    // métadonnées de chaque jeu, URL des validateurs et synchronisations
+    // inchangées sur un jeu périmé. Le numéro 18 revient aux sources CMS
+    // (#17), fusionnées en parallèle : la version réelle est la place dans
+    // cette liste ([`SCHEMA_ENRICHMENT`]).
+    include_str!("../migrations/0019.sql"),
 ];
 
 /// Version d'une migration : sa place dans [`MIGRATIONS`], plus un.
@@ -148,6 +155,9 @@ pub const SCHEMA_INVENTORY: usize = 16;
 /// Version de schéma à partir de laquelle l'état de synchronisation des
 /// sources de failles existe (issue #16, fichier `0017.sql`).
 pub const SCHEMA_VULNS_SYNC: usize = version_of(include_str!("../migrations/0017.sql"));
+/// Version de schéma à partir de laquelle les tables KEV et EPSS et
+/// `validator_url` existent (issue #18, fichier `0019.sql`).
+pub const SCHEMA_ENRICHMENT: usize = version_of(include_str!("../migrations/0019.sql"));
 /// Une adresse source de retrait est oubliée 30 jours après le dernier.
 pub const AGENT_SOURCE_RETENTION: i64 = 30 * 86_400;
 
@@ -3016,6 +3026,9 @@ mod tests {
             ("table", "vuln_advisories"),
             ("table", "vuln_affected"),
             ("table", "vuln_aliases"),
+            ("table", "vuln_dataset"),
+            ("table", "vuln_epss"),
+            ("table", "vuln_kev"),
             ("table", "vuln_sources"),
             ("trigger", "command_audit_no_delete"),
             ("trigger", "command_audit_no_update"),
@@ -3082,7 +3095,7 @@ mod tests {
         );
         // Migration 0017 : synchronisation des failles.
         assert_eq!(
-            columns("vuln_sources")[16..],
+            columns("vuln_sources")[16..27],
             [
                 "etag",
                 "http_last_modified",
@@ -3097,6 +3110,75 @@ mod tests {
                 "revision"
             ]
         );
+        // Migration 0019 : priorisation KEV et EPSS (colonnes ajoutées en
+        // dernier, après celles des sources CMS de #17).
+        let sources = columns("vuln_sources");
+        assert_eq!(
+            sources[sources.len() - 2..],
+            ["validator_url", "stale_count"]
+        );
+        for table in ["vuln_kev", "vuln_epss"] {
+            let sql: String = store
+                .conn
+                .query_row(
+                    "SELECT sql FROM sqlite_master WHERE name = ?1",
+                    [table],
+                    |row| row.get(0),
+                )
+                .expect("sql");
+            assert!(sql.contains("WITHOUT ROWID"), "{table}");
+        }
+        assert_eq!(
+            columns("vuln_dataset"),
+            ["source", "generation", "version", "released", "rows"]
+        );
+    }
+
+    #[test]
+    fn migrates_a_synced_vulns_database_to_enrichment() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("vigie.db");
+        {
+            let conn = Connection::open(&path).expect("open");
+            for migration in &MIGRATIONS[..SCHEMA_VULNS_SYNC] {
+                conn.execute_batch(migration).expect("migration");
+            }
+            conn.pragma_update(None, "user_version", SCHEMA_VULNS_SYNC as i64)
+                .expect("user_version");
+            conn.execute_batch(
+                "INSERT INTO vuln_sources (id, url, etag) VALUES
+                   ('osv-npm', 'https://dumps.example.org/npm/all.zip', '\"n1\"');
+                 INSERT INTO vuln_sources (id, url) VALUES
+                   ('osv-crates-io', 'https://dumps.example.org/crates.io/all.zip');",
+            )
+            .expect("sources v17");
+        }
+        let store = Store::open(&path).expect("open");
+        assert_eq!(store.schema_version().expect("version"), MIGRATIONS.len());
+        const { assert!(SCHEMA_ENRICHMENT > SCHEMA_VULNS_SYNC) };
+        let rows: Vec<(String, Option<String>, i64)> = store
+            .conn
+            .prepare("SELECT id, validator_url, stale_count FROM vuln_sources ORDER BY id")
+            .expect("prepare")
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+            .expect("query")
+            .collect::<rusqlite::Result<_>>()
+            .expect("rows");
+        assert_eq!(
+            rows,
+            [
+                ("osv-crates-io".to_owned(), None, 0),
+                (
+                    "osv-npm".to_owned(),
+                    Some("https://dumps.example.org/npm/all.zip".to_owned()),
+                    0
+                ),
+            ]
+        );
+        drop(store);
+        // Rejouées sans effet.
+        let store = Store::open(&path).expect("réouverture");
+        assert_eq!(store.schema_version().expect("version"), MIGRATIONS.len());
     }
 
     #[test]
@@ -3216,8 +3298,8 @@ mod tests {
             .expect("source v15");
         }
         let store = Store::open(&path).expect("open");
-        assert_eq!(store.schema_version().expect("version"), SCHEMA_VULNS_SYNC);
-        assert_eq!(SCHEMA_VULNS_SYNC, MIGRATIONS.len());
+        // Migrations suivantes comprises (#17, #18).
+        assert_eq!(store.schema_version().expect("version"), MIGRATIONS.len());
         let row: (i64, i64, String, Option<String>, Option<String>) = store
             .conn
             .query_row(
@@ -3235,7 +3317,7 @@ mod tests {
         assert!(refused.is_err(), "issue hors liste refusée");
         drop(store);
         let store = Store::open(&path).expect("réouverture");
-        assert_eq!(store.schema_version().expect("version"), SCHEMA_VULNS_SYNC);
+        assert_eq!(store.schema_version().expect("version"), MIGRATIONS.len());
     }
 
     #[test]
