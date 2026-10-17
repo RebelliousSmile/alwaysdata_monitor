@@ -2,20 +2,29 @@
 //! contre le routeur de `vigie serve`, servi sur un vrai port de la boucle
 //! locale, sur une base remplie à la main. Un champ consommé par la console
 //! qui change de nom, de type ou disparaît fait échouer la lecture.
+//!
+//! IP des plages de documentation (RFC 5737).
 
+use std::collections::HashSet;
+use std::net::IpAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
 #[path = "../../../tests/support/veilleur.rs"]
 mod veilleur;
 
+use vigie::alert::MemoryNotifier;
 use vigie::checks::CheckKind;
 use vigie::clock::FakeClock;
-use vigie::config::{Api, Config, Site, SiteKind};
+use vigie::config::{Api, Config, LogSourceKind, Site, SiteKind, SiteLogs as LogsConfig};
 use vigie::device::{self, PAIRING_TTL};
 use vigie::finding::{Finding, Severity as VSeverity};
+use vigie::logs::Entry;
+use vigie::logs::source::{LogSource, MemorySource};
 use vigie::serve;
 use vigie::store::{AcceptedReport, ReportOutcome, RunRecord, Store};
+use vigie::tick::{self, Options};
 use vigie_console_lib::Console;
 use vigie_console_lib::client::{Client, ErrorKind, IncidentState, Severity, SiteState};
 use vigie_console_lib::secret::{MemoryStore, TokenStorage};
@@ -26,6 +35,7 @@ const DAY: i64 = 86_400;
 struct Veilleur {
     _dir: tempfile::TempDir,
     config: Config,
+    clock: Arc<FakeClock>,
     base: String,
 }
 
@@ -47,24 +57,32 @@ impl Veilleur {
     /// Site A non conforme avec un agent, site B sans constat ; le routeur
     /// écoute sur 127.0.0.1, horloge fixée à `T0`.
     async fn start() -> Self {
+        Self::start_with(|_| {}).await
+    }
+
+    /// Comme `start`, la configuration retouchée par `configure`.
+    async fn start_with(configure: impl FnOnce(&mut Config)) -> Self {
         let dir = tempfile::tempdir().expect("tempdir");
         let mut config = veilleur::config(dir.path().join("vigie.db"));
         config.api = Some(Api {
             public_url: "https://vigie.example.org".into(),
         });
         config.sites.push(site_b());
+        configure(&mut config);
         Store::open(&config.database).expect("open");
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
             .expect("bind");
         let base = format!("http://{}", listener.local_addr().expect("addr"));
-        let router = serve::router_with_clock(config.clone(), Arc::new(FakeClock::new(T0)));
+        let clock = Arc::new(FakeClock::new(T0));
+        let router = serve::router_with_clock(config.clone(), clock.clone());
         // Comme `vigie serve` : l'adresse du pair sert à la limite de débit.
         let service = router.into_make_service_with_connect_info::<std::net::SocketAddr>();
         tokio::spawn(async move { axum::serve(listener, service).await.expect("serve") });
         let v = Self {
             _dir: dir,
             config,
+            clock,
             base,
         };
         v.fill();
@@ -247,7 +265,7 @@ async fn reads_overview_site_incidents_and_settings() {
     assert!(detail.checks.iter().any(|c| c.name == "heartbeat"));
     assert!(detail.checks.iter().any(|c| c.name.starts_with("agent:")));
 
-    let history = client.incidents("site-a").await.expect("incidents");
+    let history = client.incidents("site-a", None).await.expect("incidents");
     assert_eq!(history.site, "site-a");
     let closed = history
         .incidents
@@ -297,7 +315,7 @@ async fn acknowledges_an_open_incident_only() {
     assert_eq!(acked.acked_at, Some(T0));
     assert_eq!(acked.closed_at, None, "acquitté, toujours ouvert");
 
-    let history = client.incidents("site-a").await.expect("incidents");
+    let history = client.incidents("site-a", None).await.expect("incidents");
     let closed = history
         .incidents
         .iter()
@@ -400,4 +418,266 @@ async fn a_refused_store_revokes_the_new_token() {
             .expect("appareil");
         assert!(device.revoked_at.is_some(), "{name} révoqué");
     }
+}
+
+/// 120 incidents clos sur le site B : trois pages de 50, 50 et 20, sans
+/// doublon ni trou, chacune demandée avec le curseur de la précédente.
+#[tokio::test]
+async fn closed_incidents_come_in_three_pages_without_duplicate() {
+    let v = Veilleur::start().await;
+    let mut store = v.store();
+    // Chaque constat ferme le précédent : 121 ouverts, 120 clos.
+    for i in 0..=120 {
+        let finding = Finding::new(
+            "site-b",
+            "content",
+            VSeverity::Warning,
+            format!("k{i}"),
+            format!("constat {i}"),
+        );
+        store
+            .reconcile("site-b", "content", &[finding], T0 - DAY + i * 60)
+            .expect("reconcile");
+    }
+    let client = v.paired("poste").await;
+    let mut pages = Vec::new();
+    let mut cursor: Option<String> = None;
+    loop {
+        let page = client
+            .incidents("site-b", cursor.as_deref())
+            .await
+            .expect("page");
+        assert_eq!(page.site, "site-b");
+        assert!(
+            page.incidents
+                .iter()
+                .all(|i| i.state == IncidentState::Closed)
+        );
+        pages.push(page.incidents.iter().map(|i| i.id).collect::<Vec<_>>());
+        cursor = page.next_cursor;
+        if cursor.is_none() {
+            break;
+        }
+        assert!(pages.len() < 3, "trop de pages");
+    }
+    let sizes: Vec<usize> = pages.iter().map(Vec::len).collect();
+    assert_eq!(sizes, [50, 50, 20]);
+    let seen: Vec<i64> = pages.concat();
+    let unique: HashSet<i64> = seen.iter().copied().collect();
+    assert_eq!(unique.len(), 120, "doublon");
+
+    // Un curseur illisible : 400, message fixe.
+    let err = client
+        .incidents("site-b", Some("!!!"))
+        .await
+        .expect_err("curseur illisible");
+    assert_eq!(err.kind, ErrorKind::BadRequest);
+    assert!(!err.message.contains("!!!"), "{err:?}");
+}
+
+const CURL: &str = "curl/8.4.0";
+const FIREFOX: &str = "Mozilla/5.0 (X11; Linux x86_64; rv:131.0) Gecko/20100101 Firefox/131.0";
+const GPTBOT: &str = "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; GPTBot/1.2)";
+/// IP aux verdicts élevés et moyens du jeu de logs.
+const HIGH: u8 = 60;
+const MEDIUM: u8 = 15;
+
+fn ip(text: &str) -> IpAddr {
+    text.parse().expect("ip")
+}
+
+fn hit(timestamp_ms: i64, from: IpAddr, path: &str, ua: &str, facet: bool) -> Entry {
+    Entry {
+        ip: Some(from),
+        method: Some("GET".into()),
+        user_agent: ua.into(),
+        query_keys: if facet { vec!["q".into()] } else { Vec::new() },
+        ..Entry::new(timestamp_ms, path, 200)
+    }
+}
+
+/// Logs des dix minutes avant `now` : 60 IP en curl sur des facettes
+/// (élevé), 15 en Firefox sur des facettes (moyen), GPTBot (faible).
+fn scraped(now: i64) -> Vec<Entry> {
+    let start = (now - 600) * 1000;
+    let mut entries = Vec::new();
+    for n in 1..=HIGH {
+        for j in 0..20 {
+            let at = start + i64::from(n) * 100 + j * 1000;
+            entries.push(hit(
+                at,
+                ip(&format!("192.0.2.{n}")),
+                "/categorie",
+                CURL,
+                true,
+            ));
+        }
+    }
+    for n in 1..=MEDIUM {
+        for j in 0..20 {
+            let at = start + 30_000 + i64::from(n) * 100 + j * 1000;
+            let from = ip(&format!("198.51.100.{n}"));
+            entries.push(hit(at, from, "/categorie", FIREFOX, true));
+        }
+    }
+    for j in 0..10 {
+        let at = start + 90_000 + j * 100;
+        entries.push(hit(at, ip("203.0.113.50"), "/article", GPTBOT, false));
+    }
+    entries
+}
+
+/// Site A avec une source de logs, site B sans.
+async fn with_logs() -> Veilleur {
+    Veilleur::start_with(|config| {
+        config.sites[0].logs = Some(LogsConfig {
+            source: Some(LogSourceKind::Alwaysdata),
+            hosts: vec!["site-a.example.org".into()],
+            ..LogsConfig::default()
+        });
+    })
+    .await
+}
+
+/// Un passage de `tick` à `now` sur ces logs, puis l'horloge du routeur
+/// avancée à `now`.
+fn tick_logs(v: &Veilleur, now: i64, entries: &[Entry]) {
+    let options = Options {
+        check_budget: Duration::ZERO,
+        ..Options::default()
+    };
+    let mail = MemoryNotifier::new();
+    let summary = tick::run_with_sources(&v.config, now, &options, &mail, &|site| {
+        (site.id == "site-a")
+            .then(|| Box::new(MemorySource::new("memoire", entries.to_vec())) as Box<dyn LogSource>)
+    })
+    .expect("tick");
+    assert!(summary.logs_folded > 0, "{summary:?}");
+    v.clock.set(now);
+}
+
+/// Trois états de la vue des logs : 404 sans source, `null` avant toute
+/// analyse, puis robots, règles et charge.
+#[tokio::test]
+async fn the_logs_view_reads_three_states() {
+    let v = with_logs().await;
+    let client = v.paired("poste").await;
+
+    for site in ["site-b", "inconnu"] {
+        let err = client.logs(site).await.expect_err("sans source");
+        assert_eq!(err.kind, ErrorKind::NotFound, "{site}");
+        let err = client.log_ips(site, None).await.expect_err("sans source");
+        assert_eq!(err.kind, ErrorKind::NotFound, "{site}");
+    }
+
+    let logs = client.logs("site-a").await.expect("logs");
+    assert_eq!(logs.analysis, None, "analyse en attente");
+    let ips = client.log_ips("site-a", None).await.expect("ips");
+    assert_eq!(ips.generated_at, None);
+    assert!(ips.items.is_empty());
+    assert_eq!(ips.next_cursor, None);
+
+    let entries = scraped(T0);
+    tick_logs(&v, T0, &entries);
+    let analysis = client
+        .logs("site-a")
+        .await
+        .expect("logs")
+        .analysis
+        .expect("analyse");
+    assert_eq!(analysis.generated_at, T0);
+    assert_eq!(analysis.scored, u64::from(HIGH + MEDIUM) + 1);
+    let gptbot = analysis
+        .bots
+        .iter()
+        .find(|b| b.name == "GPTBot")
+        .expect("GPTBot");
+    assert_eq!(gptbot.publisher, "OpenAI");
+    assert_eq!(gptbot.class, "ai_training");
+    assert_eq!(gptbot.requests, 10);
+    assert!(!analysis.rules.is_empty());
+    let load: u64 = analysis.load.iter().map(|h| h.requests).sum();
+    assert_eq!(load, entries.len() as u64);
+    assert!(analysis.load_threshold_us > 0);
+}
+
+/// Verdicts d'IP par pages, sans doublon ; un curseur purgé rend
+/// `CursorExpired` et la liste reprend au début.
+#[tokio::test]
+async fn ip_verdicts_are_paged_and_an_expired_cursor_restarts() {
+    let v = with_logs().await;
+    let client = v.paired("poste").await;
+    let mut entries = scraped(T0);
+    tick_logs(&v, T0, &entries);
+
+    let first = client.log_ips("site-a", None).await.expect("page 1");
+    assert_eq!(first.site, "site-a");
+    assert_eq!(first.generated_at, Some(T0));
+    assert_eq!(first.items.len(), 50);
+    let cursor = first.next_cursor.clone().expect("curseur");
+    let second = client
+        .log_ips("site-a", Some(&cursor))
+        .await
+        .expect("page 2");
+    assert_eq!(second.next_cursor, None);
+    let ips: HashSet<&str> = first
+        .items
+        .iter()
+        .chain(&second.items)
+        .map(|item| item.ip.as_str())
+        .collect();
+    assert_eq!(ips.len(), usize::from(HIGH + MEDIUM), "doublon ou trou");
+    for item in first.items.iter().chain(&second.items) {
+        assert!(
+            ["moyen", "eleve"].contains(&item.level.as_str()),
+            "{item:?}"
+        );
+        assert!(!item.reasons.is_empty(), "{item:?}");
+    }
+
+    // Plus de 15 minutes après, un autre instantané : le premier est purgé.
+    let purged = T0 + 1300;
+    entries.push(hit(
+        (purged - 10) * 1000,
+        ip("203.0.113.9"),
+        "/",
+        FIREFOX,
+        false,
+    ));
+    tick_logs(&v, purged, &entries);
+    let err = client
+        .log_ips("site-a", Some(&cursor))
+        .await
+        .expect_err("instantané purgé");
+    assert_eq!(err.kind, ErrorKind::CursorExpired);
+    let again = client.log_ips("site-a", None).await.expect("reprise");
+    assert_eq!(again.generated_at, Some(purged));
+
+    let err = client
+        .log_ips("site-a", Some("!!!"))
+        .await
+        .expect_err("curseur illisible");
+    assert_eq!(err.kind, ErrorKind::BadRequest);
+}
+
+/// Au-delà de la rafale de l'appareil : 429 avec le délai de `Retry-After`.
+#[tokio::test]
+async fn too_many_requests_carry_the_retry_delay() {
+    let v = Veilleur::start().await;
+    let client = v.paired("poste").await;
+    let mut limited = None;
+    for _ in 0..60 {
+        if let Err(err) = client.overview().await {
+            limited = Some(err);
+            break;
+        }
+    }
+    let err = limited.expect("limite de débit atteinte");
+    assert_eq!(err.kind, ErrorKind::TooManyRequests);
+    let seconds = err
+        .message
+        .strip_prefix("trop de requêtes, réessayer dans ")
+        .and_then(|rest| rest.strip_suffix(" s"))
+        .and_then(|n| n.parse::<u64>().ok());
+    assert!(seconds.is_some_and(|s| s >= 1), "{err:?}");
 }

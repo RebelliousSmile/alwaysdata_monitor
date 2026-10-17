@@ -75,3 +75,9 @@ export function formatSpan(seconds: number): string {
   if (seconds % 60 === 0) return `${seconds / 60} min`
   return `${seconds} s`
 }
+
+/** Début d'une heure : « 14:00 » le jour même à Paris, sinon « 15 oct. 14:00 ». */
+export function formatHour(seconds: number, now: number): string {
+  if (parisDate(seconds) === parisDate(now)) return formatClock(seconds)
+  return `${shortDay.format(toDate(seconds))} ${formatClock(seconds)}`
+}

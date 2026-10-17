@@ -1,15 +1,16 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import DataGate from '@/components/DataGate.vue'
 import ScreenTitle from '@/components/ScreenTitle.vue'
 import StatusChip from '@/components/StatusChip.vue'
+import type { ApiError } from '@/lib/api'
 import { SEVERITY_LABEL, checkLabel, isExternal, resultChip, tlsNotAfter } from '@/lib/checks'
 import { now } from '@/lib/clock'
 import { useSiteData } from '@/lib/site-data'
 import { formatWhen } from '@/lib/time'
 
 // Disponibilité : contrôles externes, certificat, incidents des 30 jours.
-const { to, detail, error, history, missing } = useSiteData()
+const { site, sites, to, detail, error, history, missing } = useSiteData()
 
 const external = computed(() => (detail.value?.checks ?? []).filter((c) => isExternal(c.name)))
 
@@ -28,6 +29,19 @@ const certificate = computed(() => {
 })
 
 const closed = computed(() => history.value?.incidents ?? [])
+
+// « Afficher plus » : page suivante des incidents clos, ajoutée au bout. Un
+// échec (429…) reste affiché, sans relance automatique.
+const busy = ref(false)
+const moreError = ref<ApiError | null>(null)
+const notice = computed(() => sites.notices[`history:${site.value}`])
+
+async function showMore(): Promise<void> {
+  busy.value = true
+  moreError.value = await sites.moreHistory(site.value)
+  if (moreError.value?.kind === 'cursor_expired') moreError.value = null
+  busy.value = false
+}
 </script>
 
 <template>
@@ -153,6 +167,32 @@ const closed = computed(() => history.value?.incidents ?? [])
       >
         Historique pas encore lu.
       </p>
+      <p
+        v-if="notice"
+        role="status"
+        class="rounded-control bg-info-bg px-3 py-2 text-sm text-text"
+        data-list-notice
+      >
+        {{ notice }}
+      </p>
+      <p
+        v-if="moreError"
+        role="alert"
+        class="text-sm text-danger-text"
+        data-more-error
+      >
+        {{ moreError.message }}
+      </p>
+      <button
+        v-if="history?.next_cursor"
+        type="button"
+        class="flex min-h-tap items-center justify-center rounded-control border border-control text-text"
+        :disabled="busy"
+        data-more
+        @click="showMore"
+      >
+        Afficher plus
+      </button>
     </section>
   </DataGate>
 </template>

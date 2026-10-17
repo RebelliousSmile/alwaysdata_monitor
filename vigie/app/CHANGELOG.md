@@ -3,8 +3,29 @@
 Versions de la console (`vigie/app`), publiées par les tags `console-vX.Y.Z`.
 Le veilleur a son propre historique.
 
-## À venir
+## 0.2.0
 
+Prérequis de publication : le veilleur du VPS sert la pagination et les
+routes `logs` de l'API (#5, phase 2) et écrit l'analyse des logs (#8), tous
+deux déployés avant de pousser le tag `console-v0.2.0`. Les propositions de
+Trafic citent `vigie site recommend` (#13), à fusionner avant aussi. Face à
+un veilleur en retard, Visiteurs, Blocages et Ressources restent « pas encore
+disponible » (404) et les incidents clos arrivent en une seule liste, sans
+« Afficher plus ».
+
+- Trafic alimenté par l'analyse des logs : Visiteurs (IP au score moyen ou
+  élevé, avec leurs raisons), Blocages (règles de l'analyse, robots vus sur
+  24 h) et, dans Santé, Ressources (charge heure par heure, heures au-delà du
+  seuil). Trois états : site sans source de logs, « pas encore disponible » ;
+  analyse pas encore écrite, « analyse en attente » ; sinon les données.
+  Journal reste « pas encore disponible » : aucune ligne de log n'est servie.
+- Les actions des maquettes (bloquer une IP, un abonnement /64, un robot,
+  autoriser) sont des propositions : la console n'écrit rien et cite la
+  commande `vigie site recommend <site>` à passer sur le VPS.
+- « Afficher plus » pour les incidents clos (Disponibilité) et les verdicts
+  d'IP. Un curseur expiré fait reprendre la liste au début, avec un avis.
+- Erreurs de l'API nommées : trop de requêtes (« réessayer dans N s », sans
+  relance automatique), requête refusée (400, 415).
 - Jeton de l'appareil hors de `device.json` : Credential Manager sous Windows,
   fichier privé du dossier `no_backup` sous Android. Un `device.json` de la
   0.1.1 est migré au premier lancement ; en cas d'échec, l'appareil reste
