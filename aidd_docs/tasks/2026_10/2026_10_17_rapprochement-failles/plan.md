@@ -1,6 +1,6 @@
 ---
 objective: "Le veilleur confronte localement chaque composant de chaque site, vu par chaque source d'inventaire (agent PHP de F5, CI de F6), aux failles connues de F1 à F4 : rapprochement par l'index purl de F1 et le comparateur de l'écosystème, au passage de tick qui suit un nouvel inventaire, une synchronisation, une dérogation ajoutée, retirée ou échue, ou une péremption, par lots sous un budget borné qui réserve le temps des envois, sites à tour de rôle, une erreur de site n'arrêtant jamais le passage ; failles fusionnées par alias, gravité par la seule règle de F4, version ou plage inconnue jamais silencieuse ; un constat par (site, composant sans version), à clé tirée de la base de failles, ouvert à partir de l'avertissement, jamais un incident par faille, jamais « rétabli » sans preuve ; e-mail de synthèse au-delà de 5 ouvertures sur un site ; dérogations par site, composant, faille, source et version, motivées, de 90 jours au plus, auditées par empreinte du motif, interdites pour KEV ; contrôle vulns déclaré au registre, « inventaire périmé » par source ; lecture par l'API /api/v1, un écran « Failles » de la console sans action d'écriture et la CLI, attributions affichées partout."
-status: pending
+status: done
 issue_number: 21
 ---
 

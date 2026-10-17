@@ -18,6 +18,8 @@ const LABELS: Record<string, string> = {
   'agent:must-contain': 'Texte attendu dans les fichiers',
   'agent:root': 'Racine du site',
   'agent:uploads-php': 'PHP dans les uploads',
+  vulns: 'Failles des composants',
+  'vulns-sync': 'Base de failles',
 }
 
 export function checkLabel(name: string): string {
@@ -30,6 +32,7 @@ export const isExternal = (name: string): boolean => EXTERNAL_CHECKS.includes(na
 
 /** Écran où un point se lit en détail. */
 export function checkScreen(name: string): { label: string; route: string } {
+  if (name === 'vulns') return { label: 'Failles', route: 'failles' }
   return isExternal(name)
     ? { label: 'Santé › Disponibilité', route: 'sante' }
     : { label: 'Santé › Contrôles', route: 'controles' }

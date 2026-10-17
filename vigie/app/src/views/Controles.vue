@@ -11,7 +11,7 @@ import { useSiteData } from '@/lib/site-data'
 import { formatSpan, formatWhen } from '@/lib/time'
 
 // Contrôles : chaque contrôle du site avec son dernier résultat et son heure.
-const { detail, error, missing } = useSiteData()
+const { detail, error, missing, to } = useSiteData()
 
 const groups = computed(() => {
   const checks = detail.value?.checks ?? []
@@ -87,10 +87,13 @@ function cadence(check: Check): string | undefined {
       </p>
     </section>
   </DataGate>
-  <NotYet
-    feature="wordpress"
-    compact
-  />
+  <RouterLink
+    :to="to('failles')"
+    class="flex min-h-tap items-center justify-center rounded-control border border-control text-text"
+    data-vulns-link
+  >
+    Voir les failles des composants
+  </RouterLink>
   <NotYet
     feature="personnalises"
     compact

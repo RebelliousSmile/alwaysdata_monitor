@@ -453,6 +453,40 @@ Valeurs masquées, sans jeton ni identifiant de compte :
 | longueur maximale des noms `_posts/` (part des `FOPH-…`) | à relever | — |
 | mémoire de pointe (`/usr/bin/time -v`) | à relever | à relever |
 
+## Rapprochement des failles (issue #21)
+
+Règles : [`failles.md`](./failles.md#rapprochement-f7). Gestes de
+l'exploitant, sans valeur réelle consignée ici (sites, composants, comptes).
+
+1. **Veilleur à jour** : déployer le binaire qui porte la migration
+   `0021.sql` ; `vigie serve` la joue au démarrage (`vigie status` affiche le
+   schéma). Base antérieure : `tick` saute l'étape sans erreur.
+2. **Sources** : `[vulns] sources` déclarées et synchronisées au moins une
+   fois (`vigie vulns sources`), KEV et EPSS compris ; `[sites.inventory]`
+   déclarée pour chaque site à surveiller, et au moins un inventaire reçu
+   (`vigie site list`, colonne inventaire).
+3. **Premier rapprochement** : il se fait de lui-même aux passages de `tick`
+   qui suivent, par lots, sous 10 s par passage ; plusieurs passages pour un
+   grand nombre de sites (mesure : 200 sites de 2 000 composants en 13
+   passages). Les ouvertures d'un site au-delà de cinq partent en un e-mail
+   de synthèse.
+4. **Relevé masqué** du premier rapprochement, à consigner ci-dessous sans
+   nom de site ni de composant : `vigie status` (ligne « failles » de chaque
+   site, « rapprochement en échec » s'il y en a), `vigie vulns report`
+   (comptes par gravité), journal de `tick`
+   (`journalctl -u vigie-tick | grep "composant(s) rapproché(s)"`).
+5. **Dérogations** : `vigie site vulns-ack` exige `[commands]` (clé
+   d'audit) ; vérifier la chaîne par `vigie site audit <site> --verify`.
+
+### Relevé du premier rapprochement
+
+| Mesure | Valeur |
+| --- | --- |
+| sites surveillés par `vulns`, composants rapprochés | à relever |
+| incidents ouverts par gravité (critique, avertissement, information) | à relever |
+| passages nécessaires, durée du plus long | à relever |
+| sites en échec de rapprochement | à relever |
+
 ## Secrets
 
 Inventaire tenu par le socle (issue #9). Aucun secret ne passe par une variable

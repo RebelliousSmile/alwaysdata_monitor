@@ -226,6 +226,17 @@ async function remove(): Promise<void> {
       :size="18"
     /></span>
   </RouterLink>
+  <RouterLink
+    :to="{ name: 'sources-failles' }"
+    class="flex min-h-tap items-center gap-3 rounded-card border border-line bg-surface px-3.5 py-3 text-text"
+    data-sources-link
+  >
+    <span class="flex-1">Sources de failles</span>
+    <span class="text-text-3"><AppIcon
+      name="next"
+      :size="18"
+    /></span>
+  </RouterLink>
   <NotYet
     feature="theme"
     compact

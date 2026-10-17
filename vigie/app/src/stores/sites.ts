@@ -8,8 +8,11 @@ import {
   type Overview,
   type Settings,
   type SiteDetail,
+  type SiteComponents,
   type SiteIncidents,
   type SiteLogs,
+  type SiteVulns,
+  type VulnSources,
 } from '@/lib/api'
 import { asApiError, useConnection } from '@/stores/connection'
 
@@ -33,6 +36,12 @@ export const useSites = defineStore('sites', () => {
   const logs = ref<Record<string, Dated<SiteLogs>>>({})
   /** Verdicts d'IP déjà lus, pages mises bout à bout, par site. */
   const ips = ref<Record<string, Dated<LogIps>>>({})
+  /** Composants rapprochés (#21), pages mises bout à bout, par site. */
+  const components = ref<Record<string, Dated<SiteComponents>>>({})
+  /** Failles des composants (#21), pages mises bout à bout, par site. */
+  const vulns = ref<Record<string, Dated<SiteVulns>>>({})
+  /** Sources de failles du veilleur. */
+  const vulnSources = ref<Dated<VulnSources> | null>(null)
   const settings = ref<Dated<Settings> | null>(null)
   /** Dernier échec par ressource (`site:<id>`, `incident:<id>`…), effacé au succès. */
   const errors = ref<Record<string, ApiError>>({})
@@ -143,6 +152,49 @@ export const useSites = defineStore('sites', () => {
       () => loadIps(id),
     )
 
+  const loadComponents = (id: string) => {
+    delete notices.value[`components:${id}`]
+    return read(`components:${id}`, () => api.components(id), (value) => {
+      components.value[id] = value
+    })
+  }
+
+  const loadVulns = (id: string) => {
+    delete notices.value[`vulns:${id}`]
+    return read(`vulns:${id}`, () => api.vulns(id), (value) => {
+      vulns.value[id] = value
+    })
+  }
+
+  /** Les pages se suivent sur les mêmes runs : un rang suffit à dédoublonner. */
+  const moreComponents = (id: string) =>
+    more(
+      `components:${id}`,
+      components.value[id],
+      (cursor) => api.components(id, cursor),
+      (held, page) => {
+        held.items.push(...page.items)
+      },
+      () => loadComponents(id),
+    )
+
+  const moreVulns = (id: string) =>
+    more(
+      `vulns:${id}`,
+      vulns.value[id],
+      (cursor) => api.vulns(id, cursor),
+      (held, page) => {
+        const seen = new Set(held.items.map((v) => `${v.component} ${v.group}`))
+        held.items.push(...page.items.filter((v) => !seen.has(`${v.component} ${v.group}`)))
+      },
+      () => loadVulns(id),
+    )
+
+  const loadVulnSources = () =>
+    read('vuln-sources', api.vulnSources, (value) => {
+      vulnSources.value = value
+    })
+
   const loadIncident = (id: number) =>
     read(`incident:${id}`, () => api.incident(id), (value) => {
       incidents.value[id] = value
@@ -187,6 +239,9 @@ export const useSites = defineStore('sites', () => {
     incidents.value = {}
     logs.value = {}
     ips.value = {}
+    components.value = {}
+    vulns.value = {}
+    vulnSources.value = null
     settings.value = null
     errors.value = {}
     notices.value = {}
@@ -199,6 +254,9 @@ export const useSites = defineStore('sites', () => {
     incidents,
     logs,
     ips,
+    components,
+    vulns,
+    vulnSources,
     settings,
     errors,
     notices,
@@ -209,6 +267,11 @@ export const useSites = defineStore('sites', () => {
     loadLogs,
     loadIps,
     moreIps,
+    loadComponents,
+    moreComponents,
+    loadVulns,
+    moreVulns,
+    loadVulnSources,
     loadIncident,
     loadSettings,
     ack,
