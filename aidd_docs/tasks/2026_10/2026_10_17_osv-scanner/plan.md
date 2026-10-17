@@ -1,6 +1,6 @@
 ---
 objective: "Un job osv-scanner de garde-fous.yml, binaire épinglé et vérifié par SHA-256, confronte à chaque push, pull request et chaque semaine les quatre lockfiles du dépôt (deux Cargo.lock, pnpm-lock.yaml, composer.lock) à la base OSV ; toute faille non couverte par une exception datée (≤ 92 jours, vérifiée par script) et motivée d'un osv-scanner.toml le fait échouer ; la marche à suivre est écrite dans decisions.md."
-status: pending
+status: in-progress
 issue_number: 22
 ---
 
