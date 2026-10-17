@@ -418,7 +418,9 @@ fn site_command_previews_then_applies_with_every_guard() {
         &config,
         &["site", "command", "site-a", "htaccess-apply", "--apply"],
     );
-    assert!(stderr(&out).contains("pas encore disponible"), "{out:?}");
+    assert!(stderr(&out).contains("site recommend"), "{out:?}");
+    let out = vigie(&config, &["site", "command", "site-a", "htaccess-rollback"]);
+    assert!(stderr(&out).contains("rapport"), "{out:?}");
     let out = vigie(&config, &["site", "command", "site-a", "shell"]);
     assert!(stderr(&out).contains("commande inconnue"), "{out:?}");
 
