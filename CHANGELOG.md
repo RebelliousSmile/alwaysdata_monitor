@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Log analyzer wired into `tick`: bot catalogue, bounded path globs and declarative rules, incremental folding into persisted aggregates, IP suspicion score and load ported from the module, structured analysis snapshots, bounded `logs` findings, and robot user-agent signatures shared across sites without any IP (#8)
 - Alwaysdata log adapter: `/r/v1/logs` signed batches with high-water-mark idempotence, PHP agent 0.3.0 incremental reading across gz rotation, normalized entries only, 30-day purge, `AlwaysdataSource` (#1)
 - Vigie console: device token in the Windows Credential Manager (local persistence) and in Android `no_backup` storage with backup and device transfer disabled, migration from 0.1.1, security guards locked by tests (#12 phase 1)
+- Console API security (#5): per-device and per-IP (/64) rate limits with 429 and `Retry-After`, call log without tokens or raw paths, strict headers and no CORS, 415 only for typed bodies, sanitized log text, JSON key snapshot test, keyset pagination (`limit`, `cursor`, `next_cursor`), `GET /api/v1/sites/{id}/logs` and `/logs/ips` (medium and high verdicts only, 48 h), 200 sites at most
 
 ## [v1.11.2] - 2026-10-16
 
