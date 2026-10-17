@@ -75,3 +75,9 @@ interval = 300
 # `vigie site recommend` ne propose que robots.txt. protect_ips : IP jamais
 # visées par une règle d'IP (tâches planifiées, webhooks, bureau).
 # protect_ips = ["198.51.100.10"]
+# Inventaire des composants relevé par l'agent PHP 0.5.0 (issue #19,
+# docs/agent-php.md, docs/failles.md). Sans cette section, /r/v1/inventory
+# refuse le site avant de lire le corps. agent-php exige le runtime php
+# (wordpress et prestashop l'impliquent).
+# [sites.inventory]
+# source = "agent-php"

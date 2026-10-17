@@ -28,6 +28,9 @@ pub const DOMAIN_COMMANDS: &[u8] = b"vigie-commands-v1\n";
 pub const DOMAIN_AUDIT: &[u8] = b"vigie-audit-v1\n";
 /// Preuve de possession de la nouvelle clé d'un agent (`rotate-key`).
 pub const DOMAIN_ROTATE: &[u8] = b"vigie-rotate-v1\n";
+/// Inventaire des composants de l'agent (`/r/v1/inventory`, issue #19),
+/// signé par sa clé de rapport.
+pub const DOMAIN_INVENTORY: &[u8] = b"vigie-inventory-v1\n";
 
 #[derive(Debug, thiserror::Error)]
 pub enum KeyError {
@@ -266,6 +269,34 @@ mod tests {
             &[b"123\n", b"{}"],
             "pas du base64"
         ));
+    }
+
+    /// Matrice des six domaines et d'une signature sans préfixe (celle d'un
+    /// rapport) : chaque signature ne vérifie que sous son propre domaine.
+    #[test]
+    fn each_domain_verifies_only_its_own_signatures() {
+        let key = SigningKey::from_bytes(&[9; 32]);
+        let public = key.verifying_key();
+        let domains: [&[u8]; 7] = [
+            DOMAIN_PULL,
+            DOMAIN_LOGS,
+            DOMAIN_COMMANDS,
+            DOMAIN_AUDIT,
+            DOMAIN_ROTATE,
+            DOMAIN_INVENTORY,
+            b"",
+        ];
+        let body: &[u8] = br#"{"v":1}"#;
+        for (i, signed) in domains.iter().enumerate() {
+            let sig = sign(&key, signed, &[body]);
+            for (j, checked) in domains.iter().enumerate() {
+                assert_eq!(
+                    verify(&public, checked, &[body], &sig),
+                    i == j,
+                    "signé sous {i}, vérifié sous {j}"
+                );
+            }
+        }
     }
 
     #[cfg(unix)]

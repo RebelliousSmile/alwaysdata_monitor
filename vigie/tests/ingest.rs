@@ -39,6 +39,7 @@ fn site() -> Site {
         interval: 86_400,
         agent_silence: 900,
         logs: None,
+        inventory: None,
     }
 }
 

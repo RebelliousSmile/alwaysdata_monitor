@@ -36,6 +36,7 @@ fn site(id: &str, logs: Option<SiteLogs>) -> Site {
         interval: 300,
         agent_silence: 900,
         logs,
+        inventory: None,
     }
 }
 

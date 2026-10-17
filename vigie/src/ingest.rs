@@ -67,6 +67,14 @@ pub enum Reason {
     Quota {
         used: i64,
     },
+    /// Inventaire pour un site sans `[sites.inventory]` (#19).
+    InventoryClosed,
+    /// Inventaire de plus de 512 Kio.
+    InventoryTooLarge,
+    /// Plafond quotidien des inventaires nouveaux du site atteint.
+    InventoryQuota {
+        new_today: i64,
+    },
     Internal(String),
 }
 
@@ -101,6 +109,14 @@ impl fmt::Display for Reason {
             Self::Quota { used } => write!(
                 f,
                 "plafond quotidien des logs atteint ({used} octets reçus aujourd'hui)"
+            ),
+            Self::InventoryClosed => {
+                f.write_str("réception de l'inventaire fermée ([sites.inventory] absent)")
+            }
+            Self::InventoryTooLarge => f.write_str("corps de plus de 512 Kio"),
+            Self::InventoryQuota { new_today } => write!(
+                f,
+                "plafond quotidien des inventaires atteint ({new_today} nouveaux aujourd'hui)"
             ),
             Self::Internal(reason) => write!(f, "erreur interne : {reason}"),
         }

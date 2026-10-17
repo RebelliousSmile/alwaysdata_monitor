@@ -100,6 +100,7 @@ fn site(id: &str, kind: SiteKind, interval: u64) -> Site {
         interval,
         agent_silence: 900,
         logs: None,
+        inventory: None,
     }
 }
 

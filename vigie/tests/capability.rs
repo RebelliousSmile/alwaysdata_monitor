@@ -79,6 +79,7 @@ fn site(id: &str, kind: SiteKind, runtime: Option<Runtime>, logs: bool) -> Site 
             hosts: vec![format!("{id}.example.org")],
             ..SiteLogs::default()
         }),
+        inventory: None,
     }
 }
 
@@ -270,6 +271,54 @@ fn command_names_round_trip_and_unknown_names_are_refused() {
     }
     for name in ["", "PING", "shell", "eval", "rotate_key", "ping "] {
         assert_eq!(CommandKind::from_name(name), None, "{name:?}");
+    }
+}
+
+// --- Inventaire (#19) ---------------------------------------------------
+
+#[test]
+fn the_inventory_ecosystem_matrix_matches_the_literal_table() {
+    use vigie::vulns::purl::PurlType::*;
+    // (CMS, wordpress, prestashop, composer, npm, cargo)
+    let table = [
+        (SiteKind::Generic, false, false, true, true, true),
+        (SiteKind::Wordpress, true, false, true, true, true),
+        (SiteKind::Prestashop, false, true, true, true, true),
+    ];
+    for (kind, wp, ps, composer, npm, cargo) in table {
+        let admitted = capability::inventory_ecosystems(kind);
+        for (ty, expected) in [
+            (Wordpress, wp),
+            (Prestashop, ps),
+            (Composer, composer),
+            (Npm, npm),
+            (Cargo, cargo),
+        ] {
+            assert_eq!(admitted.contains(&ty), expected, "{ty:?} pour {kind:?}");
+        }
+    }
+}
+
+#[test]
+fn only_a_declared_section_opens_the_inventory() {
+    use vigie::config::{InventorySource, SiteInventory};
+    let mut wp = site("site-a", SiteKind::Wordpress, None, false);
+    assert_eq!(capability::inventory_source(&wp), None);
+    wp.inventory = Some(SiteInventory {
+        source: InventorySource::AgentPhp,
+    });
+    assert_eq!(
+        capability::inventory_source(&wp),
+        Some(InventorySource::AgentPhp)
+    );
+    // L'inventaire n'ouvre aucun contrôle en F5 : `vulns` viendra avec F7.
+    for ctx in CONTEXTS {
+        let mut without = wp.clone();
+        without.inventory = None;
+        assert_eq!(
+            capability::allowed_controls(&wp, &ctx),
+            capability::allowed_controls(&without, &ctx)
+        );
     }
 }
 

@@ -10,6 +10,10 @@
 //! - Chaque **commande** ([`CommandKind`]) déclare les runtimes qui
 //!   l'admettent ; un site sans runtime (`generic` non déclaré) n'en admet
 //!   aucune.
+//! - L'**inventaire** des composants (#19) : [`inventory_source`] ouvre
+//!   `/r/v1/inventory` et sera la condition d'existence du contrôle `vulns`
+//!   (F7) ; [`inventory_ecosystems`] fixe les écosystèmes purl admis selon le
+//!   CMS du site.
 //!
 //! Les listes sont fermées et codées en dur, par des `match` sans joker : une
 //! variante nouvelle oblige à décider, et ajouter un contrôle, une famille ou
@@ -21,8 +25,9 @@
 use std::fmt;
 
 use crate::checks::CheckKind;
-use crate::config::{Runtime, Site, SiteKind};
+use crate::config::{InventorySource, Runtime, Site, SiteKind};
 use crate::finding::{Finding, Severity};
+use crate::vulns::purl::PurlType;
 
 const ALL_CMS: &[SiteKind] = &[SiteKind::Generic, SiteKind::Wordpress, SiteKind::Prestashop];
 
@@ -267,6 +272,36 @@ pub fn typology_findings(site: &Site, ctx: &Ctx) -> Vec<Finding> {
         TYPOLOGY_KEY,
         "agent enregistré sur un site sans runtime php : déclarer runtime = \"php\"",
     )]
+}
+
+/// Source d'inventaire déclarée du site (`[sites.inventory]`) : seule porte
+/// de `/r/v1/inventory`, et future condition `Needs::InventorySource` du
+/// contrôle `vulns` (F7). `None` : inventaire refusé avant lecture du corps.
+pub fn inventory_source(site: &Site) -> Option<InventorySource> {
+    site.inventory.map(|inventory| inventory.source)
+}
+
+/// Écosystèmes purl admis dans l'inventaire d'un site, selon son CMS (lu
+/// dans la configuration, jamais dans l'inventaire) : le CMS du site, puis
+/// `composer`, `npm` et `cargo`, que les sources OSV couvrent quel que soit le
+/// site (`docs/failles.md`). Un composant d'un autre écosystème est écarté et
+/// compté, l'inventaire restant accepté.
+pub fn inventory_ecosystems(kind: SiteKind) -> &'static [PurlType] {
+    match kind {
+        SiteKind::Wordpress => &[
+            PurlType::Wordpress,
+            PurlType::Composer,
+            PurlType::Npm,
+            PurlType::Cargo,
+        ],
+        SiteKind::Prestashop => &[
+            PurlType::Prestashop,
+            PurlType::Composer,
+            PurlType::Npm,
+            PurlType::Cargo,
+        ],
+        SiteKind::Generic => &[PurlType::Composer, PurlType::Npm, PurlType::Cargo],
+    }
 }
 
 /// Commandes que le veilleur peut servir à un agent (#10).

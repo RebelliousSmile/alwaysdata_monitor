@@ -17,6 +17,7 @@ pub fn site_a() -> Site {
         interval: 300,
         agent_silence: 900,
         logs: None,
+        inventory: None,
     }
 }
 
