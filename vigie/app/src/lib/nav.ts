@@ -20,7 +20,7 @@ export const SITE_NAV: readonly NavItem[] = [
 
 /**
  * Nombre de points ouverts par onglet. Trafic et Erreurs n'ont pas de
- * source : leur badge n'existe pas, pas même « 0 ».
+ * points ouverts à compter : leur badge n'existe pas, pas même « 0 ».
  */
 export interface NavBadges {
   'a-traiter'?: number

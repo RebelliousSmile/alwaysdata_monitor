@@ -9,6 +9,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
 
+use reqwest::header::RETRY_AFTER;
 use reqwest::{Method, StatusCode};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Deserializer, Serialize};
@@ -36,6 +37,15 @@ pub enum ErrorKind {
     NotFound,
     /// Acquittement d'un incident fermé.
     Conflict,
+    /// Curseur d'une liste dont l'instantané a été purgé : reprendre au
+    /// début, sans curseur (`409 cursor_expired`).
+    CursorExpired,
+    /// Paramètre de pagination refusé (`400 bad_request`).
+    BadRequest,
+    /// Corps d'un autre type que JSON (`415`).
+    UnsupportedMediaType,
+    /// Limite de débit dépassée (`429`) : aucune relance automatique.
+    TooManyRequests,
     /// Réponse 5xx, ou réponse illisible.
     Server,
     /// Lien d'appairage mal formé ou adresse refusée.
@@ -187,11 +197,99 @@ pub struct SiteDetail {
     pub checks: Vec<Check>,
 }
 
+/// Une page des incidents clos. `next_cursor` manque chez un veilleur
+/// antérieur à la pagination : il vaut alors `null`, dernière page.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SiteIncidents {
     pub site: String,
     pub since: i64,
     pub incidents: Vec<Incident>,
+    #[serde(default)]
+    pub next_cursor: Option<String>,
+}
+
+/// Robot du catalogue vu sur 24 h. Ses textes viennent des logs : le
+/// webview ne les affiche qu'en texte.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Bot {
+    pub name: String,
+    pub publisher: String,
+    pub purpose: String,
+    pub honours_robots: bool,
+    /// `search_engine`, `ai_training`… (`BotClass` du veilleur).
+    pub class: String,
+    /// Jamais visé par une action robots.txt ou user-agent.
+    pub protected: bool,
+    pub requests: u64,
+}
+
+/// Règle de l'analyse sur sa fenêtre ; aucune IP.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Rule {
+    pub rule: String,
+    /// `ip` ou `site`.
+    pub scope: String,
+    pub severity: Severity,
+    pub window_secs: u32,
+    pub min_count: u32,
+    pub count: u64,
+    pub distinct_ips: u64,
+    pub exceeded: bool,
+}
+
+/// Charge d'une heure (`timestamp_ms / 3 600 000`), temps en µs.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LoadHour {
+    pub hour: i64,
+    pub requests: u64,
+    pub refused: u64,
+    /// Requêtes dont le log porte une durée.
+    pub timed: u64,
+    pub service_us: u64,
+    pub bots: u64,
+}
+
+/// Dernier instantané de l'analyse des logs d'un site.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Analysis {
+    pub generated_at: i64,
+    pub bots: Vec<Bot>,
+    pub scored: u64,
+    pub unscored: u64,
+    pub rules: Vec<Rule>,
+    pub load: Vec<LoadHour>,
+    pub load_threshold_us: u64,
+}
+
+/// Réponse de `GET /api/v1/sites/{id}/logs` : `null` tant qu'aucune
+/// analyse n'a été écrite.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SiteLogs {
+    #[serde(deserialize_with = "nullable")]
+    pub analysis: Option<Analysis>,
+}
+
+/// Verdict d'une IP : codes de raison, jamais de user-agent ni de chemin.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Verdict {
+    pub ip: String,
+    pub score: u8,
+    /// `moyen` ou `eleve`.
+    pub level: String,
+    pub reasons: Vec<String>,
+    pub class: String,
+}
+
+/// Une page des verdicts d'IP d'un instantané.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LogIps {
+    pub site: String,
+    /// Instantané lu ; `null` s'il n'y en a pas de moins de 48 h.
+    #[serde(deserialize_with = "nullable")]
+    pub generated_at: Option<i64>,
+    pub items: Vec<Verdict>,
+    #[serde(default)]
+    pub next_cursor: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -323,13 +421,24 @@ impl Client {
         url
     }
 
+    /// URL d'une page : `?cursor=<next_cursor>` après la première. `limit`
+    /// n'est jamais envoyé : 50 par défaut, le même à chaque page.
+    fn page_url(&self, segments: &[&str], cursor: Option<&str>) -> Url {
+        let mut url = self.url(segments);
+        if let Some(cursor) = cursor {
+            url.query_pairs_mut().append_pair("cursor", cursor);
+        }
+        url
+    }
+
     async fn send(
         &self,
         method: Method,
         segments: &[&str],
+        cursor: Option<&str>,
         body: Option<serde_json::Value>,
     ) -> Result<reqwest::Response, ApiError> {
-        let mut request = self.http.request(method, self.url(segments));
+        let mut request = self.http.request(method, self.page_url(segments, cursor));
         if let Some(token) = &self.token {
             request = request.bearer_auth(token);
         }
@@ -346,30 +455,36 @@ impl Client {
                 },
             )
         })?;
-        match response.status() {
-            status if status.is_success() => Ok(response),
-            StatusCode::UNAUTHORIZED => Err(ApiError::new(
-                ErrorKind::Unauthorized,
-                "appareil inconnu ou révoqué",
-            )),
-            StatusCode::NOT_FOUND => Err(ApiError::new(ErrorKind::NotFound, "introuvable")),
-            StatusCode::CONFLICT => Err(ApiError::new(
-                ErrorKind::Conflict,
-                "l'incident est déjà fermé",
-            )),
-            status => Err(ApiError::new(
-                ErrorKind::Server,
-                format!("le veilleur a répondu {}", status.as_u16()),
-            )),
+        let status = response.status();
+        if status.is_success() {
+            return Ok(response);
         }
+        let retry_after = response
+            .headers()
+            .get(RETRY_AFTER)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.trim().parse::<u64>().ok());
+        // Seul `error.code` est lu : `message` n'est qu'indicatif.
+        let code = if status == StatusCode::CONFLICT {
+            response
+                .bytes()
+                .await
+                .ok()
+                .and_then(|body| serde_json::from_slice::<ErrorBody>(&body).ok())
+                .map(|body| body.error.code)
+        } else {
+            None
+        };
+        Err(classify(status, code.as_deref(), retry_after))
     }
 
     async fn read<T: DeserializeOwned>(
         &self,
         method: Method,
         segments: &[&str],
+        cursor: Option<&str>,
     ) -> Result<T, ApiError> {
-        let response = self.send(method, segments, None).await?;
+        let response = self.send(method, segments, cursor, None).await?;
         decode(response).await
     }
 
@@ -379,6 +494,7 @@ impl Client {
             .send(
                 Method::POST,
                 &["pair"],
+                None,
                 Some(serde_json::json!({ "code": code })),
             )
             .await
@@ -393,36 +509,102 @@ impl Client {
     }
 
     pub async fn overview(&self) -> Result<Overview, ApiError> {
-        self.read(Method::GET, &["overview"]).await
+        self.read(Method::GET, &["overview"], None).await
     }
 
     pub async fn site(&self, id: &str) -> Result<SiteDetail, ApiError> {
-        self.read(Method::GET, &["sites", id]).await
+        self.read(Method::GET, &["sites", id], None).await
     }
 
-    pub async fn incidents(&self, site: &str) -> Result<SiteIncidents, ApiError> {
-        self.read(Method::GET, &["sites", site, "incidents"]).await
+    /// Une page des incidents clos ; `cursor` est le `next_cursor` de la
+    /// page précédente, `None` pour la première.
+    pub async fn incidents(
+        &self,
+        site: &str,
+        cursor: Option<&str>,
+    ) -> Result<SiteIncidents, ApiError> {
+        self.read(Method::GET, &["sites", site, "incidents"], cursor)
+            .await
+    }
+
+    /// Dernière analyse des logs du site. 404 : site sans source de logs,
+    /// ou veilleur antérieur à cette route.
+    pub async fn logs(&self, site: &str) -> Result<SiteLogs, ApiError> {
+        self.read(Method::GET, &["sites", site, "logs"], None).await
+    }
+
+    /// Une page des verdicts d'IP. `CursorExpired` : l'instantané du
+    /// curseur a été purgé, reprendre sans curseur.
+    pub async fn log_ips(&self, site: &str, cursor: Option<&str>) -> Result<LogIps, ApiError> {
+        self.read(Method::GET, &["sites", site, "logs", "ips"], cursor)
+            .await
     }
 
     pub async fn incident(&self, id: i64) -> Result<Incident, ApiError> {
-        self.read(Method::GET, &["incidents", &id.to_string()])
+        self.read(Method::GET, &["incidents", &id.to_string()], None)
             .await
     }
 
     pub async fn ack(&self, id: i64) -> Result<Incident, ApiError> {
-        self.read(Method::POST, &["incidents", &id.to_string(), "ack"])
+        self.read(Method::POST, &["incidents", &id.to_string(), "ack"], None)
             .await
     }
 
     pub async fn settings(&self) -> Result<Settings, ApiError> {
-        self.read(Method::GET, &["settings"]).await
+        self.read(Method::GET, &["settings"], None).await
     }
 
     /// Révoque cet appareil côté veilleur.
     pub async fn unpair(&self) -> Result<(), ApiError> {
-        self.send(Method::DELETE, &["devices", "self"], None)
+        self.send(Method::DELETE, &["devices", "self"], None, None)
             .await
             .map(drop)
+    }
+}
+
+/// Corps d'erreur commun : `{"error": {"code", "message", "request_id"}}`.
+#[derive(Deserialize)]
+struct ErrorBody {
+    error: ErrorCode,
+}
+
+#[derive(Deserialize)]
+struct ErrorCode {
+    code: String,
+}
+
+/// Erreur d'une réponse non réussie. Messages fixes : rien de la réponse
+/// n'y est recopié, hormis le délai de `Retry-After`.
+fn classify(status: StatusCode, code: Option<&str>, retry_after: Option<u64>) -> ApiError {
+    match status {
+        StatusCode::UNAUTHORIZED => {
+            ApiError::new(ErrorKind::Unauthorized, "appareil inconnu ou révoqué")
+        }
+        StatusCode::NOT_FOUND => ApiError::new(ErrorKind::NotFound, "introuvable"),
+        StatusCode::CONFLICT if code == Some("cursor_expired") => ApiError::new(
+            ErrorKind::CursorExpired,
+            "la liste a changé depuis la première page : elle reprend au début",
+        ),
+        StatusCode::CONFLICT => ApiError::new(ErrorKind::Conflict, "l'incident est déjà fermé"),
+        StatusCode::BAD_REQUEST => ApiError::new(
+            ErrorKind::BadRequest,
+            "requête refusée par le veilleur : pagination illisible",
+        ),
+        StatusCode::UNSUPPORTED_MEDIA_TYPE => ApiError::new(
+            ErrorKind::UnsupportedMediaType,
+            "requête refusée par le veilleur : type de contenu non accepté",
+        ),
+        StatusCode::TOO_MANY_REQUESTS => ApiError::new(
+            ErrorKind::TooManyRequests,
+            match retry_after {
+                Some(seconds) => format!("trop de requêtes, réessayer dans {seconds} s"),
+                None => "trop de requêtes, réessayer dans un moment".to_owned(),
+            },
+        ),
+        status => ApiError::new(
+            ErrorKind::Server,
+            format!("le veilleur a répondu {}", status.as_u16()),
+        ),
     }
 }
 
@@ -475,6 +657,57 @@ mod tests {
             name: "poste".into(),
         };
         assert!(!format!("{paired:?}").contains("secret-du-jeton"));
+    }
+
+    #[test]
+    fn statuses_map_to_typed_errors_with_fixed_messages() {
+        let expired = classify(StatusCode::CONFLICT, Some("cursor_expired"), None);
+        assert_eq!(expired.kind, ErrorKind::CursorExpired);
+        let conflict = classify(StatusCode::CONFLICT, Some("conflict"), None);
+        assert_eq!(conflict.kind, ErrorKind::Conflict);
+        assert_eq!(
+            classify(StatusCode::CONFLICT, None, None).kind,
+            ErrorKind::Conflict
+        );
+        let bad = classify(StatusCode::BAD_REQUEST, None, None);
+        assert_eq!(bad.kind, ErrorKind::BadRequest);
+        let media = classify(StatusCode::UNSUPPORTED_MEDIA_TYPE, None, None);
+        assert_eq!(media.kind, ErrorKind::UnsupportedMediaType);
+        let limited = classify(StatusCode::TOO_MANY_REQUESTS, None, Some(12));
+        assert_eq!(limited.kind, ErrorKind::TooManyRequests);
+        assert_eq!(limited.message, "trop de requêtes, réessayer dans 12 s");
+        let unknown = classify(StatusCode::TOO_MANY_REQUESTS, None, None);
+        assert_eq!(
+            unknown.message,
+            "trop de requêtes, réessayer dans un moment"
+        );
+        assert_eq!(
+            classify(StatusCode::BAD_GATEWAY, None, None).message,
+            "le veilleur a répondu 502"
+        );
+    }
+
+    #[test]
+    fn next_cursor_may_be_missing_on_an_older_veilleur() {
+        let page: SiteIncidents =
+            serde_json::from_str(r#"{"site":"site-a","since":1,"incidents":[]}"#).expect("page");
+        assert_eq!(page.next_cursor, None);
+        let logs = serde_json::from_str::<SiteLogs>("{}").expect_err("analysis requis");
+        assert!(logs.to_string().contains("analysis"), "{logs}");
+    }
+
+    #[test]
+    fn the_cursor_goes_in_the_query_string() {
+        let client = Client::new("https://veilleur.example.org/").expect("client");
+        let segments = ["sites", "site-a", "logs", "ips"];
+        assert_eq!(
+            client.page_url(&segments, Some("djF8+/=")).as_str(),
+            "https://veilleur.example.org/api/v1/sites/site-a/logs/ips?cursor=djF8%2B%2F%3D"
+        );
+        assert_eq!(
+            client.page_url(&segments, None).as_str(),
+            "https://veilleur.example.org/api/v1/sites/site-a/logs/ips"
+        );
     }
 
     #[test]

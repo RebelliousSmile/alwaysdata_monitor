@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatClock, formatDay, formatSpan, formatWhen, parisDate, readAgo } from '@/lib/time'
+import { formatClock, formatDay, formatHour, formatSpan, formatWhen, parisDate, readAgo } from '@/lib/time'
 
 const at = (iso: string): number => Date.parse(iso) / 1000
 
@@ -65,5 +65,14 @@ describe('formatSpan', () => {
     expect(formatSpan(7200)).toBe('2 h')
     expect(formatSpan(86400)).toBe('1 j')
     expect(formatSpan(90)).toBe('90 s')
+  })
+})
+
+describe('formatHour', () => {
+  const now = at('2026-10-14T12:00:00Z')
+
+  it('donne l’heure seule le jour même à Paris, sinon le jour en plus', () => {
+    expect(formatHour(at('2026-10-14T09:00:00Z'), now)).toBe('11:00')
+    expect(formatHour(at('2026-10-13T21:00:00Z'), now)).toBe('13 oct. 23:00')
   })
 })
