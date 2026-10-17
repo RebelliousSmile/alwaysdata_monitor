@@ -1,0 +1,16 @@
+# BEGIN vigie
+# Gere par Vigie (vigie site recommend) : ne pas modifier a la main.
+RewriteEngine On
+# ua jusqu'au 2026-07-05 12:00:00
+RewriteCond %{HTTP_USER_AGENT} "Bytespider" [NC]
+RewriteCond %{TIME} <20260705120000
+RewriteRule ^ - [F,L]
+# ua jusqu'au 2026-07-15 12:00:00
+RewriteCond %{HTTP_USER_AGENT} "MauiBot" [NC]
+RewriteCond %{TIME} <20260715120000
+RewriteRule ^ - [F,L]
+# ip jusqu'au 2026-06-16 12:00:00
+RewriteCond %{REMOTE_ADDR} "^192\.0\.2\.44$"
+RewriteCond %{TIME} <20260616120000
+RewriteRule ^ - [F,L]
+# END vigie

@@ -18,8 +18,8 @@ changement de code relu, jamais une valeur de configuration.
 | --- | --- | --- |
 | `ping` | aller-retour sans effet : prouve que le canal fonctionne | `php` |
 | `rotate-key` | l'agent crée une nouvelle paire de clés de rapport et rend la clé publique | `php` |
-| `htaccess-apply` | remplace le bloc `# BEGIN vigie` … `# END vigie` du `.htaccess` (#13) | `php` |
-| `htaccess-rollback` | remet le `.htaccess` précédent (#13) | `php` |
+| `htaccess-apply` | remplace le bloc `# BEGIN vigie` … `# END vigie` du `.htaccess`, ou calcule seulement l'empreinte du résultat (#13, [`htaccess.md`](./htaccess.md)) | `php` |
+| `htaccess-rollback` | remet la copie privée du `.htaccess` d'avant la dernière application (#13) | `php` |
 
 Aucune commande n'admet `node` tant qu'aucun agent Node n'existe, ni `static`,
 qui n'a pas d'agent.
@@ -187,6 +187,40 @@ served → unknown (sans résultat en 24 h : elle a pu s'exécuter) → done | f
 - Remettre en file une commande non idempotente (`rotate-key`, `htaccess-*`)
   après une issue `unknown` exige `--force`.
 
+## `htaccess-apply` et `htaccess-rollback`
+
+Disponibles depuis #13, dans le même changement que la grammaire fermée
+vérifiée par l'agent ([`htaccess.md`](./htaccess.md)). Paramètres stricts
+(toute clé inconnue fait refuser) ; une empreinte est un SHA-256 en
+hexadécimal minuscule, `null` pour un fichier absent.
+
+| Commande | `params` |
+| --- | --- |
+| `htaccess-apply` | `{"block": "# BEGIN vigie\n…# END vigie\n", "previous_sha256": …, "new_sha256": … \| null}` |
+| `htaccess-rollback` | `{"expected_current_sha256": …, "prev_sha256": …}` |
+
+- `htaccess-apply` : l'agent refuse si le `.htaccess` n'a plus
+  `previous_sha256` (lue par le veilleur dans le dernier rapport), si le bloc
+  ne passe pas **sa propre** validation, ou si le contenu qu'il calcule n'a
+  pas `new_sha256`. Avec `new_sha256: null`, il calcule seulement : rien n'est
+  écrit, le résultat porte `data.new_sha256` (le veilleur ne connaît que des
+  empreintes et ne peut pas la calculer).
+- `htaccess-rollback` : refusé si la copie privée de l'agent n'a pas
+  `prev_sha256` ou si le `.htaccess` n'a pas `expected_current_sha256`.
+- Tout résultat porte `data.current_sha256`, l'empreinte du `.htaccess` après
+  la commande, quelle que soit son issue (`null` ou absente : fichier absent).
+  `data` n'admet que `new_pubkey`, `proof`, `current_sha256` et `new_sha256` ;
+  une empreinte mal formée fait refuser le retrait (schéma).
+- **Intégrité** : tant qu'une commande `htaccess-*` est `served` ou
+  `unknown`, ses empreintes attendues (`new_sha256` et `previous_sha256` d'une
+  application, `prev_sha256` et `expected_current_sha256` d'un retour
+  arrière ; aucune pour un calcul seul) n'ouvrent pas
+  `agent:integrity/modified:.htaccess`. La référence suit `current_sha256`
+  du résultat seulement s'il en fait partie.
+- **Adresse source** : `serve` note l'adresse d'où vient chaque retrait
+  accepté (pair TCP ; `X-Forwarded-For` seulement si le pair est la boucle
+  locale), 30 jours ; une règle d'IP ne la vise jamais.
+
 ## `rotate-key`
 
 1. L'agent crée une nouvelle paire et **garde l'ancienne**.
@@ -233,6 +267,8 @@ $ vigie commands pubkey                         # à épingler par chaque agent
 $ vigie site commands site-a enable            # kill-switch : enable | disable
 $ vigie site command site-a ping               # aperçu, rien n'est écrit
 $ vigie site command site-a ping --apply       # en file, servie au prochain retrait
+$ vigie site recommend site-a [--apply] [--replace]   # htaccess-apply (htaccess.md)
+$ vigie site command site-a htaccess-rollback --apply
 $ vigie site command-cancel site-a
 $ vigie site audit site-a --verify --head <hash>
 ```

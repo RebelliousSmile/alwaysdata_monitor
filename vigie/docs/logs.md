@@ -270,6 +270,11 @@ L'analyseur ne voit que des `Entry` : il ne contient aucun code propre à une
 source. Il remplace à terme le classement des robots, le score de suspicion,
 les erreurs 500 et la charge du module PrestaShop.
 
+Le trafic de Vigie elle-même est retiré de l'analyse avant tout comptage
+(#13, `fold::is_vigie_traffic`) : UA `vigie/…` (veilleur) et
+`vigie-agent-php/…`, chemins `/vigie-essai-*` (bac à sable de l'agent,
+[`htaccess.md`](./htaccess.md)). Il compte dans `excluded`.
+
 ```text
 tick (chaque minute)
   pour chaque site qui a une source, à tour de rôle :

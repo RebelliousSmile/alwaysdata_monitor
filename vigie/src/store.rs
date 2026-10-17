@@ -63,6 +63,9 @@ const MIGRATIONS: &[&str] = &[
     // 12 : index des incidents clos d'un site, pour leur pagination par clé
     // (`/api/v1/sites/{id}/incidents`, issue #5).
     include_str!("../migrations/0012.sql"),
+    // 13 : recommandations htaccess (#13) : adresses source des retraits
+    // signés de l'agent, protégées des règles d'IP, 30 jours.
+    include_str!("../migrations/0013.sql"),
 ];
 
 /// Version de schéma à partir de laquelle les incidents existent.
@@ -90,6 +93,11 @@ pub const SCHEMA_FINDINGS: usize = 11;
 /// Version de schéma à partir de laquelle les incidents clos sont indexés
 /// par site, date de clôture et id.
 pub const SCHEMA_CLOSED_INDEX: usize = 12;
+/// Version de schéma à partir de laquelle les adresses source des retraits
+/// existent.
+pub const SCHEMA_AGENT_SOURCES: usize = 13;
+/// Une adresse source de retrait est oubliée 30 jours après le dernier.
+pub const AGENT_SOURCE_RETENTION: i64 = 30 * 86_400;
 
 /// Empreinte de la typologie chargée par `serve` à son démarrage.
 pub const META_TYPOLOGY_SERVE: &str = "typology.serve";
@@ -964,6 +972,8 @@ impl Store {
             "log_analysis",
             "log_verdicts",
             "log_signatures",
+            // Adresses source des retraits (#13).
+            "agent_sources",
         ] {
             tx.execute(&format!("DELETE FROM {table} WHERE site = ?1"), [site])?;
         }
@@ -1089,7 +1099,11 @@ impl Store {
             Some(baseline) => {
                 let baseline: facts::Files =
                     serde_json::from_str(&baseline).context("référence d'empreintes illisible")?;
-                let (drift, next) = facts::compare(site, &baseline, &reported);
+                let admitted = std::collections::BTreeMap::from([(
+                    crate::command::HTACCESS.to_owned(),
+                    crate::command::store::htaccess_admitted(&tx, site)?,
+                )]);
+                let (drift, next) = facts::compare_admitting(site, &baseline, &reported, &admitted);
                 findings.extend(drift);
                 if next != baseline {
                     tx.execute(
@@ -1284,6 +1298,34 @@ impl Store {
                 Ok(RevokeOutcome::Revoked)
             }
         }
+    }
+
+    /// Adresses source des retraits signés de l'agent d'un site, vues
+    /// depuis 30 jours.
+    pub fn agent_sources(&self, site: &str, now: i64) -> Result<Vec<std::net::IpAddr>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT ip FROM agent_sources WHERE site = ?1 AND last_seen >= ?2 ORDER BY ip",
+        )?;
+        let rows = stmt.query_map(params![site, now - AGENT_SOURCE_RETENTION], |row| {
+            row.get::<_, String>(0)
+        })?;
+        let mut ips = Vec::new();
+        for row in rows {
+            if let Ok(ip) = row?.parse() {
+                ips.push(ip);
+            }
+        }
+        Ok(ips)
+    }
+
+    /// Empreintes des fichiers critiques du dernier rapport accepté, en JSON.
+    pub fn last_files(&self, site: &str) -> Result<Option<String>> {
+        Ok(self
+            .conn
+            .query_row("SELECT files FROM reports WHERE site = ?1", [site], |row| {
+                row.get(0)
+            })
+            .optional()?)
     }
 
     /// Dernier relevé (`facts`) accepté d'un site, en JSON.
@@ -2322,7 +2364,7 @@ mod tests {
         let (_dir, store) = temp_store();
         assert_eq!(
             store.schema_version().expect("version"),
-            SCHEMA_CLOSED_INDEX
+            SCHEMA_AGENT_SOURCES
         );
         let mut stmt = store
             .conn
@@ -2352,6 +2394,7 @@ mod tests {
             ("index", "log_verdicts_generated"),
             ("index", "log_verdicts_score"),
             ("index", "ticks_at"),
+            ("table", "agent_sources"),
             ("table", "audit_notified"),
             ("table", "baselines"),
             ("table", "check_runs"),

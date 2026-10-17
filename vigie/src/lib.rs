@@ -17,6 +17,7 @@ pub mod finding;
 pub mod http;
 pub mod ingest;
 pub mod logs;
+pub mod recommend;
 pub mod report;
 pub mod request_id;
 pub mod serve;

@@ -1,5 +1,5 @@
 ---
-status: pending
+status: done
 ---
 
 # Instruction: Application par l'agent : bac à sable, bascule, retour arrière

@@ -157,6 +157,20 @@ impl Delta {
     }
 }
 
+/// Préfixe des dossiers du bac à sable de l'agent (#13).
+pub const SANDBOX_PREFIX: &str = "/vigie-essai-";
+
+/// Trafic de Vigie elle-même, retiré de l'analyse (#13) : les contrôles du
+/// veilleur (`vigie/…`), l'agent (`vigie-agent-php/…`) et les requêtes du bac
+/// à sable de l'agent (`/vigie-essai-*`). Sans cela, le veilleur (UA d'outil,
+/// IP d'hébergeur, sans statiques) atteindrait le niveau élevé du score.
+pub fn is_vigie_traffic(entry: &Entry) -> bool {
+    let ua = entry.user_agent.as_bytes();
+    let starts =
+        |prefix: &[u8]| ua.len() >= prefix.len() && ua[..prefix.len()].eq_ignore_ascii_case(prefix);
+    entry.path.starts_with(SANDBOX_PREFIX) || starts(b"vigie/") || starts(b"vigie-agent-php/")
+}
+
 /// Résultats de chemin d'un lot, par chemin distinct.
 struct PathInfo {
     excluded: bool,
@@ -201,6 +215,10 @@ pub fn fold(entries: &[Entry], rules: &RuleSet, state: &mut SiteState, now_ms: i
             continue;
         }
         let path = entry.path.as_str();
+        if is_vigie_traffic(entry) {
+            delta.excluded += 1;
+            continue;
+        }
         let info = paths.entry(path).or_insert_with(|| PathInfo {
             excluded: rules.excluded(path),
             hits: vec![None; active.len()],

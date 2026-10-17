@@ -1,0 +1,5896 @@
+{
+  "bases": [
+    "# BEGIN vigie\n# Gere par Vigie (vigie site recommend) : ne pas modifier a la main.\nRewriteEngine On\n# ua jusqu'au 2026-07-15 12:00:00\nRewriteCond %{HTTP_USER_AGENT} \"Bytespider\" [NC,OR]\nRewriteCond %{HTTP_USER_AGENT} \"SEOkicks\" [NC,OR]\nRewriteCond %{HTTP_USER_AGENT} \"Screaming Frog\" [NC]\nRewriteCond %{TIME} <20260715120000\nRewriteRule ^ - [F,L]\n# END vigie\n",
+    "# BEGIN vigie\n# Gere par Vigie (vigie site recommend) : ne pas modifier a la main.\nRewriteEngine On\n# ip jusqu'au 2026-06-16 12:00:00\nRewriteCond %{REMOTE_ADDR} \"^203\\.0\\.113\\.7$\"\nRewriteCond %{TIME} <20260616120000\nRewriteRule ^ - [F,L]\n# ip jusqu'au 2026-06-16 12:00:00\nRewriteCond %{REMOTE_ADDR} \"^2001\\:db8\\:\\:7$\"\nRewriteCond %{TIME} <20260616120000\nRewriteRule ^ - [F,L]\n# END vigie\n",
+    "# BEGIN vigie\n# Gere par Vigie (vigie site recommend) : ne pas modifier a la main.\nRewriteEngine On\n# ua jusqu'au 2026-07-05 12:00:00\nRewriteCond %{HTTP_USER_AGENT} \"Bytespider\" [NC]\nRewriteCond %{TIME} <20260705120000\nRewriteRule ^ - [F,L]\n# ua jusqu'au 2026-07-15 12:00:00\nRewriteCond %{HTTP_USER_AGENT} \"MauiBot\" [NC]\nRewriteCond %{TIME} <20260715120000\nRewriteRule ^ - [F,L]\n# ip jusqu'au 2026-06-16 12:00:00\nRewriteCond %{REMOTE_ADDR} \"^192\\.0\\.2\\.44$\"\nRewriteCond %{TIME} <20260616120000\nRewriteRule ^ - [F,L]\n# END vigie\n",
+    "# BEGIN vigie\n# Gere par Vigie (vigie site recommend) : ne pas modifier a la main.\nRewriteEngine On\n# END vigie\n"
+  ],
+  "comment": "Vecteurs de la grammaire du bloc # BEGIN vigie (#13), verdicts du validateur Rust ; l'agent PHP doit rendre les mêmes.",
+  "fuzz": [
+    {
+      "at": 313,
+      "base": 0,
+      "byte": 56,
+      "op": "insert",
+      "verdict": "time-format"
+    },
+    {
+      "at": 98,
+      "base": 3,
+      "byte": 54,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 504,
+      "base": 2,
+      "byte": 43,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 321,
+      "base": 0,
+      "byte": 93,
+      "op": "replace",
+      "verdict": "time-format"
+    },
+    {
+      "at": 93,
+      "base": 2,
+      "byte": 98,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 96,
+      "base": 3,
+      "byte": 116,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 203,
+      "base": 1,
+      "byte": 55,
+      "op": "insert",
+      "verdict": "time-format"
+    },
+    {
+      "at": 165,
+      "base": 1,
+      "byte": 56,
+      "op": "delete",
+      "verdict": "valid"
+    },
+    {
+      "at": 232,
+      "base": 0,
+      "byte": 114,
+      "op": "delete",
+      "verdict": "flags"
+    },
+    {
+      "at": 96,
+      "base": 3,
+      "byte": 51,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 368,
+      "base": 2,
+      "byte": 34,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 95,
+      "base": 2,
+      "byte": 78,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 308,
+      "base": 1,
+      "byte": 49,
+      "op": "delete",
+      "verdict": "valid"
+    },
+    {
+      "at": 319,
+      "base": 0,
+      "byte": 50,
+      "op": "delete",
+      "verdict": "time-format"
+    },
+    {
+      "at": 350,
+      "base": 0,
+      "byte": 57,
+      "op": "replace",
+      "verdict": "end"
+    },
+    {
+      "at": 506,
+      "base": 2,
+      "byte": 60,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 171,
+      "base": 0,
+      "byte": 50,
+      "op": "delete",
+      "verdict": "valid"
+    },
+    {
+      "at": 98,
+      "base": 3,
+      "byte": 50,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 99,
+      "base": 1,
+      "byte": 13,
+      "op": "replace",
+      "verdict": "cr"
+    },
+    {
+      "at": 98,
+      "base": 3,
+      "byte": 52,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 97,
+      "base": 3,
+      "byte": 116,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 123,
+      "base": 0,
+      "byte": 50,
+      "op": "insert",
+      "verdict": "valid"
+    },
+    {
+      "at": 335,
+      "base": 0,
+      "byte": 79,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 313,
+      "base": 0,
+      "byte": 53,
+      "op": "delete",
+      "verdict": "time-format"
+    },
+    {
+      "at": 95,
+      "base": 3,
+      "byte": 35,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 214,
+      "base": 1,
+      "byte": 110,
+      "op": "delete",
+      "verdict": "time-format"
+    },
+    {
+      "at": 93,
+      "base": 3,
+      "byte": 54,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 13,
+      "base": 3,
+      "byte": 69,
+      "op": "delete",
+      "verdict": "begin"
+    },
+    {
+      "at": 309,
+      "base": 2,
+      "byte": 52,
+      "op": "delete",
+      "verdict": "valid"
+    },
+    {
+      "at": 164,
+      "base": 1,
+      "byte": 35,
+      "op": "delete",
+      "verdict": "valid"
+    },
+    {
+      "at": 179,
+      "base": 1,
+      "byte": 119,
+      "op": "replace",
+      "verdict": "quote"
+    },
+    {
+      "at": 98,
+      "base": 0,
+      "byte": 10,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 200,
+      "base": 1,
+      "byte": 117,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 236,
+      "base": 2,
+      "byte": 52,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 6,
+      "base": 0,
+      "byte": 78,
+      "op": "replace",
+      "verdict": "valid"
+    },
+    {
+      "at": 458,
+      "base": 2,
+      "byte": 34,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 308,
+      "base": 0,
+      "byte": 49,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 350,
+      "base": 2,
+      "byte": 55,
+      "op": "insert",
+      "verdict": "time-format"
+    },
+    {
+      "at": 527,
+      "base": 2,
+      "byte": 53,
+      "op": "replace",
+      "verdict": "final-newline"
+    },
+    {
+      "at": 225,
+      "base": 0,
+      "byte": 48,
+      "op": "insert",
+      "verdict": "valid"
+    },
+    {
+      "at": 232,
+      "base": 0,
+      "byte": 51,
+      "op": "replace",
+      "verdict": "flags"
+    },
+    {
+      "at": 12,
+      "base": 0,
+      "byte": 92,
+      "op": "replace",
+      "verdict": "continuation"
+    },
+    {
+      "at": 94,
+      "base": 1,
+      "byte": 92,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 92,
+      "base": 1,
+      "byte": 36,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 94,
+      "base": 3,
+      "byte": 54,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 99,
+      "base": 1,
+      "byte": 65,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 230,
+      "base": 2,
+      "byte": 91,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 319,
+      "base": 0,
+      "byte": 57,
+      "op": "replace",
+      "verdict": "valid"
+    },
+    {
+      "at": 96,
+      "base": 3,
+      "byte": 46,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 479,
+      "base": 2,
+      "byte": 123,
+      "op": "delete",
+      "verdict": "time-format"
+    },
+    {
+      "at": 306,
+      "base": 0,
+      "byte": 87,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 291,
+      "base": 1,
+      "byte": 114,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 56,
+      "base": 3,
+      "byte": 9,
+      "op": "delete",
+      "verdict": "valid"
+    },
+    {
+      "at": 362,
+      "base": 2,
+      "byte": 53,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 226,
+      "base": 1,
+      "byte": 0,
+      "op": "replace",
+      "verdict": "nul"
+    },
+    {
+      "at": 307,
+      "base": 2,
+      "byte": 53,
+      "op": "delete",
+      "verdict": "valid"
+    },
+    {
+      "at": 173,
+      "base": 0,
+      "byte": 51,
+      "op": "delete",
+      "verdict": "valid"
+    },
+    {
+      "at": 374,
+      "base": 1,
+      "byte": 53,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 345,
+      "base": 0,
+      "byte": 54,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 99,
+      "base": 3,
+      "byte": 67,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 488,
+      "base": 2,
+      "byte": 78,
+      "op": "replace",
+      "verdict": "time-format"
+    },
+    {
+      "at": 457,
+      "base": 2,
+      "byte": 125,
+      "op": "delete",
+      "verdict": "quote"
+    },
+    {
+      "at": 94,
+      "base": 0,
+      "byte": 114,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 99,
+      "base": 0,
+      "byte": 95,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 97,
+      "base": 3,
+      "byte": 51,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 96,
+      "base": 3,
+      "byte": 54,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 384,
+      "base": 2,
+      "byte": 36,
+      "op": "replace",
+      "verdict": "valid"
+    },
+    {
+      "at": 338,
+      "base": 0,
+      "byte": 58,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 229,
+      "base": 1,
+      "byte": 56,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 160,
+      "base": 2,
+      "byte": 13,
+      "op": "insert",
+      "verdict": "cr"
+    },
+    {
+      "at": 299,
+      "base": 2,
+      "byte": 50,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 96,
+      "base": 3,
+      "byte": 0,
+      "op": "insert",
+      "verdict": "nul"
+    },
+    {
+      "at": 342,
+      "base": 2,
+      "byte": 48,
+      "op": "replace",
+      "verdict": "time-format"
+    },
+    {
+      "at": 353,
+      "base": 0,
+      "byte": 50,
+      "op": "insert",
+      "verdict": "end"
+    },
+    {
+      "at": 373,
+      "base": 1,
+      "byte": 46,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 91,
+      "base": 3,
+      "byte": 110,
+      "op": "replace",
+      "verdict": "valid"
+    },
+    {
+      "at": 91,
+      "base": 3,
+      "byte": 49,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 301,
+      "base": 1,
+      "byte": 51,
+      "op": "delete",
+      "verdict": "ip"
+    },
+    {
+      "at": 132,
+      "base": 1,
+      "byte": 63,
+      "op": "insert",
+      "verdict": "valid"
+    },
+    {
+      "at": 389,
+      "base": 2,
+      "byte": 70,
+      "op": "replace",
+      "verdict": "valid"
+    },
+    {
+      "at": 315,
+      "base": 2,
+      "byte": 47,
+      "op": "delete",
+      "verdict": "flags"
+    },
+    {
+      "at": 335,
+      "base": 0,
+      "byte": 122,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 336,
+      "base": 1,
+      "byte": 49,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 92,
+      "base": 3,
+      "byte": 51,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 91,
+      "base": 3,
+      "byte": 56,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 356,
+      "base": 0,
+      "byte": 50,
+      "op": "insert",
+      "verdict": "end"
+    },
+    {
+      "at": 80,
+      "base": 1,
+      "byte": 51,
+      "op": "replace",
+      "verdict": "valid"
+    },
+    {
+      "at": 174,
+      "base": 0,
+      "byte": 126,
+      "op": "replace",
+      "verdict": "ua-pattern"
+    },
+    {
+      "at": 97,
+      "base": 3,
+      "byte": 63,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 94,
+      "base": 3,
+      "byte": 50,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 276,
+      "base": 0,
+      "byte": 48,
+      "op": "insert",
+      "verdict": "valid"
+    },
+    {
+      "at": 76,
+      "base": 1,
+      "byte": 55,
+      "op": "replace",
+      "verdict": "valid"
+    },
+    {
+      "at": 237,
+      "base": 1,
+      "byte": 48,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 171,
+      "base": 1,
+      "byte": 52,
+      "op": "insert",
+      "verdict": "ip"
+    },
+    {
+      "at": 99,
+      "base": 3,
+      "byte": 101,
+      "op": "delete",
+      "verdict": "end"
+    },
+    {
+      "at": 229,
+      "base": 0,
+      "byte": 43,
+      "op": "delete",
+      "verdict": "flags"
+    },
+    {
+      "at": 210,
+      "base": 1,
+      "byte": 66,
+      "op": "delete",
+      "verdict": "time-format"
+    },
+    {
+      "at": 94,
+      "base": 3,
+      "byte": 50,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 370,
+      "base": 1,
+      "byte": 56,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 197,
+      "base": 1,
+      "byte": 68,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 146,
+      "base": 0,
+      "byte": 54,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 173,
+      "base": 0,
+      "byte": 55,
+      "op": "replace",
+      "verdict": "valid"
+    },
+    {
+      "at": 339,
+      "base": 2,
+      "byte": 0,
+      "op": "insert",
+      "verdict": "nul"
+    },
+    {
+      "at": 96,
+      "base": 3,
+      "byte": 46,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 92,
+      "base": 0,
+      "byte": 125,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 213,
+      "base": 1,
+      "byte": 101,
+      "op": "insert",
+      "verdict": "time-format"
+    },
+    {
+      "at": 72,
+      "base": 3,
+      "byte": 122,
+      "op": "replace",
+      "verdict": "valid"
+    },
+    {
+      "at": 324,
+      "base": 0,
+      "byte": 37,
+      "op": "insert",
+      "verdict": "time-format"
+    },
+    {
+      "at": 305,
+      "base": 1,
+      "byte": 55,
+      "op": "replace",
+      "verdict": "ip-pattern"
+    },
+    {
+      "at": 511,
+      "base": 2,
+      "byte": 13,
+      "op": "replace",
+      "verdict": "cr"
+    },
+    {
+      "at": 59,
+      "base": 2,
+      "byte": 87,
+      "op": "delete",
+      "verdict": "valid"
+    },
+    {
+      "at": 97,
+      "base": 3,
+      "byte": 55,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 95,
+      "base": 1,
+      "byte": 53,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 340,
+      "base": 2,
+      "byte": 48,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 97,
+      "base": 3,
+      "byte": 48,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 96,
+      "base": 3,
+      "byte": 94,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 353,
+      "base": 1,
+      "byte": 54,
+      "op": "insert",
+      "verdict": "time-format"
+    },
+    {
+      "at": 476,
+      "base": 2,
+      "byte": 50,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 98,
+      "base": 3,
+      "byte": 48,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 95,
+      "base": 0,
+      "byte": 95,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 91,
+      "base": 3,
+      "byte": 53,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 323,
+      "base": 2,
+      "byte": 101,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 317,
+      "base": 0,
+      "byte": 65,
+      "op": "delete",
+      "verdict": "time-format"
+    },
+    {
+      "at": 98,
+      "base": 3,
+      "byte": 58,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 317,
+      "base": 2,
+      "byte": 68,
+      "op": "insert",
+      "verdict": "flags"
+    },
+    {
+      "at": 37,
+      "base": 3,
+      "byte": 35,
+      "op": "delete",
+      "verdict": "valid"
+    },
+    {
+      "at": 97,
+      "base": 3,
+      "byte": 54,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 99,
+      "base": 3,
+      "byte": 51,
+      "op": "delete",
+      "verdict": "end"
+    },
+    {
+      "at": 441,
+      "base": 2,
+      "byte": 51,
+      "op": "insert",
+      "verdict": "ip-pattern"
+    },
+    {
+      "at": 295,
+      "base": 1,
+      "byte": 62,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 93,
+      "base": 3,
+      "byte": 0,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 218,
+      "base": 0,
+      "byte": 48,
+      "op": "replace",
+      "verdict": "valid"
+    },
+    {
+      "at": 98,
+      "base": 2,
+      "byte": 49,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 97,
+      "base": 3,
+      "byte": 62,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 6,
+      "base": 3,
+      "byte": 49,
+      "op": "insert",
+      "verdict": "begin"
+    },
+    {
+      "at": 163,
+      "base": 0,
+      "byte": 56,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 179,
+      "base": 1,
+      "byte": 57,
+      "op": "delete",
+      "verdict": "quote"
+    },
+    {
+      "at": 278,
+      "base": 0,
+      "byte": 84,
+      "op": "replace",
+      "verdict": "valid"
+    },
+    {
+      "at": 93,
+      "base": 3,
+      "byte": 95,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 210,
+      "base": 2,
+      "byte": 98,
+      "op": "insert",
+      "verdict": "time-format"
+    },
+    {
+      "at": 346,
+      "base": 0,
+      "byte": 99,
+      "op": "replace",
+      "verdict": "end"
+    },
+    {
+      "at": 271,
+      "base": 0,
+      "byte": 52,
+      "op": "delete",
+      "verdict": "valid"
+    },
+    {
+      "at": 237,
+      "base": 1,
+      "byte": 84,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 97,
+      "base": 2,
+      "byte": 97,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 365,
+      "base": 1,
+      "byte": 117,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 171,
+      "base": 1,
+      "byte": 46,
+      "op": "delete",
+      "verdict": "valid"
+    },
+    {
+      "at": 94,
+      "base": 3,
+      "byte": 54,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 235,
+      "base": 2,
+      "byte": 46,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 92,
+      "base": 2,
+      "byte": 255,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 167,
+      "base": 1,
+      "byte": 51,
+      "op": "insert",
+      "verdict": "ip-pattern"
+    },
+    {
+      "at": 93,
+      "base": 3,
+      "byte": 56,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 319,
+      "base": 0,
+      "byte": 85,
+      "op": "insert",
+      "verdict": "time-format"
+    },
+    {
+      "at": 92,
+      "base": 3,
+      "byte": 90,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 91,
+      "base": 3,
+      "byte": 52,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 175,
+      "base": 1,
+      "byte": 52,
+      "op": "delete",
+      "verdict": "ip-pattern"
+    },
+    {
+      "at": 167,
+      "base": 2,
+      "byte": 79,
+      "op": "delete",
+      "verdict": "valid"
+    },
+    {
+      "at": 132,
+      "base": 0,
+      "byte": 78,
+      "op": "replace",
+      "verdict": "valid"
+    },
+    {
+      "at": 93,
+      "base": 3,
+      "byte": 48,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 480,
+      "base": 2,
+      "byte": 56,
+      "op": "delete",
+      "verdict": "time-format"
+    },
+    {
+      "at": 93,
+      "base": 3,
+      "byte": 94,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 374,
+      "base": 2,
+      "byte": 65,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 263,
+      "base": 0,
+      "byte": 56,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 97,
+      "base": 1,
+      "byte": 50,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 375,
+      "base": 1,
+      "byte": 56,
+      "op": "delete",
+      "verdict": "end"
+    },
+    {
+      "at": 366,
+      "base": 1,
+      "byte": 56,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 339,
+      "base": 2,
+      "byte": 46,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 378,
+      "base": 2,
+      "byte": 49,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 156,
+      "base": 0,
+      "byte": 56,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 164,
+      "base": 0,
+      "byte": 54,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 93,
+      "base": 3,
+      "byte": 100,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 281,
+      "base": 0,
+      "byte": 57,
+      "op": "insert",
+      "verdict": "valid"
+    },
+    {
+      "at": 97,
+      "base": 0,
+      "byte": 63,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 336,
+      "base": 0,
+      "byte": 53,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 320,
+      "base": 2,
+      "byte": 48,
+      "op": "replace",
+      "verdict": "flags"
+    },
+    {
+      "at": 343,
+      "base": 0,
+      "byte": 49,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 170,
+      "base": 0,
+      "byte": 53,
+      "op": "replace",
+      "verdict": "valid"
+    },
+    {
+      "at": 97,
+      "base": 3,
+      "byte": 50,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 89,
+      "base": 3,
+      "byte": 94,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 386,
+      "base": 1,
+      "byte": 32,
+      "op": "delete",
+      "verdict": "end"
+    },
+    {
+      "at": 320,
+      "base": 2,
+      "byte": 37,
+      "op": "replace",
+      "verdict": "flags"
+    },
+    {
+      "at": 109,
+      "base": 3,
+      "byte": 110,
+      "op": "replace",
+      "verdict": "end"
+    },
+    {
+      "at": 283,
+      "base": 0,
+      "byte": 53,
+      "op": "insert",
+      "verdict": "flags"
+    },
+    {
+      "at": 96,
+      "base": 1,
+      "byte": 62,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 374,
+      "base": 1,
+      "byte": 98,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 207,
+      "base": 2,
+      "byte": 54,
+      "op": "delete",
+      "verdict": "time-format"
+    },
+    {
+      "at": 333,
+      "base": 0,
+      "byte": 54,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 94,
+      "base": 3,
+      "byte": 57,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 321,
+      "base": 0,
+      "byte": 70,
+      "op": "replace",
+      "verdict": "time-format"
+    },
+    {
+      "at": 306,
+      "base": 0,
+      "byte": 82,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 184,
+      "base": 2,
+      "byte": 119,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 373,
+      "base": 1,
+      "byte": 62,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 165,
+      "base": 2,
+      "byte": 49,
+      "op": "insert",
+      "verdict": "quote"
+    },
+    {
+      "at": 77,
+      "base": 0,
+      "byte": 114,
+      "op": "replace",
+      "verdict": "valid"
+    },
+    {
+      "at": 214,
+      "base": 1,
+      "byte": 54,
+      "op": "replace",
+      "verdict": "valid"
+    },
+    {
+      "at": 215,
+      "base": 0,
+      "byte": 92,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 314,
+      "base": 2,
+      "byte": 49,
+      "op": "replace",
+      "verdict": "quote"
+    },
+    {
+      "at": 96,
+      "base": 3,
+      "byte": 56,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 202,
+      "base": 2,
+      "byte": 48,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 374,
+      "base": 1,
+      "byte": 60,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 99,
+      "base": 1,
+      "byte": 48,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 177,
+      "base": 1,
+      "byte": 53,
+      "op": "delete",
+      "verdict": "ip-pattern"
+    },
+    {
+      "at": 94,
+      "base": 3,
+      "byte": 52,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 89,
+      "base": 3,
+      "byte": 111,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 343,
+      "base": 1,
+      "byte": 48,
+      "op": "delete",
+      "verdict": "time-format"
+    },
+    {
+      "at": 370,
+      "base": 2,
+      "byte": 32,
+      "op": "replace",
+      "verdict": "valid"
+    },
+    {
+      "at": 225,
+      "base": 0,
+      "byte": 54,
+      "op": "replace",
+      "verdict": "valid"
+    },
+    {
+      "at": 94,
+      "base": 3,
+      "byte": 53,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 333,
+      "base": 0,
+      "byte": 69,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 316,
+      "base": 1,
+      "byte": 58,
+      "op": "delete",
+      "verdict": "quote"
+    },
+    {
+      "at": 302,
+      "base": 2,
+      "byte": 62,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 209,
+      "base": 2,
+      "byte": 53,
+      "op": "delete",
+      "verdict": "time-format"
+    },
+    {
+      "at": 76,
+      "base": 2,
+      "byte": 49,
+      "op": "delete",
+      "verdict": "valid"
+    },
+    {
+      "at": 442,
+      "base": 2,
+      "byte": 0,
+      "op": "insert",
+      "verdict": "nul"
+    },
+    {
+      "at": 236,
+      "base": 2,
+      "byte": 62,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 95,
+      "base": 3,
+      "byte": 55,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 316,
+      "base": 1,
+      "byte": 57,
+      "op": "insert",
+      "verdict": "ip-pattern"
+    },
+    {
+      "at": 339,
+      "base": 0,
+      "byte": 54,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 184,
+      "base": 0,
+      "byte": 78,
+      "op": "delete",
+      "verdict": "flags"
+    },
+    {
+      "at": 129,
+      "base": 2,
+      "byte": 10,
+      "op": "delete",
+      "verdict": "valid"
+    },
+    {
+      "at": 138,
+      "base": 1,
+      "byte": 97,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 512,
+      "base": 2,
+      "byte": 101,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 480,
+      "base": 2,
+      "byte": 13,
+      "op": "insert",
+      "verdict": "cr"
+    },
+    {
+      "at": 296,
+      "base": 1,
+      "byte": 49,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 422,
+      "base": 2,
+      "byte": 50,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 97,
+      "base": 3,
+      "byte": 126,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 304,
+      "base": 1,
+      "byte": 48,
+      "op": "insert",
+      "verdict": "ip"
+    },
+    {
+      "at": 92,
+      "base": 3,
+      "byte": 0,
+      "op": "insert",
+      "verdict": "nul"
+    },
+    {
+      "at": 93,
+      "base": 3,
+      "byte": 95,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 218,
+      "base": 2,
+      "byte": 60,
+      "op": "delete",
+      "verdict": "time-format"
+    },
+    {
+      "at": 338,
+      "base": 0,
+      "byte": 57,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 96,
+      "base": 1,
+      "byte": 52,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 340,
+      "base": 0,
+      "byte": 48,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 8,
+      "base": 3,
+      "byte": 50,
+      "op": "delete",
+      "verdict": "begin"
+    },
+    {
+      "at": 193,
+      "base": 2,
+      "byte": 66,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 220,
+      "base": 0,
+      "byte": 98,
+      "op": "delete",
+      "verdict": "valid"
+    },
+    {
+      "at": 105,
+      "base": 3,
+      "byte": 118,
+      "op": "delete",
+      "verdict": "end"
+    },
+    {
+      "at": 444,
+      "base": 2,
+      "byte": 54,
+      "op": "delete",
+      "verdict": "valid"
+    },
+    {
+      "at": 207,
+      "base": 1,
+      "byte": 36,
+      "op": "insert",
+      "verdict": "time-format"
+    },
+    {
+      "at": 352,
+      "base": 2,
+      "byte": 48,
+      "op": "insert",
+      "verdict": "time-format"
+    },
+    {
+      "at": 280,
+      "base": 0,
+      "byte": 78,
+      "op": "replace",
+      "verdict": "valid"
+    },
+    {
+      "at": 92,
+      "base": 3,
+      "byte": 98,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 269,
+      "base": 0,
+      "byte": 56,
+      "op": "insert",
+      "verdict": "valid"
+    },
+    {
+      "at": 99,
+      "base": 3,
+      "byte": 116,
+      "op": "replace",
+      "verdict": "end"
+    },
+    {
+      "at": 99,
+      "base": 3,
+      "byte": 10,
+      "op": "delete",
+      "verdict": "end"
+    },
+    {
+      "at": 84,
+      "base": 3,
+      "byte": 10,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 97,
+      "base": 3,
+      "byte": 101,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 224,
+      "base": 0,
+      "byte": 49,
+      "op": "insert",
+      "verdict": "valid"
+    },
+    {
+      "at": 297,
+      "base": 1,
+      "byte": 54,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 232,
+      "base": 0,
+      "byte": 66,
+      "op": "insert",
+      "verdict": "flags"
+    },
+    {
+      "at": 173,
+      "base": 0,
+      "byte": 10,
+      "op": "delete",
+      "verdict": "valid"
+    },
+    {
+      "at": 373,
+      "base": 2,
+      "byte": 67,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 357,
+      "base": 0,
+      "byte": 124,
+      "op": "delete",
+      "verdict": "end"
+    },
+    {
+      "at": 276,
+      "base": 0,
+      "byte": 43,
+      "op": "insert",
+      "verdict": "ua-pattern"
+    },
+    {
+      "at": 200,
+      "base": 1,
+      "byte": 56,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 98,
+      "base": 2,
+      "byte": 46,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 250,
+      "base": 0,
+      "byte": 48,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 93,
+      "base": 3,
+      "byte": 68,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 92,
+      "base": 1,
+      "byte": 52,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 513,
+      "base": 2,
+      "byte": 102,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 216,
+      "base": 0,
+      "byte": 57,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 279,
+      "base": 0,
+      "byte": 53,
+      "op": "delete",
+      "verdict": "valid"
+    },
+    {
+      "at": 161,
+      "base": 0,
+      "byte": 57,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 235,
+      "base": 2,
+      "byte": 55,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 237,
+      "base": 1,
+      "byte": 54,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 97,
+      "base": 0,
+      "byte": 13,
+      "op": "replace",
+      "verdict": "cr"
+    },
+    {
+      "at": 508,
+      "base": 2,
+      "byte": 90,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 94,
+      "base": 3,
+      "byte": 101,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 96,
+      "base": 0,
+      "byte": 34,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 95,
+      "base": 3,
+      "byte": 116,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 449,
+      "base": 2,
+      "byte": 98,
+      "op": "insert",
+      "verdict": "ip-pattern"
+    },
+    {
+      "at": 311,
+      "base": 2,
+      "byte": 66,
+      "op": "insert",
+      "verdict": "valid"
+    },
+    {
+      "at": 482,
+      "base": 2,
+      "byte": 43,
+      "op": "delete",
+      "verdict": "time-format"
+    },
+    {
+      "at": 488,
+      "base": 2,
+      "byte": 36,
+      "op": "insert",
+      "verdict": "time-format"
+    },
+    {
+      "at": 339,
+      "base": 0,
+      "byte": 43,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 197,
+      "base": 1,
+      "byte": 62,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 348,
+      "base": 2,
+      "byte": 50,
+      "op": "insert",
+      "verdict": "time-format"
+    },
+    {
+      "at": 312,
+      "base": 0,
+      "byte": 97,
+      "op": "delete",
+      "verdict": "time-format"
+    },
+    {
+      "at": 92,
+      "base": 3,
+      "byte": 57,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 91,
+      "base": 1,
+      "byte": 48,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 161,
+      "base": 0,
+      "byte": 102,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 315,
+      "base": 2,
+      "byte": 48,
+      "op": "delete",
+      "verdict": "flags"
+    },
+    {
+      "at": 158,
+      "base": 1,
+      "byte": 70,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 92,
+      "base": 3,
+      "byte": 50,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 99,
+      "base": 3,
+      "byte": 55,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 211,
+      "base": 0,
+      "byte": 62,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 99,
+      "base": 3,
+      "byte": 53,
+      "op": "delete",
+      "verdict": "end"
+    },
+    {
+      "at": 349,
+      "base": 2,
+      "byte": 122,
+      "op": "replace",
+      "verdict": "time-format"
+    },
+    {
+      "at": 92,
+      "base": 2,
+      "byte": 56,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 97,
+      "base": 3,
+      "byte": 110,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 330,
+      "base": 0,
+      "byte": 52,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 91,
+      "base": 3,
+      "byte": 99,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 300,
+      "base": 1,
+      "byte": 50,
+      "op": "replace",
+      "verdict": "ip-pattern"
+    },
+    {
+      "at": 97,
+      "base": 3,
+      "byte": 54,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 368,
+      "base": 1,
+      "byte": 99,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 304,
+      "base": 2,
+      "byte": 35,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 6,
+      "base": 1,
+      "byte": 50,
+      "op": "insert",
+      "verdict": "begin"
+    },
+    {
+      "at": 171,
+      "base": 1,
+      "byte": 114,
+      "op": "delete",
+      "verdict": "valid"
+    },
+    {
+      "at": 273,
+      "base": 0,
+      "byte": 34,
+      "op": "delete",
+      "verdict": "valid"
+    },
+    {
+      "at": 292,
+      "base": 0,
+      "byte": 54,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 337,
+      "base": 1,
+      "byte": 34,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 222,
+      "base": 2,
+      "byte": 53,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 307,
+      "base": 0,
+      "byte": 54,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 209,
+      "base": 2,
+      "byte": 125,
+      "op": "insert",
+      "verdict": "time-format"
+    },
+    {
+      "at": 96,
+      "base": 0,
+      "byte": 99,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 297,
+      "base": 1,
+      "byte": 110,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 342,
+      "base": 0,
+      "byte": 57,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 209,
+      "base": 1,
+      "byte": 91,
+      "op": "delete",
+      "verdict": "time-format"
+    },
+    {
+      "at": 179,
+      "base": 1,
+      "byte": 94,
+      "op": "replace",
+      "verdict": "quote"
+    },
+    {
+      "at": 213,
+      "base": 1,
+      "byte": 84,
+      "op": "insert",
+      "verdict": "time-format"
+    },
+    {
+      "at": 453,
+      "base": 2,
+      "byte": 114,
+      "op": "insert",
+      "verdict": "ip-pattern"
+    },
+    {
+      "at": 367,
+      "base": 2,
+      "byte": 78,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 359,
+      "base": 1,
+      "byte": 62,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 422,
+      "base": 2,
+      "byte": 50,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 92,
+      "base": 3,
+      "byte": 36,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 211,
+      "base": 0,
+      "byte": 35,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 96,
+      "base": 1,
+      "byte": 123,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 381,
+      "base": 1,
+      "byte": 78,
+      "op": "replace",
+      "verdict": "end"
+    },
+    {
+      "at": 374,
+      "base": 1,
+      "byte": 45,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 345,
+      "base": 0,
+      "byte": 128,
+      "op": "insert",
+      "verdict": "byte"
+    },
+    {
+      "at": 167,
+      "base": 1,
+      "byte": 32,
+      "op": "replace",
+      "verdict": "ip-pattern"
+    },
+    {
+      "at": 227,
+      "base": 1,
+      "byte": 110,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 97,
+      "base": 2,
+      "byte": 52,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 92,
+      "base": 2,
+      "byte": 37,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 345,
+      "base": 0,
+      "byte": 57,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 86,
+      "base": 1,
+      "byte": 48,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 307,
+      "base": 1,
+      "byte": 0,
+      "op": "delete",
+      "verdict": "valid"
+    },
+    {
+      "at": 201,
+      "base": 1,
+      "byte": 99,
+      "op": "replace",
+      "verdict": "time-format"
+    },
+    {
+      "at": 370,
+      "base": 1,
+      "byte": 95,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 231,
+      "base": 2,
+      "byte": 10,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 24,
+      "base": 1,
+      "byte": 52,
+      "op": "insert",
+      "verdict": "valid"
+    },
+    {
+      "at": 97,
+      "base": 2,
+      "byte": 92,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 356,
+      "base": 1,
+      "byte": 52,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 204,
+      "base": 1,
+      "byte": 52,
+      "op": "replace",
+      "verdict": "time-past"
+    },
+    {
+      "at": 158,
+      "base": 1,
+      "byte": 82,
+      "op": "replace",
+      "verdict": "valid"
+    },
+    {
+      "at": 352,
+      "base": 2,
+      "byte": 125,
+      "op": "insert",
+      "verdict": "time-format"
+    },
+    {
+      "at": 189,
+      "base": 1,
+      "byte": 91,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 174,
+      "base": 1,
+      "byte": 51,
+      "op": "replace",
+      "verdict": "ip-pattern"
+    },
+    {
+      "at": 236,
+      "base": 2,
+      "byte": 92,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 175,
+      "base": 0,
+      "byte": 32,
+      "op": "replace",
+      "verdict": "valid"
+    },
+    {
+      "at": 93,
+      "base": 2,
+      "byte": 49,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 484,
+      "base": 2,
+      "byte": 126,
+      "op": "delete",
+      "verdict": "time-format"
+    },
+    {
+      "at": 93,
+      "base": 3,
+      "byte": 48,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 95,
+      "base": 3,
+      "byte": 57,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 300,
+      "base": 2,
+      "byte": 53,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 156,
+      "base": 1,
+      "byte": 57,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 98,
+      "base": 2,
+      "byte": 44,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 318,
+      "base": 1,
+      "byte": 47,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 94,
+      "base": 3,
+      "byte": 90,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 83,
+      "base": 2,
+      "byte": 32,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 355,
+      "base": 1,
+      "byte": 48,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 118,
+      "base": 0,
+      "byte": 56,
+      "op": "replace",
+      "verdict": "valid"
+    },
+    {
+      "at": 445,
+      "base": 2,
+      "byte": 94,
+      "op": "replace",
+      "verdict": "ip-pattern"
+    },
+    {
+      "at": 285,
+      "base": 1,
+      "byte": 51,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 96,
+      "base": 3,
+      "byte": 68,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 70,
+      "base": 1,
+      "byte": 122,
+      "op": "delete",
+      "verdict": "valid"
+    },
+    {
+      "at": 93,
+      "base": 3,
+      "byte": 51,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 92,
+      "base": 3,
+      "byte": 70,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 94,
+      "base": 3,
+      "byte": 50,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 99,
+      "base": 3,
+      "byte": 51,
+      "op": "replace",
+      "verdict": "end"
+    },
+    {
+      "at": 476,
+      "base": 2,
+      "byte": 102,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 169,
+      "base": 1,
+      "byte": 10,
+      "op": "insert",
+      "verdict": "quote"
+    },
+    {
+      "at": 88,
+      "base": 3,
+      "byte": 79,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 234,
+      "base": 1,
+      "byte": 122,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 513,
+      "base": 2,
+      "byte": 49,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 94,
+      "base": 3,
+      "byte": 63,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 94,
+      "base": 3,
+      "byte": 95,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 98,
+      "base": 3,
+      "byte": 33,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 236,
+      "base": 2,
+      "byte": 49,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 12,
+      "base": 1,
+      "byte": 94,
+      "op": "insert",
+      "verdict": "begin"
+    },
+    {
+      "at": 203,
+      "base": 2,
+      "byte": 99,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 217,
+      "base": 1,
+      "byte": 49,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 269,
+      "base": 0,
+      "byte": 57,
+      "op": "delete",
+      "verdict": "valid"
+    },
+    {
+      "at": 86,
+      "base": 2,
+      "byte": 53,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 336,
+      "base": 1,
+      "byte": 57,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 203,
+      "base": 0,
+      "byte": 90,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 99,
+      "base": 1,
+      "byte": 78,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 205,
+      "base": 1,
+      "byte": 48,
+      "op": "delete",
+      "verdict": "time-format"
+    },
+    {
+      "at": 157,
+      "base": 1,
+      "byte": 45,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 94,
+      "base": 3,
+      "byte": 52,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 91,
+      "base": 3,
+      "byte": 56,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 183,
+      "base": 1,
+      "byte": 49,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 181,
+      "base": 1,
+      "byte": 56,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 203,
+      "base": 1,
+      "byte": 49,
+      "op": "delete",
+      "verdict": "time-format"
+    },
+    {
+      "at": 355,
+      "base": 1,
+      "byte": 36,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 89,
+      "base": 3,
+      "byte": 52,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 85,
+      "base": 3,
+      "byte": 67,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 368,
+      "base": 2,
+      "byte": 47,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 341,
+      "base": 0,
+      "byte": 52,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 346,
+      "base": 1,
+      "byte": 48,
+      "op": "replace",
+      "verdict": "time-past"
+    },
+    {
+      "at": 200,
+      "base": 1,
+      "byte": 65,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 13,
+      "base": 2,
+      "byte": 70,
+      "op": "replace",
+      "verdict": "begin"
+    },
+    {
+      "at": 236,
+      "base": 1,
+      "byte": 48,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 88,
+      "base": 0,
+      "byte": 62,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 213,
+      "base": 1,
+      "byte": 46,
+      "op": "insert",
+      "verdict": "time-format"
+    },
+    {
+      "at": 345,
+      "base": 2,
+      "byte": 91,
+      "op": "insert",
+      "verdict": "time-format"
+    },
+    {
+      "at": 266,
+      "base": 0,
+      "byte": 57,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 336,
+      "base": 1,
+      "byte": 63,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 52,
+      "base": 1,
+      "byte": 57,
+      "op": "insert",
+      "verdict": "valid"
+    },
+    {
+      "at": 98,
+      "base": 3,
+      "byte": 55,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 95,
+      "base": 3,
+      "byte": 82,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 96,
+      "base": 0,
+      "byte": 55,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 357,
+      "base": 0,
+      "byte": 53,
+      "op": "delete",
+      "verdict": "end"
+    },
+    {
+      "at": 98,
+      "base": 3,
+      "byte": 46,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 99,
+      "base": 3,
+      "byte": 33,
+      "op": "replace",
+      "verdict": "end"
+    },
+    {
+      "at": 344,
+      "base": 0,
+      "byte": 51,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 91,
+      "base": 3,
+      "byte": 48,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 183,
+      "base": 0,
+      "byte": 53,
+      "op": "replace",
+      "verdict": "flags"
+    },
+    {
+      "at": 227,
+      "base": 1,
+      "byte": 54,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 513,
+      "base": 2,
+      "byte": 98,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 341,
+      "base": 2,
+      "byte": 52,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 326,
+      "base": 2,
+      "byte": 110,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 174,
+      "base": 0,
+      "byte": 100,
+      "op": "delete",
+      "verdict": "valid"
+    },
+    {
+      "at": 233,
+      "base": 1,
+      "byte": 94,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 266,
+      "base": 1,
+      "byte": 51,
+      "op": "delete",
+      "verdict": "valid"
+    },
+    {
+      "at": 267,
+      "base": 0,
+      "byte": 86,
+      "op": "insert",
+      "verdict": "quote"
+    },
+    {
+      "at": 91,
+      "base": 3,
+      "byte": 54,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 97,
+      "base": 0,
+      "byte": 119,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 350,
+      "base": 1,
+      "byte": 116,
+      "op": "insert",
+      "verdict": "time-format"
+    },
+    {
+      "at": 490,
+      "base": 2,
+      "byte": 35,
+      "op": "delete",
+      "verdict": "time-format"
+    },
+    {
+      "at": 309,
+      "base": 0,
+      "byte": 62,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 214,
+      "base": 2,
+      "byte": 48,
+      "op": "replace",
+      "verdict": "valid"
+    },
+    {
+      "at": 93,
+      "base": 1,
+      "byte": 97,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 94,
+      "base": 3,
+      "byte": 55,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 93,
+      "base": 3,
+      "byte": 13,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 363,
+      "base": 1,
+      "byte": 55,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 94,
+      "base": 3,
+      "byte": 56,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 92,
+      "base": 0,
+      "byte": 57,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 95,
+      "base": 3,
+      "byte": 49,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 343,
+      "base": 2,
+      "byte": 48,
+      "op": "delete",
+      "verdict": "time-format"
+    },
+    {
+      "at": 95,
+      "base": 0,
+      "byte": 110,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 312,
+      "base": 0,
+      "byte": 116,
+      "op": "replace",
+      "verdict": "time-format"
+    },
+    {
+      "at": 97,
+      "base": 2,
+      "byte": 79,
+      "op": "replace",
+      "verdict": "valid"
+    },
+    {
+      "at": 485,
+      "base": 2,
+      "byte": 55,
+      "op": "delete",
+      "verdict": "time-format"
+    },
+    {
+      "at": 351,
+      "base": 1,
+      "byte": 85,
+      "op": "delete",
+      "verdict": "time-format"
+    },
+    {
+      "at": 318,
+      "base": 1,
+      "byte": 102,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 91,
+      "base": 0,
+      "byte": 66,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 97,
+      "base": 3,
+      "byte": 49,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 97,
+      "base": 0,
+      "byte": 118,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 481,
+      "base": 2,
+      "byte": 122,
+      "op": "delete",
+      "verdict": "time-format"
+    },
+    {
+      "at": 2,
+      "base": 3,
+      "byte": 92,
+      "op": "replace",
+      "verdict": "begin"
+    },
+    {
+      "at": 97,
+      "base": 3,
+      "byte": 57,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 185,
+      "base": 1,
+      "byte": 123,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 376,
+      "base": 2,
+      "byte": 66,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 96,
+      "base": 2,
+      "byte": 57,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 345,
+      "base": 1,
+      "byte": 51,
+      "op": "replace",
+      "verdict": "time-format"
+    },
+    {
+      "at": 350,
+      "base": 2,
+      "byte": 60,
+      "op": "replace",
+      "verdict": "time-format"
+    },
+    {
+      "at": 193,
+      "base": 0,
+      "byte": 55,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 97,
+      "base": 0,
+      "byte": 55,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 239,
+      "base": 0,
+      "byte": 60,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 364,
+      "base": 1,
+      "byte": 116,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 169,
+      "base": 2,
+      "byte": 53,
+      "op": "delete",
+      "verdict": "valid"
+    },
+    {
+      "at": 284,
+      "base": 1,
+      "byte": 49,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 294,
+      "base": 1,
+      "byte": 124,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 173,
+      "base": 2,
+      "byte": 69,
+      "op": "insert",
+      "verdict": "valid"
+    },
+    {
+      "at": 353,
+      "base": 2,
+      "byte": 111,
+      "op": "insert",
+      "verdict": "time-format"
+    },
+    {
+      "at": 88,
+      "base": 0,
+      "byte": 66,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 375,
+      "base": 2,
+      "byte": 49,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 374,
+      "base": 1,
+      "byte": 57,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 98,
+      "base": 3,
+      "byte": 48,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 279,
+      "base": 0,
+      "byte": 55,
+      "op": "replace",
+      "verdict": "valid"
+    },
+    {
+      "at": 98,
+      "base": 3,
+      "byte": 49,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 352,
+      "base": 1,
+      "byte": 56,
+      "op": "delete",
+      "verdict": "time-format"
+    },
+    {
+      "at": 235,
+      "base": 2,
+      "byte": 52,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 230,
+      "base": 1,
+      "byte": 125,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 410,
+      "base": 2,
+      "byte": 9,
+      "op": "delete",
+      "verdict": "valid"
+    },
+    {
+      "at": 308,
+      "base": 0,
+      "byte": 48,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 232,
+      "base": 0,
+      "byte": 49,
+      "op": "delete",
+      "verdict": "flags"
+    },
+    {
+      "at": 228,
+      "base": 1,
+      "byte": 55,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 207,
+      "base": 1,
+      "byte": 13,
+      "op": "replace",
+      "verdict": "cr"
+    },
+    {
+      "at": 98,
+      "base": 3,
+      "byte": 63,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 94,
+      "base": 3,
+      "byte": 50,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 513,
+      "base": 2,
+      "byte": 51,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 364,
+      "base": 1,
+      "byte": 69,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 209,
+      "base": 2,
+      "byte": 65,
+      "op": "replace",
+      "verdict": "time-format"
+    },
+    {
+      "at": 350,
+      "base": 1,
+      "byte": 44,
+      "op": "insert",
+      "verdict": "time-format"
+    },
+    {
+      "at": 84,
+      "base": 3,
+      "byte": 50,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 99,
+      "base": 3,
+      "byte": 65,
+      "op": "delete",
+      "verdict": "end"
+    },
+    {
+      "at": 95,
+      "base": 1,
+      "byte": 102,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 364,
+      "base": 1,
+      "byte": 0,
+      "op": "insert",
+      "verdict": "nul"
+    },
+    {
+      "at": 350,
+      "base": 2,
+      "byte": 255,
+      "op": "delete",
+      "verdict": "time-format"
+    },
+    {
+      "at": 97,
+      "base": 3,
+      "byte": 48,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 8,
+      "base": 3,
+      "byte": 60,
+      "op": "insert",
+      "verdict": "begin"
+    },
+    {
+      "at": 267,
+      "base": 2,
+      "byte": 92,
+      "op": "replace",
+      "verdict": "comment"
+    },
+    {
+      "at": 177,
+      "base": 0,
+      "byte": 57,
+      "op": "insert",
+      "verdict": "flags"
+    },
+    {
+      "at": 94,
+      "base": 1,
+      "byte": 48,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 307,
+      "base": 1,
+      "byte": 50,
+      "op": "replace",
+      "verdict": "valid"
+    },
+    {
+      "at": 321,
+      "base": 0,
+      "byte": 50,
+      "op": "delete",
+      "verdict": "time-format"
+    },
+    {
+      "at": 351,
+      "base": 2,
+      "byte": 93,
+      "op": "delete",
+      "verdict": "time-format"
+    },
+    {
+      "at": 151,
+      "base": 0,
+      "byte": 55,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 170,
+      "base": 1,
+      "byte": 118,
+      "op": "insert",
+      "verdict": "ip-pattern"
+    },
+    {
+      "at": 500,
+      "base": 2,
+      "byte": 9,
+      "op": "replace",
+      "verdict": "tab"
+    },
+    {
+      "at": 287,
+      "base": 0,
+      "byte": 57,
+      "op": "delete",
+      "verdict": "flags"
+    },
+    {
+      "at": 324,
+      "base": 0,
+      "byte": 51,
+      "op": "delete",
+      "verdict": "time-format"
+    },
+    {
+      "at": 96,
+      "base": 3,
+      "byte": 66,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 98,
+      "base": 3,
+      "byte": 53,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 343,
+      "base": 0,
+      "byte": 43,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 98,
+      "base": 3,
+      "byte": 45,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 165,
+      "base": 2,
+      "byte": 118,
+      "op": "insert",
+      "verdict": "quote"
+    },
+    {
+      "at": 229,
+      "base": 2,
+      "byte": 44,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 89,
+      "base": 3,
+      "byte": 102,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 299,
+      "base": 2,
+      "byte": 47,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 93,
+      "base": 3,
+      "byte": 44,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 86,
+      "base": 2,
+      "byte": 53,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 348,
+      "base": 2,
+      "byte": 60,
+      "op": "insert",
+      "verdict": "time-format"
+    },
+    {
+      "at": 207,
+      "base": 1,
+      "byte": 48,
+      "op": "replace",
+      "verdict": "time-past"
+    },
+    {
+      "at": 98,
+      "base": 3,
+      "byte": 53,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 226,
+      "base": 1,
+      "byte": 56,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 373,
+      "base": 2,
+      "byte": 63,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 96,
+      "base": 0,
+      "byte": 52,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 236,
+      "base": 1,
+      "byte": 52,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 98,
+      "base": 1,
+      "byte": 111,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 99,
+      "base": 3,
+      "byte": 93,
+      "op": "replace",
+      "verdict": "end"
+    },
+    {
+      "at": 81,
+      "base": 3,
+      "byte": 57,
+      "op": "replace",
+      "verdict": "valid"
+    },
+    {
+      "at": 337,
+      "base": 1,
+      "byte": 50,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 159,
+      "base": 2,
+      "byte": 91,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 275,
+      "base": 0,
+      "byte": 94,
+      "op": "replace",
+      "verdict": "ua-pattern"
+    },
+    {
+      "at": 368,
+      "base": 1,
+      "byte": 51,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 149,
+      "base": 1,
+      "byte": 66,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 97,
+      "base": 3,
+      "byte": 114,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 181,
+      "base": 0,
+      "byte": 54,
+      "op": "replace",
+      "verdict": "flags"
+    },
+    {
+      "at": 95,
+      "base": 2,
+      "byte": 35,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 167,
+      "base": 0,
+      "byte": 56,
+      "op": "replace",
+      "verdict": "valid"
+    },
+    {
+      "at": 67,
+      "base": 3,
+      "byte": 50,
+      "op": "delete",
+      "verdict": "valid"
+    },
+    {
+      "at": 96,
+      "base": 2,
+      "byte": 48,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 179,
+      "base": 2,
+      "byte": 48,
+      "op": "insert",
+      "verdict": "flags"
+    },
+    {
+      "at": 492,
+      "base": 2,
+      "byte": 98,
+      "op": "insert",
+      "verdict": "time-format"
+    },
+    {
+      "at": 95,
+      "base": 3,
+      "byte": 44,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 98,
+      "base": 3,
+      "byte": 114,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 208,
+      "base": 2,
+      "byte": 53,
+      "op": "delete",
+      "verdict": "time-format"
+    },
+    {
+      "at": 504,
+      "base": 2,
+      "byte": 69,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 230,
+      "base": 2,
+      "byte": 118,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 285,
+      "base": 0,
+      "byte": 53,
+      "op": "insert",
+      "verdict": "flags"
+    },
+    {
+      "at": 451,
+      "base": 2,
+      "byte": 87,
+      "op": "replace",
+      "verdict": "ip-pattern"
+    },
+    {
+      "at": 95,
+      "base": 2,
+      "byte": 117,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 263,
+      "base": 0,
+      "byte": 57,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 212,
+      "base": 2,
+      "byte": 126,
+      "op": "insert",
+      "verdict": "time-format"
+    },
+    {
+      "at": 340,
+      "base": 2,
+      "byte": 57,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 284,
+      "base": 0,
+      "byte": 123,
+      "op": "insert",
+      "verdict": "flags"
+    },
+    {
+      "at": 99,
+      "base": 3,
+      "byte": 85,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 484,
+      "base": 2,
+      "byte": 66,
+      "op": "replace",
+      "verdict": "time-format"
+    },
+    {
+      "at": 362,
+      "base": 1,
+      "byte": 36,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 487,
+      "base": 2,
+      "byte": 49,
+      "op": "delete",
+      "verdict": "time-format"
+    },
+    {
+      "at": 335,
+      "base": 0,
+      "byte": 48,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 349,
+      "base": 2,
+      "byte": 52,
+      "op": "replace",
+      "verdict": "valid"
+    },
+    {
+      "at": 93,
+      "base": 3,
+      "byte": 48,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 226,
+      "base": 0,
+      "byte": 118,
+      "op": "delete",
+      "verdict": "quote"
+    },
+    {
+      "at": 91,
+      "base": 3,
+      "byte": 126,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 343,
+      "base": 0,
+      "byte": 123,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 99,
+      "base": 3,
+      "byte": 100,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 341,
+      "base": 0,
+      "byte": 128,
+      "op": "insert",
+      "verdict": "byte"
+    },
+    {
+      "at": 303,
+      "base": 1,
+      "byte": 55,
+      "op": "delete",
+      "verdict": "valid"
+    },
+    {
+      "at": 382,
+      "base": 1,
+      "byte": 49,
+      "op": "insert",
+      "verdict": "end"
+    },
+    {
+      "at": 7,
+      "base": 3,
+      "byte": 65,
+      "op": "insert",
+      "verdict": "begin"
+    },
+    {
+      "at": 509,
+      "base": 2,
+      "byte": 101,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 208,
+      "base": 1,
+      "byte": 94,
+      "op": "insert",
+      "verdict": "time-format"
+    },
+    {
+      "at": 238,
+      "base": 2,
+      "byte": 47,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 225,
+      "base": 2,
+      "byte": 56,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 368,
+      "base": 1,
+      "byte": 53,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 85,
+      "base": 3,
+      "byte": 55,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 98,
+      "base": 3,
+      "byte": 53,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 95,
+      "base": 3,
+      "byte": 52,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 96,
+      "base": 3,
+      "byte": 44,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 96,
+      "base": 2,
+      "byte": 60,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 93,
+      "base": 3,
+      "byte": 49,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 92,
+      "base": 3,
+      "byte": 86,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 85,
+      "base": 0,
+      "byte": 78,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 175,
+      "base": 1,
+      "byte": 57,
+      "op": "insert",
+      "verdict": "ip-pattern"
+    },
+    {
+      "at": 362,
+      "base": 1,
+      "byte": 119,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 169,
+      "base": 2,
+      "byte": 53,
+      "op": "replace",
+      "verdict": "valid"
+    },
+    {
+      "at": 227,
+      "base": 0,
+      "byte": 37,
+      "op": "replace",
+      "verdict": "flags"
+    },
+    {
+      "at": 168,
+      "base": 0,
+      "byte": 91,
+      "op": "insert",
+      "verdict": "ua-pattern"
+    },
+    {
+      "at": 370,
+      "base": 2,
+      "byte": 99,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 101,
+      "base": 2,
+      "byte": 49,
+      "op": "delete",
+      "verdict": "comment"
+    },
+    {
+      "at": 344,
+      "base": 0,
+      "byte": 36,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 374,
+      "base": 1,
+      "byte": 49,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 352,
+      "base": 1,
+      "byte": 50,
+      "op": "insert",
+      "verdict": "time-format"
+    },
+    {
+      "at": 94,
+      "base": 3,
+      "byte": 100,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 312,
+      "base": 0,
+      "byte": 43,
+      "op": "insert",
+      "verdict": "time-format"
+    },
+    {
+      "at": 487,
+      "base": 2,
+      "byte": 32,
+      "op": "delete",
+      "verdict": "time-format"
+    },
+    {
+      "at": 92,
+      "base": 3,
+      "byte": 36,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 93,
+      "base": 1,
+      "byte": 94,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 94,
+      "base": 0,
+      "byte": 63,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 148,
+      "base": 0,
+      "byte": 93,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 96,
+      "base": 1,
+      "byte": 114,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 318,
+      "base": 0,
+      "byte": 51,
+      "op": "insert",
+      "verdict": "time-format"
+    },
+    {
+      "at": 97,
+      "base": 1,
+      "byte": 122,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 240,
+      "base": 2,
+      "byte": 116,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 92,
+      "base": 0,
+      "byte": 68,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 95,
+      "base": 3,
+      "byte": 54,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 164,
+      "base": 2,
+      "byte": 52,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 95,
+      "base": 3,
+      "byte": 9,
+      "op": "replace",
+      "verdict": "tab"
+    },
+    {
+      "at": 93,
+      "base": 3,
+      "byte": 60,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 318,
+      "base": 0,
+      "byte": 116,
+      "op": "insert",
+      "verdict": "time-format"
+    },
+    {
+      "at": 306,
+      "base": 0,
+      "byte": 95,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 169,
+      "base": 1,
+      "byte": 48,
+      "op": "insert",
+      "verdict": "ip"
+    },
+    {
+      "at": 179,
+      "base": 0,
+      "byte": 70,
+      "op": "delete",
+      "verdict": "flags"
+    },
+    {
+      "at": 88,
+      "base": 3,
+      "byte": 48,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 447,
+      "base": 2,
+      "byte": 84,
+      "op": "insert",
+      "verdict": "ip-pattern"
+    },
+    {
+      "at": 206,
+      "base": 1,
+      "byte": 95,
+      "op": "delete",
+      "verdict": "time-format"
+    },
+    {
+      "at": 96,
+      "base": 0,
+      "byte": 87,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 505,
+      "base": 2,
+      "byte": 57,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 98,
+      "base": 1,
+      "byte": 95,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 306,
+      "base": 1,
+      "byte": 86,
+      "op": "insert",
+      "verdict": "ip-pattern"
+    },
+    {
+      "at": 264,
+      "base": 0,
+      "byte": 84,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 317,
+      "base": 2,
+      "byte": 110,
+      "op": "delete",
+      "verdict": "flags"
+    },
+    {
+      "at": 338,
+      "base": 0,
+      "byte": 46,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 317,
+      "base": 1,
+      "byte": 57,
+      "op": "replace",
+      "verdict": "quote"
+    },
+    {
+      "at": 212,
+      "base": 1,
+      "byte": 35,
+      "op": "delete",
+      "verdict": "time-format"
+    },
+    {
+      "at": 337,
+      "base": 1,
+      "byte": 52,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 232,
+      "base": 0,
+      "byte": 49,
+      "op": "delete",
+      "verdict": "flags"
+    },
+    {
+      "at": 96,
+      "base": 2,
+      "byte": 54,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 211,
+      "base": 0,
+      "byte": 70,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 299,
+      "base": 1,
+      "byte": 102,
+      "op": "delete",
+      "verdict": "quote"
+    },
+    {
+      "at": 250,
+      "base": 0,
+      "byte": 94,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 167,
+      "base": 0,
+      "byte": 78,
+      "op": "replace",
+      "verdict": "valid"
+    },
+    {
+      "at": 97,
+      "base": 3,
+      "byte": 49,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 204,
+      "base": 2,
+      "byte": 57,
+      "op": "replace",
+      "verdict": "time-format"
+    },
+    {
+      "at": 349,
+      "base": 2,
+      "byte": 68,
+      "op": "insert",
+      "verdict": "time-format"
+    },
+    {
+      "at": 3,
+      "base": 2,
+      "byte": 55,
+      "op": "insert",
+      "verdict": "begin"
+    },
+    {
+      "at": 91,
+      "base": 3,
+      "byte": 128,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 299,
+      "base": 1,
+      "byte": 13,
+      "op": "replace",
+      "verdict": "cr"
+    },
+    {
+      "at": 346,
+      "base": 0,
+      "byte": 78,
+      "op": "delete",
+      "verdict": "end"
+    },
+    {
+      "at": 369,
+      "base": 2,
+      "byte": 36,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 374,
+      "base": 1,
+      "byte": 34,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 281,
+      "base": 1,
+      "byte": 54,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 177,
+      "base": 1,
+      "byte": 48,
+      "op": "replace",
+      "verdict": "ip-pattern"
+    },
+    {
+      "at": 174,
+      "base": 1,
+      "byte": 128,
+      "op": "delete",
+      "verdict": "ip-pattern"
+    },
+    {
+      "at": 165,
+      "base": 2,
+      "byte": 114,
+      "op": "insert",
+      "verdict": "quote"
+    },
+    {
+      "at": 347,
+      "base": 1,
+      "byte": 33,
+      "op": "delete",
+      "verdict": "time-format"
+    },
+    {
+      "at": 96,
+      "base": 3,
+      "byte": 102,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 485,
+      "base": 2,
+      "byte": 49,
+      "op": "replace",
+      "verdict": "valid"
+    },
+    {
+      "at": 317,
+      "base": 0,
+      "byte": 117,
+      "op": "delete",
+      "verdict": "time-format"
+    },
+    {
+      "at": 306,
+      "base": 0,
+      "byte": 51,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 349,
+      "base": 2,
+      "byte": 50,
+      "op": "delete",
+      "verdict": "time-format"
+    },
+    {
+      "at": 237,
+      "base": 1,
+      "byte": 97,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 97,
+      "base": 1,
+      "byte": 69,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 365,
+      "base": 1,
+      "byte": 57,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 93,
+      "base": 3,
+      "byte": 10,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 340,
+      "base": 0,
+      "byte": 69,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 99,
+      "base": 3,
+      "byte": 46,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 319,
+      "base": 0,
+      "byte": 119,
+      "op": "delete",
+      "verdict": "time-format"
+    },
+    {
+      "at": 57,
+      "base": 3,
+      "byte": 117,
+      "op": "insert",
+      "verdict": "valid"
+    },
+    {
+      "at": 334,
+      "base": 0,
+      "byte": 111,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 201,
+      "base": 2,
+      "byte": 53,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 237,
+      "base": 1,
+      "byte": 51,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 161,
+      "base": 0,
+      "byte": 102,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 95,
+      "base": 3,
+      "byte": 32,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 93,
+      "base": 1,
+      "byte": 48,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 95,
+      "base": 3,
+      "byte": 65,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 90,
+      "base": 3,
+      "byte": 48,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 208,
+      "base": 1,
+      "byte": 51,
+      "op": "delete",
+      "verdict": "time-format"
+    },
+    {
+      "at": 97,
+      "base": 3,
+      "byte": 52,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 507,
+      "base": 2,
+      "byte": 48,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 91,
+      "base": 3,
+      "byte": 47,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 97,
+      "base": 3,
+      "byte": 99,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 313,
+      "base": 1,
+      "byte": 57,
+      "op": "delete",
+      "verdict": "ip-pattern"
+    },
+    {
+      "at": 123,
+      "base": 2,
+      "byte": 0,
+      "op": "replace",
+      "verdict": "nul"
+    },
+    {
+      "at": 345,
+      "base": 1,
+      "byte": 13,
+      "op": "delete",
+      "verdict": "time-format"
+    },
+    {
+      "at": 91,
+      "base": 2,
+      "byte": 43,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 212,
+      "base": 0,
+      "byte": 95,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 349,
+      "base": 1,
+      "byte": 49,
+      "op": "insert",
+      "verdict": "time-format"
+    },
+    {
+      "at": 250,
+      "base": 0,
+      "byte": 54,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 74,
+      "base": 3,
+      "byte": 85,
+      "op": "delete",
+      "verdict": "valid"
+    },
+    {
+      "at": 108,
+      "base": 3,
+      "byte": 98,
+      "op": "insert",
+      "verdict": "end"
+    },
+    {
+      "at": 344,
+      "base": 1,
+      "byte": 49,
+      "op": "replace",
+      "verdict": "time-past"
+    },
+    {
+      "at": 342,
+      "base": 1,
+      "byte": 57,
+      "op": "delete",
+      "verdict": "time-format"
+    },
+    {
+      "at": 310,
+      "base": 2,
+      "byte": 50,
+      "op": "delete",
+      "verdict": "valid"
+    },
+    {
+      "at": 94,
+      "base": 3,
+      "byte": 51,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 281,
+      "base": 0,
+      "byte": 55,
+      "op": "insert",
+      "verdict": "valid"
+    },
+    {
+      "at": 89,
+      "base": 3,
+      "byte": 55,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 509,
+      "base": 2,
+      "byte": 117,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 450,
+      "base": 2,
+      "byte": 49,
+      "op": "insert",
+      "verdict": "valid"
+    },
+    {
+      "at": 97,
+      "base": 1,
+      "byte": 9,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 397,
+      "base": 2,
+      "byte": 49,
+      "op": "insert",
+      "verdict": "valid"
+    },
+    {
+      "at": 260,
+      "base": 0,
+      "byte": 54,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 159,
+      "base": 1,
+      "byte": 56,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 95,
+      "base": 3,
+      "byte": 57,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 342,
+      "base": 0,
+      "byte": 34,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 307,
+      "base": 0,
+      "byte": 55,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 11,
+      "base": 0,
+      "byte": 46,
+      "op": "delete",
+      "verdict": "begin"
+    },
+    {
+      "at": 215,
+      "base": 2,
+      "byte": 63,
+      "op": "delete",
+      "verdict": "time-format"
+    },
+    {
+      "at": 345,
+      "base": 0,
+      "byte": 49,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 232,
+      "base": 1,
+      "byte": 49,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 337,
+      "base": 0,
+      "byte": 124,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 98,
+      "base": 3,
+      "byte": 49,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 11,
+      "base": 3,
+      "byte": 98,
+      "op": "delete",
+      "verdict": "begin"
+    },
+    {
+      "at": 174,
+      "base": 2,
+      "byte": 52,
+      "op": "insert",
+      "verdict": "valid"
+    },
+    {
+      "at": 99,
+      "base": 3,
+      "byte": 56,
+      "op": "replace",
+      "verdict": "end"
+    },
+    {
+      "at": 237,
+      "base": 2,
+      "byte": 93,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 94,
+      "base": 3,
+      "byte": 34,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 97,
+      "base": 1,
+      "byte": 51,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 95,
+      "base": 3,
+      "byte": 51,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 180,
+      "base": 0,
+      "byte": 93,
+      "op": "replace",
+      "verdict": "flags"
+    },
+    {
+      "at": 154,
+      "base": 0,
+      "byte": 48,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 345,
+      "base": 0,
+      "byte": 52,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 314,
+      "base": 1,
+      "byte": 49,
+      "op": "insert",
+      "verdict": "valid"
+    },
+    {
+      "at": 98,
+      "base": 3,
+      "byte": 62,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 235,
+      "base": 2,
+      "byte": 56,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 287,
+      "base": 0,
+      "byte": 44,
+      "op": "replace",
+      "verdict": "flags"
+    },
+    {
+      "at": 91,
+      "base": 1,
+      "byte": 79,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 266,
+      "base": 0,
+      "byte": 110,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 231,
+      "base": 1,
+      "byte": 255,
+      "op": "replace",
+      "verdict": "byte"
+    },
+    {
+      "at": 314,
+      "base": 0,
+      "byte": 57,
+      "op": "replace",
+      "verdict": "time-format"
+    },
+    {
+      "at": 233,
+      "base": 0,
+      "byte": 45,
+      "op": "insert",
+      "verdict": "flags"
+    },
+    {
+      "at": 174,
+      "base": 0,
+      "byte": 47,
+      "op": "replace",
+      "verdict": "valid"
+    },
+    {
+      "at": 300,
+      "base": 1,
+      "byte": 90,
+      "op": "replace",
+      "verdict": "ip-pattern"
+    },
+    {
+      "at": 93,
+      "base": 3,
+      "byte": 48,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 91,
+      "base": 3,
+      "byte": 32,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 127,
+      "base": 1,
+      "byte": 45,
+      "op": "delete",
+      "verdict": "valid"
+    },
+    {
+      "at": 225,
+      "base": 0,
+      "byte": 57,
+      "op": "delete",
+      "verdict": "valid"
+    },
+    {
+      "at": 97,
+      "base": 3,
+      "byte": 123,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 296,
+      "base": 1,
+      "byte": 95,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 169,
+      "base": 2,
+      "byte": 255,
+      "op": "replace",
+      "verdict": "byte"
+    },
+    {
+      "at": 87,
+      "base": 0,
+      "byte": 70,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 205,
+      "base": 1,
+      "byte": 53,
+      "op": "insert",
+      "verdict": "time-format"
+    },
+    {
+      "at": 228,
+      "base": 1,
+      "byte": 68,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 299,
+      "base": 0,
+      "byte": 34,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 232,
+      "base": 0,
+      "byte": 55,
+      "op": "replace",
+      "verdict": "flags"
+    },
+    {
+      "at": 97,
+      "base": 3,
+      "byte": 56,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 296,
+      "base": 1,
+      "byte": 99,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 375,
+      "base": 1,
+      "byte": 55,
+      "op": "delete",
+      "verdict": "end"
+    },
+    {
+      "at": 96,
+      "base": 3,
+      "byte": 54,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 98,
+      "base": 3,
+      "byte": 58,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 301,
+      "base": 1,
+      "byte": 33,
+      "op": "replace",
+      "verdict": "ip-pattern"
+    },
+    {
+      "at": 340,
+      "base": 1,
+      "byte": 50,
+      "op": "delete",
+      "verdict": "time-format"
+    },
+    {
+      "at": 504,
+      "base": 2,
+      "byte": 102,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 233,
+      "base": 1,
+      "byte": 57,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 350,
+      "base": 1,
+      "byte": 55,
+      "op": "delete",
+      "verdict": "time-format"
+    },
+    {
+      "at": 353,
+      "base": 1,
+      "byte": 53,
+      "op": "delete",
+      "verdict": "time-format"
+    },
+    {
+      "at": 339,
+      "base": 0,
+      "byte": 54,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 91,
+      "base": 2,
+      "byte": 49,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 281,
+      "base": 0,
+      "byte": 50,
+      "op": "insert",
+      "verdict": "valid"
+    },
+    {
+      "at": 73,
+      "base": 3,
+      "byte": 37,
+      "op": "insert",
+      "verdict": "valid"
+    },
+    {
+      "at": 227,
+      "base": 1,
+      "byte": 46,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 212,
+      "base": 0,
+      "byte": 48,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 294,
+      "base": 1,
+      "byte": 85,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 439,
+      "base": 2,
+      "byte": 87,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 95,
+      "base": 3,
+      "byte": 66,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 91,
+      "base": 3,
+      "byte": 54,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 504,
+      "base": 2,
+      "byte": 37,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 512,
+      "base": 2,
+      "byte": 32,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 87,
+      "base": 3,
+      "byte": 53,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 96,
+      "base": 2,
+      "byte": 55,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 173,
+      "base": 1,
+      "byte": 49,
+      "op": "delete",
+      "verdict": "valid"
+    },
+    {
+      "at": 314,
+      "base": 0,
+      "byte": 95,
+      "op": "delete",
+      "verdict": "time-format"
+    },
+    {
+      "at": 352,
+      "base": 1,
+      "byte": 52,
+      "op": "delete",
+      "verdict": "time-format"
+    },
+    {
+      "at": 98,
+      "base": 3,
+      "byte": 53,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 197,
+      "base": 0,
+      "byte": 33,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 340,
+      "base": 0,
+      "byte": 56,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 337,
+      "base": 2,
+      "byte": 48,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 204,
+      "base": 1,
+      "byte": 90,
+      "op": "delete",
+      "verdict": "time-format"
+    },
+    {
+      "at": 221,
+      "base": 2,
+      "byte": 52,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 98,
+      "base": 3,
+      "byte": 57,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 92,
+      "base": 3,
+      "byte": 48,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 487,
+      "base": 2,
+      "byte": 110,
+      "op": "replace",
+      "verdict": "time-format"
+    },
+    {
+      "at": 226,
+      "base": 1,
+      "byte": 36,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 310,
+      "base": 2,
+      "byte": 55,
+      "op": "delete",
+      "verdict": "valid"
+    },
+    {
+      "at": 294,
+      "base": 1,
+      "byte": 49,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 343,
+      "base": 1,
+      "byte": 0,
+      "op": "insert",
+      "verdict": "nul"
+    },
+    {
+      "at": 473,
+      "base": 2,
+      "byte": 44,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 217,
+      "base": 0,
+      "byte": 45,
+      "op": "insert",
+      "verdict": "quote"
+    },
+    {
+      "at": 92,
+      "base": 3,
+      "byte": 124,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 226,
+      "base": 1,
+      "byte": 49,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 368,
+      "base": 1,
+      "byte": 50,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 272,
+      "base": 1,
+      "byte": 54,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 485,
+      "base": 2,
+      "byte": 123,
+      "op": "insert",
+      "verdict": "time-format"
+    },
+    {
+      "at": 95,
+      "base": 3,
+      "byte": 44,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 359,
+      "base": 1,
+      "byte": 55,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 97,
+      "base": 0,
+      "byte": 44,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 164,
+      "base": 2,
+      "byte": 52,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 93,
+      "base": 3,
+      "byte": 50,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 99,
+      "base": 1,
+      "byte": 48,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 225,
+      "base": 1,
+      "byte": 56,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 95,
+      "base": 3,
+      "byte": 56,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 172,
+      "base": 1,
+      "byte": 43,
+      "op": "insert",
+      "verdict": "ip-pattern"
+    },
+    {
+      "at": 92,
+      "base": 3,
+      "byte": 51,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 157,
+      "base": 1,
+      "byte": 116,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 97,
+      "base": 3,
+      "byte": 49,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 345,
+      "base": 2,
+      "byte": 50,
+      "op": "insert",
+      "verdict": "time-format"
+    },
+    {
+      "at": 386,
+      "base": 2,
+      "byte": 0,
+      "op": "delete",
+      "verdict": "valid"
+    },
+    {
+      "at": 321,
+      "base": 1,
+      "byte": 53,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 174,
+      "base": 0,
+      "byte": 10,
+      "op": "insert",
+      "verdict": "quote"
+    },
+    {
+      "at": 262,
+      "base": 0,
+      "byte": 44,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 77,
+      "base": 3,
+      "byte": 50,
+      "op": "insert",
+      "verdict": "valid"
+    },
+    {
+      "at": 166,
+      "base": 1,
+      "byte": 100,
+      "op": "replace",
+      "verdict": "ip-pattern"
+    },
+    {
+      "at": 139,
+      "base": 2,
+      "byte": 67,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 167,
+      "base": 0,
+      "byte": 55,
+      "op": "replace",
+      "verdict": "valid"
+    },
+    {
+      "at": 95,
+      "base": 3,
+      "byte": 51,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 89,
+      "base": 1,
+      "byte": 98,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 109,
+      "base": 3,
+      "byte": 122,
+      "op": "replace",
+      "verdict": "end"
+    },
+    {
+      "at": 377,
+      "base": 2,
+      "byte": 48,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 352,
+      "base": 0,
+      "byte": 95,
+      "op": "insert",
+      "verdict": "end"
+    },
+    {
+      "at": 166,
+      "base": 0,
+      "byte": 98,
+      "op": "delete",
+      "verdict": "valid"
+    },
+    {
+      "at": 173,
+      "base": 2,
+      "byte": 52,
+      "op": "delete",
+      "verdict": "valid"
+    },
+    {
+      "at": 156,
+      "base": 1,
+      "byte": 110,
+      "op": "insert",
+      "verdict": "directive"
+    },
+    {
+      "at": 20,
+      "base": 2,
+      "byte": 51,
+      "op": "replace",
+      "verdict": "valid"
+    },
+    {
+      "at": 205,
+      "base": 1,
+      "byte": 93,
+      "op": "delete",
+      "verdict": "time-format"
+    },
+    {
+      "at": 83,
+      "base": 3,
+      "byte": 57,
+      "op": "delete",
+      "verdict": "directive"
+    },
+    {
+      "at": 93,
+      "base": 3,
+      "byte": 49,
+      "op": "replace",
+      "verdict": "directive"
+    },
+    {
+      "at": 199,
+      "base": 1,
+      "byte": 95,
+      "op": "delete",
+      "verdict": "directive"
+    }
+  ],
+  "goldens": [
+    "ua.htaccess",
+    "ip.htaccess",
+    "cumulative.htaccess",
+    "empty.htaccess"
+  ],
+  "now": 1781517600,
+  "tz": "Europe/Paris",
+  "vectors": [
+    {
+      "block": "# BEGIN vigie\nRewriteEngine On\nRewriteCond %{HTTP_USER_AGENT} \"Bytespider\" [NC]\nRewriteCond %{TIME} <20260620120000\nRewriteRule ^ - [F,L]\n# END vigie\n",
+      "name": "groupe d'UA valide",
+      "verdict": "valid"
+    },
+    {
+      "block": "# BEGIN vigie\nRewriteEngine On\nphp_value auto_prepend_file /tmp/x.php\nRewriteCond %{HTTP_USER_AGENT} \"Bytespider\" [NC]\nRewriteCond %{TIME} <20260620120000\nRewriteRule ^ - [F,L]\n# END vigie\n",
+      "name": "php_value auto_prepend_file /tmp/x.php",
+      "verdict": "directive"
+    },
+    {
+      "block": "# BEGIN vigie\nRewriteEngine On\nphp_flag engine on\nRewriteCond %{HTTP_USER_AGENT} \"Bytespider\" [NC]\nRewriteCond %{TIME} <20260620120000\nRewriteRule ^ - [F,L]\n# END vigie\n",
+      "name": "php_flag engine on",
+      "verdict": "directive"
+    },
+    {
+      "block": "# BEGIN vigie\nRewriteEngine On\nAddHandler application/x-httpd-php .jpg\nRewriteCond %{HTTP_USER_AGENT} \"Bytespider\" [NC]\nRewriteCond %{TIME} <20260620120000\nRewriteRule ^ - [F,L]\n# END vigie\n",
+      "name": "AddHandler application/x-httpd-php .jpg",
+      "verdict": "directive"
+    },
+    {
+      "block": "# BEGIN vigie\nRewriteEngine On\nSetHandler application/x-httpd-php\nRewriteCond %{HTTP_USER_AGENT} \"Bytespider\" [NC]\nRewriteCond %{TIME} <20260620120000\nRewriteRule ^ - [F,L]\n# END vigie\n",
+      "name": "SetHandler application/x-httpd-php",
+      "verdict": "directive"
+    },
+    {
+      "block": "# BEGIN vigie\nRewriteEngine On\nAddType application/x-httpd-php .png\nRewriteCond %{HTTP_USER_AGENT} \"Bytespider\" [NC]\nRewriteCond %{TIME} <20260620120000\nRewriteRule ^ - [F,L]\n# END vigie\n",
+      "name": "AddType application/x-httpd-php .png",
+      "verdict": "directive"
+    },
+    {
+      "block": "# BEGIN vigie\nRewriteEngine On\nAction php-script /cgi-bin/php\nRewriteCond %{HTTP_USER_AGENT} \"Bytespider\" [NC]\nRewriteCond %{TIME} <20260620120000\nRewriteRule ^ - [F,L]\n# END vigie\n",
+      "name": "Action php-script /cgi-bin/php",
+      "verdict": "directive"
+    },
+    {
+      "block": "# BEGIN vigie\nRewriteEngine On\nInclude /etc/passwd\nRewriteCond %{HTTP_USER_AGENT} \"Bytespider\" [NC]\nRewriteCond %{TIME} <20260620120000\nRewriteRule ^ - [F,L]\n# END vigie\n",
+      "name": "Include /etc/passwd",
+      "verdict": "directive"
+    },
+    {
+      "block": "# BEGIN vigie\nRewriteEngine On\nauto_prepend_file x\nRewriteCond %{HTTP_USER_AGENT} \"Bytespider\" [NC]\nRewriteCond %{TIME} <20260620120000\nRewriteRule ^ - [F,L]\n# END vigie\n",
+      "name": "auto_prepend_file x",
+      "verdict": "directive"
+    },
+    {
+      "block": "# BEGIN vigie\nRewriteEngine On\nallow_url_include On\nRewriteCond %{HTTP_USER_AGENT} \"Bytespider\" [NC]\nRewriteCond %{TIME} <20260620120000\nRewriteRule ^ - [F,L]\n# END vigie\n",
+      "name": "allow_url_include On",
+      "verdict": "directive"
+    },
+    {
+      "block": "# BEGIN vigie\nRewriteEngine On\nOptions +ExecCGI\nRewriteCond %{HTTP_USER_AGENT} \"Bytespider\" [NC]\nRewriteCond %{TIME} <20260620120000\nRewriteRule ^ - [F,L]\n# END vigie\n",
+      "name": "Options +ExecCGI",
+      "verdict": "directive"
+    },
+    {
+      "block": "# BEGIN vigie\nRewriteEngine On\n<Files \"x.jpg\">\nRewriteCond %{HTTP_USER_AGENT} \"Bytespider\" [NC]\nRewriteCond %{TIME} <20260620120000\nRewriteRule ^ - [F,L]\n# END vigie\n",
+      "name": "<Files \"x.jpg\">",
+      "verdict": "directive"
+    },
+    {
+      "block": "# BEGIN vigie\nRewriteEngine On\nRewriteRule ^ /shell.php [L]\nRewriteCond %{HTTP_USER_AGENT} \"Bytespider\" [NC]\nRewriteCond %{TIME} <20260620120000\nRewriteRule ^ - [F,L]\n# END vigie\n",
+      "name": "RewriteRule ^ /shell.php [L]",
+      "verdict": "directive"
+    },
+    {
+      "block": "# BEGIN vigie\nRewriteEngine On\nRewriteCond %{QUERY_STRING} x\nRewriteCond %{HTTP_USER_AGENT} \"Bytespider\" [NC]\nRewriteCond %{TIME} <20260620120000\nRewriteRule ^ - [F,L]\n# END vigie\n",
+      "name": "RewriteCond %{QUERY_STRING} x",
+      "verdict": "directive"
+    },
+    {
+      "block": "# BEGIN vigie\nRewriteEngine On\nRewriteCond  %{HTTP_USER_AGENT} \"Bytespider\" [NC]\nRewriteCond %{TIME} <20260620120000\nRewriteRule ^ - [F,L]\n# END vigie\n",
+      "name": "espaces bizarres",
+      "verdict": "directive"
+    },
+    {
+      "block": "# BEGIN vigie\nRewriteEngine On\n RewriteCond %{HTTP_USER_AGENT} \"Bytespider\" [NC]\nRewriteCond %{TIME} <20260620120000\nRewriteRule ^ - [F,L]\n# END vigie\n",
+      "name": "espace en tête",
+      "verdict": "directive"
+    },
+    {
+      "block": "# BEGIN vigie\nRewriteEngine On\nRewriteCond %{HTTP_USER_AGENT} \"Bytespider\" [NC] \nRewriteCond %{TIME} <20260620120000\nRewriteRule ^ - [F,L]\n# END vigie\n",
+      "name": "espace après les drapeaux",
+      "verdict": "flags"
+    },
+    {
+      "block": "# BEGIN vigie\nRewriteEngine On\nRewriteCond %{HTTP_USER_AGENT} \"Bytespider [NC]\nRewriteCond %{TIME} <20260620120000\nRewriteRule ^ - [F,L]\n# END vigie\n",
+      "name": "guillemet non fermé",
+      "verdict": "quote"
+    },
+    {
+      "block": "# BEGIN vigie\nRewriteEngine On\nRewriteCond %{HTTP_USER_AGENT} \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\" [NC]\nRewriteCond %{TIME} <20260620120000\nRewriteRule ^ - [F,L]\n# END vigie\n",
+      "name": "littéral trop long",
+      "verdict": "ua-literal"
+    },
+    {
+      "block": "# BEGIN vigie\nRewriteEngine On\nRewriteCond %{HTTP_USER_AGENT} \"-Bytespider\" [NC]\nRewriteCond %{TIME} <20260620120000\nRewriteRule ^ - [F,L]\n# END vigie\n",
+      "name": "littéral commençant par -",
+      "verdict": "ua-literal"
+    },
+    {
+      "block": "# BEGIN vigie\nRewriteEngine On\nRewriteCond %{HTTP_USER_AGENT} \"Bytespider\" [NC]\nRewriteCond %{TIME} <20260620120000\nRewriteRule ^ - [F,L]\n# END vigie\nRewriteCond %{HTTP_USER_AGENT} \"Bytespider\" [NC]\nRewriteCond %{TIME} <20260620120000\nRewriteRule ^ - [F,L]\n# END vigie\n",
+      "name": "# END vigie imbriqué",
+      "verdict": "comment"
+    },
+    {
+      "block": "# BEGIN vigie\nRewriteEngine On\n# commentaire \\\nRewriteCond %{HTTP_USER_AGENT} \"Bytespider\" [NC]\nRewriteCond %{TIME} <20260620120000\nRewriteRule ^ - [F,L]\n# END vigie\n",
+      "name": "ligne finissant par \\",
+      "verdict": "continuation"
+    },
+    {
+      "block": "# BEGIN vigie\r\nRewriteEngine On\r\nRewriteCond %{HTTP_USER_AGENT} \"Bytespider\" [NC]\r\nRewriteCond %{TIME} <20260620120000\r\nRewriteRule ^ - [F,L]\r\n# END vigie\r\n",
+      "name": "CR",
+      "verdict": "cr"
+    },
+    {
+      "block": "# BEGIN vigie\nRewriteEngine On\nRewriteCond %{HTTP_USER_AGENT}\t\"Bytespider\" [NC]\nRewriteCond %{TIME} <20260620120000\nRewriteRule ^ - [F,L]\n# END vigie\n",
+      "name": "tabulation",
+      "verdict": "tab"
+    },
+    {
+      "block": "# BEGIN vigie\nRewriteEngine On\nRewriteCond %{HTTP_USER_AGENT} \"archive.org_bot\" [NC]\nRewriteCond %{TIME} <20260620120000\nRewriteRule ^ - [F,L]\n# END vigie\n",
+      "name": ". non échappé",
+      "verdict": "ua-pattern"
+    },
+    {
+      "block": "# BEGIN vigie\nRewriteEngine On\nRewriteCond %{HTTP_USER_AGENT} \"archive\\.org_bot\" [NC]\nRewriteCond %{TIME} <20260620120000\nRewriteRule ^ - [F,L]\n# END vigie\n",
+      "name": ". échappé",
+      "verdict": "valid"
+    },
+    {
+      "block": "# BEGIN vigie\nRewriteEngine On\nRewriteCond %{HTTP_USER_AGENT} \"(.*)\" [NC]\nRewriteCond %{TIME} <20260620120000\nRewriteRule ^ - [F,L]\n# END vigie\n",
+      "name": "expression régulière",
+      "verdict": "ua-pattern"
+    },
+    {
+      "block": "# BEGIN vigie\nRewriteEngine On\nRewriteCond %{HTTP_USER_AGENT} \"Bytespider\" [NC]\nRewriteRule ^ - [F,L]\n# END vigie\n",
+      "name": "groupe sans %{TIME}",
+      "verdict": "no-time"
+    },
+    {
+      "block": "# BEGIN vigie\nRewriteEngine On\nRewriteCond %{HTTP_USER_AGENT} \"Bytespider\" [NC,OR]\nRewriteCond %{TIME} <20260620120000\nRewriteRule ^ - [F,L]\n# END vigie\n",
+      "name": "[OR] sur la dernière condition",
+      "verdict": "or-last"
+    },
+    {
+      "block": "# BEGIN vigie\nRewriteEngine On\nRewriteCond %{HTTP_USER_AGENT} \"Bytespider\" [NC]\nRewriteCond %{HTTP_USER_AGENT} \"MauiBot\" [NC]\nRewriteCond %{TIME} <20260620120000\nRewriteRule ^ - [F,L]\n# END vigie\n",
+      "name": "conditions non chaînées",
+      "verdict": "or-chain"
+    },
+    {
+      "block": "# BEGIN vigie\nRewriteEngine On\nRewriteCond %{HTTP_USER_AGENT} \"Bytespider\" [NC,OR]\nRewriteCond %{REMOTE_ADDR} \"^203\\.0\\.113\\.7$\"\nRewriteCond %{TIME} <20260620120000\nRewriteRule ^ - [F,L]\n# END vigie\n",
+      "name": "UA et IP mêlées",
+      "verdict": "group"
+    },
+    {
+      "block": "# BEGIN vigie\nRewriteEngine On\nRewriteCond %{HTTP_USER_AGENT} \"Bytespider\" [NC]\nRewriteCond %{TIME} <20260620120000\nRewriteCond %{TIME} <20260620120000\nRewriteRule ^ - [F,L]\n# END vigie\n",
+      "name": "deux %{TIME}",
+      "verdict": "group"
+    },
+    {
+      "block": "# BEGIN vigie\nRewriteEngine On\nRewriteCond %{HTTP_USER_AGENT} \"Bytespider\" [NC]\nRewriteCond %{TIME} <20260620120000\nRewriteRule ^ - [F,L]\nRewriteRule ^ - [F,L]\n# END vigie\n",
+      "name": "deux RewriteRule",
+      "verdict": "group"
+    },
+    {
+      "block": "# BEGIN vigie\nRewriteEngine On\nRewriteCond %{HTTP_USER_AGENT} \"Bytespider\" [NC]\nRewriteCond %{TIME} <20260615115959\nRewriteRule ^ - [F,L]\n# END vigie\n",
+      "name": "%{TIME} passé",
+      "verdict": "time-past"
+    },
+    {
+      "block": "# BEGIN vigie\nRewriteEngine On\nRewriteCond %{HTTP_USER_AGENT} \"Bytespider\" [NC]\nRewriteCond %{TIME} <20260716120000\nRewriteRule ^ - [F,L]\n# END vigie\n",
+      "name": "%{TIME} à 31 jours pile",
+      "verdict": "valid"
+    },
+    {
+      "block": "# BEGIN vigie\nRewriteEngine On\nRewriteCond %{HTTP_USER_AGENT} \"Bytespider\" [NC]\nRewriteCond %{TIME} <20260716120001\nRewriteRule ^ - [F,L]\n# END vigie\n",
+      "name": "%{TIME} d'UA au-delà de 31 jours",
+      "verdict": "time-bound"
+    },
+    {
+      "block": "# BEGIN vigie\nRewriteEngine On\nRewriteCond %{REMOTE_ADDR} \"^203\\.0\\.113\\.7$\"\nRewriteCond %{TIME} <20260616130001\nRewriteRule ^ - [F,L]\n# END vigie\n",
+      "name": "%{TIME} d'IP au-delà de 25 h",
+      "verdict": "time-bound"
+    },
+    {
+      "block": "# BEGIN vigie\nRewriteEngine On\nRewriteCond %{REMOTE_ADDR} \"^203\\.0\\.113\\.7$\"\nRewriteCond %{TIME} <20260616130000\nRewriteRule ^ - [F,L]\n# END vigie\n",
+      "name": "%{TIME} d'IP à 25 h pile",
+      "verdict": "valid"
+    },
+    {
+      "block": "# BEGIN vigie\nRewriteEngine On\nRewriteCond %{HTTP_USER_AGENT} \"Bytespider\" [NC]\nRewriteCond %{TIME} <20260631120000\nRewriteRule ^ - [F,L]\n# END vigie\n",
+      "name": "%{TIME} impossible",
+      "verdict": "time-format"
+    },
+    {
+      "block": "# BEGIN vigie\nRewriteEngine On\nRewriteCond %{HTTP_USER_AGENT} \"googlebot\" [NC]\nRewriteCond %{TIME} <20260620120000\nRewriteRule ^ - [F,L]\n# END vigie\n",
+      "name": "littéral qui touche Googlebot",
+      "verdict": "protected-ua"
+    },
+    {
+      "block": "# BEGIN vigie\nRewriteEngine On\nRewriteCond %{HTTP_USER_AGENT} \"Firefox\" [NC]\nRewriteCond %{TIME} <20260620120000\nRewriteRule ^ - [F,L]\n# END vigie\n",
+      "name": "littéral qui touche un navigateur",
+      "verdict": "protected-ua"
+    },
+    {
+      "block": "# BEGIN vigie\nRewriteEngine On\nRewriteCond %{HTTP_USER_AGENT} \"curl\" [NC]\nRewriteCond %{TIME} <20260620120000\nRewriteRule ^ - [F,L]\n# END vigie\n",
+      "name": "littéral générique",
+      "verdict": "protected-ua"
+    },
+    {
+      "block": "# BEGIN vigie\nRewriteEngine On\nRewriteCond %{REMOTE_ADDR} \"^2001\\:0db8\\:\\:7$\"\nRewriteCond %{TIME} <20260616120000\nRewriteRule ^ - [F,L]\n# END vigie\n",
+      "name": "IP non canonique",
+      "verdict": "ip"
+    },
+    {
+      "block": "# BEGIN vigie\nRewriteEngine On\nRewriteCond %{REMOTE_ADDR} \"^\\:\\:ffff\\:c000\\:22c$\"\nRewriteCond %{TIME} <20260616120000\nRewriteRule ^ - [F,L]\n# END vigie\n",
+      "name": "IPv4 mappée",
+      "verdict": "ip"
+    },
+    {
+      "block": "# BEGIN vigie\nRewriteEngine On\nRewriteCond %{REMOTE_ADDR} \"203\\.0\\.113\\.7\"\nRewriteCond %{TIME} <20260616120000\nRewriteRule ^ - [F,L]\n# END vigie\n",
+      "name": "IP sans ancres",
+      "verdict": "ip-pattern"
+    },
+    {
+      "block": "# BEGIN vigie\nRewriteEngine On\nRewriteEngine On\nRewriteCond %{HTTP_USER_AGENT} \"Bytespider\" [NC]\nRewriteCond %{TIME} <20260620120000\nRewriteRule ^ - [F,L]\n# END vigie\n",
+      "name": "RewriteEngine répété",
+      "verdict": "engine"
+    },
+    {
+      "block": "# BEGIN vigie\nRewriteCond %{HTTP_USER_AGENT} \"Bytespider\" [NC]\nRewriteCond %{TIME} <20260620120000\nRewriteRule ^ - [F,L]\n# END vigie\n",
+      "name": "sans RewriteEngine",
+      "verdict": "engine"
+    },
+    {
+      "block": "# BEGIN vigie\nRewriteEngine On\n#x\nRewriteCond %{HTTP_USER_AGENT} \"Bytespider\" [NC]\nRewriteCond %{TIME} <20260620120000\nRewriteRule ^ - [F,L]\n# END vigie\n",
+      "name": "commentaire sans espace",
+      "verdict": "comment"
+    },
+    {
+      "block": "# BEGIN vigie\nRewriteEngine On\n\nRewriteCond %{HTTP_USER_AGENT} \"Bytespider\" [NC]\nRewriteCond %{TIME} <20260620120000\nRewriteRule ^ - [F,L]\n# END vigie\n",
+      "name": "ligne vide",
+      "verdict": "directive"
+    },
+    {
+      "block": "# BEGIN vigie\nRewriteEngine On\nRewriteCond %{HTTP_USER_AGENT} \"Bytespider\" [NC]\nRewriteCond %{TIME} <20260620120000\nRewriteRule ^ - [F,L]\n# END vigie",
+      "name": "sans fin de ligne finale",
+      "verdict": "final-newline"
+    },
+    {
+      "block": "# BEGIN vigie\nRewriteEngine On\n# é\nRewriteCond %{HTTP_USER_AGENT} \"Bytespider\" [NC]\nRewriteCond %{TIME} <20260620120000\nRewriteRule ^ - [F,L]\n# END vigie\n",
+      "name": "octet non ASCII",
+      "verdict": "byte"
+    },
+    {
+      "block": "# BEGIN vigie\nRewriteEngine On\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# x\n# END vigie\n",
+      "name": "trop de lignes",
+      "verdict": "too-many-lines"
+    },
+    {
+      "block": "# BEGIN vigie\nRewriteEngine On\n# xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n# END vigie\n",
+      "name": "trop gros",
+      "verdict": "too-large"
+    },
+    {
+      "block": "# BEGIN vigie\nRewriteEngine On\nRewriteCond %{HTTP_USER_AGENT} \"Bytespider\" [NC]\nRewriteCond %{TIME} <20260620120000\n# END vigie\n",
+      "name": "groupe inachevé",
+      "verdict": "group"
+    },
+    {
+      "block": "# BEGIN Vigie\nRewriteEngine On\nRewriteCond %{HTTP_USER_AGENT} \"Bytespider\" [NC]\nRewriteCond %{TIME} <20260620120000\nRewriteRule ^ - [F,L]\n# END vigie\n",
+      "name": "première ligne",
+      "verdict": "begin"
+    }
+  ]
+}
