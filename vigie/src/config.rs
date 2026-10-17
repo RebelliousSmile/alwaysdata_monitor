@@ -152,6 +152,33 @@ impl SiteLogs {
     }
 }
 
+/// `[sites.inventory]` : source de l'inventaire des composants du site
+/// (issue #19). Sans elle, `/r/v1/inventory` refuse le site avant de lire le
+/// corps, et le contrôle `vulns` (F7) n'existe pas : « surveillé » se lit
+/// dans la configuration du veilleur, jamais dans ce qu'un agent envoie.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SiteInventory {
+    pub source: InventorySource,
+}
+
+/// Source d'inventaire : liste fermée (#20 ajoutera la sienne).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum InventorySource {
+    /// L'agent PHP relève les composants du site (`docs/agent-php.md`) ;
+    /// exige le runtime effectif `php`.
+    AgentPhp,
+}
+
+impl InventorySource {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::AgentPhp => "agent-php",
+        }
+    }
+}
+
 /// API de la console (`docs/api-console.md`).
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -271,6 +298,8 @@ pub struct Site {
     pub agent_silence: u64,
     /// `[sites.logs]`, facultatif.
     pub logs: Option<SiteLogs>,
+    /// `[sites.inventory]`, facultatif.
+    pub inventory: Option<SiteInventory>,
 }
 
 fn default_interval() -> u64 {
@@ -578,6 +607,19 @@ impl Config {
                     "agent_silence du site « {} » : {MIN_AGENT_SILENCE} s au moins (reçu : {})",
                     site.id, site.agent_silence
                 ));
+            }
+            if let Some(inventory) = &site.inventory {
+                match inventory.source {
+                    InventorySource::AgentPhp if site.effective_runtime() != Some(Runtime::Php) => {
+                        return Err(format!(
+                            "inventory du site « {} » : source = \"{}\" exige le runtime php (reçu : {})",
+                            site.id,
+                            inventory.source.as_str(),
+                            site.effective_runtime().map_or("-", Runtime::as_str)
+                        ));
+                    }
+                    InventorySource::AgentPhp => {}
+                }
             }
             if let Some(logs) = &site.logs {
                 logs.validate()

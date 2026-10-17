@@ -245,6 +245,19 @@ pub fn run_with_sources(
         Err(err) => log::error!("purge des logs : {err:#}"),
     }
     purge_analysis(&mut store, now);
+    // Inventaires : dernier et 30 jours d'historique ; le dernier d'un site
+    // qui ne déclare plus [sites.inventory] part aussi après 30 jours.
+    let declared: Vec<&str> = config
+        .sites
+        .iter()
+        .filter(|site| crate::capability::inventory_source(site).is_some())
+        .map(|site| site.id.as_str())
+        .collect();
+    match store.purge_inventory(now, &declared) {
+        Ok(0) => {}
+        Ok(purged) => log::info!("inventaires : {purged} inventaire(s) de plus de 30 jours purgés"),
+        Err(err) => log::error!("purge des inventaires : {err:#}"),
+    }
     let http = Http::new(&options.trust, options.request_timeout);
     let ctx = Ctx {
         http: &http,

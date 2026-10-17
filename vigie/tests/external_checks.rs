@@ -228,6 +228,7 @@ fn site(base: &str) -> Site {
         interval: 300,
         agent_silence: 900,
         logs: None,
+        inventory: None,
     }
 }
 

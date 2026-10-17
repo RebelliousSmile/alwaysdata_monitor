@@ -1,0 +1,232 @@
+{
+  "v": 1,
+  "type": "inventory",
+  "site": "site-a",
+  "seq": 1,
+  "sent_at": 1792152000,
+  "agent": "vigie-agent-php/0.5.0",
+  "complete": true,
+  "skipped": 0,
+  "bom": {
+    "bomFormat": "CycloneDX",
+    "specVersion": "1.7",
+    "serialNumber": "urn:uuid:3e671687-395b-41f5-a30f-a58921a69b79",
+    "metadata": {
+      "timestamp": "2026-10-16T12:00:00Z",
+      "component": {
+        "type": "application",
+        "name": "site-a"
+      }
+    },
+    "components": [
+      {
+        "type": "application",
+        "name": "core",
+        "version": "6.6.2",
+        "purl": "pkg:wordpress/core/core@6.6.2",
+        "scope": "required",
+        "properties": [
+          {
+            "name": "vigie:path",
+            "value": "wp-includes/version.php"
+          },
+          {
+            "name": "vigie:scope",
+            "value": "required"
+          }
+        ]
+      },
+      {
+        "type": "library",
+        "name": "exemple-formulaire",
+        "version": "5.9.3",
+        "purl": "pkg:wordpress/plugin/exemple-formulaire@5.9.3",
+        "scope": "required",
+        "properties": [
+          {
+            "name": "vigie:path",
+            "value": "wp-content/plugins/exemple-formulaire"
+          },
+          {
+            "name": "vigie:scope",
+            "value": "required"
+          }
+        ]
+      },
+      {
+        "type": "library",
+        "name": "exemple-cache",
+        "version": "2.1.0",
+        "purl": "pkg:wordpress/plugin/exemple-cache@2.1.0",
+        "scope": "required",
+        "properties": [
+          {
+            "name": "vigie:path",
+            "value": "wp-content/plugins/exemple-cache"
+          },
+          {
+            "name": "vigie:scope",
+            "value": "required"
+          }
+        ]
+      },
+      {
+        "type": "library",
+        "name": "exemple-unique",
+        "version": "1.0",
+        "purl": "pkg:wordpress/plugin/exemple-unique@1.0",
+        "scope": "required",
+        "properties": [
+          {
+            "name": "vigie:path",
+            "value": "wp-content/plugins/exemple-unique.php"
+          },
+          {
+            "name": "vigie:scope",
+            "value": "required"
+          }
+        ]
+      },
+      {
+        "type": "library",
+        "name": "exemple-sans-version",
+        "version": "",
+        "purl": "pkg:wordpress/plugin/exemple-sans-version",
+        "scope": "required",
+        "properties": [
+          {
+            "name": "vigie:path",
+            "value": "wp-content/plugins/exemple-sans-version"
+          },
+          {
+            "name": "vigie:scope",
+            "value": "required"
+          }
+        ]
+      },
+      {
+        "type": "library",
+        "name": "exemple-mu",
+        "version": "0.3",
+        "purl": "pkg:wordpress/plugin/exemple-mu@0.3",
+        "scope": "required",
+        "properties": [
+          {
+            "name": "vigie:path",
+            "value": "wp-content/mu-plugins/exemple-mu.php"
+          },
+          {
+            "name": "vigie:scope",
+            "value": "mu"
+          }
+        ]
+      },
+      {
+        "type": "library",
+        "name": "exemple-theme",
+        "version": "2.1",
+        "purl": "pkg:wordpress/theme/exemple-theme@2.1",
+        "scope": "required",
+        "properties": [
+          {
+            "name": "vigie:path",
+            "value": "wp-content/themes/exemple-theme"
+          },
+          {
+            "name": "vigie:scope",
+            "value": "required"
+          }
+        ]
+      },
+      {
+        "type": "library",
+        "name": "exemple-theme-enfant",
+        "version": "1.0",
+        "purl": "pkg:wordpress/theme/exemple-theme-enfant@1.0",
+        "scope": "required",
+        "properties": [
+          {
+            "name": "vigie:path",
+            "value": "wp-content/themes/exemple-theme-enfant"
+          },
+          {
+            "name": "vigie:scope",
+            "value": "required"
+          },
+          {
+            "name": "vigie:parent",
+            "value": "exemple-theme"
+          }
+        ]
+      },
+      {
+        "type": "library",
+        "name": "exemple/outil",
+        "version": "1.2.0",
+        "purl": "pkg:composer/exemple/outil@1.2.0",
+        "scope": "required",
+        "properties": [
+          {
+            "name": "vigie:path",
+            "value": "composer.lock"
+          },
+          {
+            "name": "vigie:scope",
+            "value": "required"
+          }
+        ]
+      },
+      {
+        "type": "library",
+        "name": "exemple/outil-test",
+        "version": "3.0.0",
+        "purl": "pkg:composer/exemple/outil-test@3.0.0",
+        "scope": "excluded",
+        "properties": [
+          {
+            "name": "vigie:path",
+            "value": "composer.lock"
+          },
+          {
+            "name": "vigie:scope",
+            "value": "dev"
+          }
+        ]
+      },
+      {
+        "type": "library",
+        "name": "@exemple/paquet",
+        "version": "2.0.0",
+        "purl": "pkg:npm/%40exemple/paquet@2.0.0",
+        "scope": "required",
+        "properties": [
+          {
+            "name": "vigie:path",
+            "value": "package-lock.json"
+          },
+          {
+            "name": "vigie:scope",
+            "value": "required"
+          }
+        ]
+      },
+      {
+        "type": "library",
+        "name": "paquet-simple",
+        "version": "4.17.21",
+        "purl": "pkg:npm/paquet-simple@4.17.21",
+        "scope": "required",
+        "properties": [
+          {
+            "name": "vigie:path",
+            "value": "package-lock.json"
+          },
+          {
+            "name": "vigie:scope",
+            "value": "required"
+          }
+        ]
+      }
+    ]
+  }
+}

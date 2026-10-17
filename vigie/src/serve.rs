@@ -13,6 +13,9 @@
 //! - `POST /r/v1/logs` reçoit les lots de logs signés des agents
 //!   (`logs/receive.rs`, `docs/logs.md`), fermé pour un site sans
 //!   `[sites.logs] source` ;
+//! - `POST /r/v1/inventory` reçoit l'inventaire signé des composants d'un
+//!   site (`inventory/receive.rs`, 512 Kio au plus), fermé pour un site sans
+//!   `[sites.inventory]`, refusé avant toute lecture du corps ;
 //! - `/api/v1` sert la console, authentifiée par appareil (`api.rs`,
 //!   `docs/api-console.md`).
 //!
@@ -143,6 +146,10 @@ pub fn router_with(config: Config, clock: Arc<dyn Clock>, config_path: Option<Pa
         .route(
             crate::logs::receive::ROUTE,
             post(logs_handler).fallback(not_found),
+        )
+        .route(
+            crate::inventory::receive::ROUTE,
+            post(inventory_handler).fallback(not_found),
         )
         .merge(crate::api::routes())
         .fallback(not_found)
@@ -299,16 +306,18 @@ async fn report_handler(State(state): State<Arc<AppState>>, request: Request) ->
     }
 }
 
-/// Lit le corps d'une requête d'agent avec les limites de `/r/v1/report` ;
-/// `Err` : la raison du refus.
+/// Lit le corps d'une requête d'agent, `limit` octets au plus (64 Ko de
+/// `/r/v1/report`, 512 Kio de `/r/v1/inventory`), en 10 s ; `Err` : la raison
+/// du refus.
 async fn read_agent_body(
     body: axum::body::Body,
     announced: Option<u64>,
+    limit: usize,
 ) -> Result<axum::body::Bytes, Reason> {
-    if announced.is_some_and(|len| len > MAX_REPORT_BYTES as u64) {
+    if announced.is_some_and(|len| len > limit as u64) {
         return Err(Reason::TooLarge);
     }
-    let read = axum::body::to_bytes(body, MAX_REPORT_BYTES);
+    let read = axum::body::to_bytes(body, limit);
     match tokio::time::timeout(REPORT_BODY_TIMEOUT, read).await {
         Ok(Ok(bytes)) => Ok(bytes),
         Ok(Err(err)) => {
@@ -346,7 +355,7 @@ async fn commands_handler(
     let signature = header(HEADER_SIGNATURE);
     let source = pull_source(&parts);
     let announced = header(CONTENT_LENGTH.as_str()).and_then(|v| v.parse::<u64>().ok());
-    let bytes = match read_agent_body(body, announced).await {
+    let bytes = match read_agent_body(body, announced, MAX_REPORT_BYTES).await {
         Ok(bytes) => bytes,
         Err(reason) => return refuse_pull(Refusal::new(site.as_deref(), reason)),
     };
@@ -467,7 +476,7 @@ async fn logs_handler(State(state): State<Arc<AppState>>, request: Request) -> S
     let site = header(HEADER_SITE);
     let signature = header(HEADER_SIGNATURE);
     let announced = header(CONTENT_LENGTH.as_str()).and_then(|v| v.parse::<u64>().ok());
-    let bytes = match read_agent_body(body, announced).await {
+    let bytes = match read_agent_body(body, announced, MAX_REPORT_BYTES).await {
         Ok(bytes) => bytes,
         Err(reason) => return refuse_logs(Refusal::new(site.as_deref(), reason)),
     };
@@ -528,6 +537,116 @@ async fn logs_handler(State(state): State<Arc<AppState>>, request: Request) -> S
             Reason::Internal(format!("tâche interrompue : {err}")),
         )),
     }
+}
+
+/// 204 si l'inventaire est accepté (nouveau ou inchangé), 404 sans corps
+/// sinon. La porte (site, `[sites.inventory]`, clé) passe avant toute lecture
+/// du corps ; signature et liste blanche hors du writer ; seule l'écriture le
+/// tient. La configuration est celle du démarrage, comme pour les rapports.
+async fn inventory_handler(State(state): State<Arc<AppState>>, request: Request) -> StatusCode {
+    use crate::inventory::{MAX_INVENTORY_BYTES, receive};
+    let (parts, body) = request.into_parts();
+    let header = |name: &str| {
+        parts
+            .headers
+            .get(name)
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_owned)
+    };
+    let site = header(HEADER_SITE);
+    let signature = header(HEADER_SIGNATURE);
+    let announced = header(CONTENT_LENGTH.as_str()).and_then(|v| v.parse::<u64>().ok());
+    let interrupted = |err: tokio::task::JoinError| {
+        Refusal::new(
+            site.as_deref(),
+            Reason::Internal(format!("tâche interrompue : {err}")),
+        )
+    };
+
+    // Porte, par une connexion de lecture : rien n'est lu du corps d'un site
+    // fermé, inconnu ou sans clé.
+    let task_state = Arc::clone(&state);
+    let task_site = site.clone();
+    let gate = tokio::task::spawn_blocking(move || {
+        let store = Store::open_read(task_state.database())
+            .map_err(|e| Refusal::new(task_site.as_deref(), Reason::Internal(format!("{e:#}"))))?;
+        receive::gate(
+            store.as_ref(),
+            &task_state.config,
+            task_site.as_deref(),
+            signature.as_deref(),
+        )
+    })
+    .await;
+    let opened = match gate {
+        Ok(Ok(opened)) => opened,
+        Ok(Err(refusal)) => return refuse_inventory(refusal),
+        Err(err) => return refuse_inventory(interrupted(err)),
+    };
+
+    let bytes = match read_agent_body(body, announced, MAX_INVENTORY_BYTES).await {
+        Ok(bytes) => bytes,
+        Err(Reason::TooLarge) => {
+            return refuse_inventory(Refusal::new(site.as_deref(), Reason::InventoryTooLarge));
+        }
+        Err(reason) => return refuse_inventory(Refusal::new(site.as_deref(), reason)),
+    };
+    let now = state.clock.unix();
+    let task_state = Arc::clone(&state);
+    let outcome = tokio::task::spawn_blocking(move || {
+        // Travail CPU avant de prendre le writer.
+        let inventory = receive::verify(&opened, &bytes, now)?;
+        let refusal = |reason| Refusal::new(Some(&opened.site), reason).with_seq(inventory.seq);
+        let written = task_state
+            .writer
+            .write(|store| Ok(receive::store(store, &opened, &inventory, now)));
+        match written {
+            Ok(Some(result)) => result,
+            Ok(None) => Err(refusal(Reason::UnknownSite)),
+            Err(err) => Err(refusal(Reason::Internal(format!("{err:#}")))),
+        }
+    })
+    .await;
+    match outcome {
+        Ok(Ok(received)) => {
+            let rid = crate::request_id::current();
+            let dropped: usize = received.dropped.values().sum();
+            log::info!(
+                "[{rid}] inventaire accepté (site {}, seq {}) : {} composant(s), {} écarté(s) à la réception, {} écarté(s) par l'agent, {}, {}",
+                received.site,
+                received.seq,
+                received.components,
+                dropped,
+                received.skipped,
+                if received.complete {
+                    "complet"
+                } else {
+                    "incomplet"
+                },
+                if received.new { "nouveau" } else { "inchangé" }
+            );
+            if dropped > 0 {
+                log::warn!(
+                    "[{rid}] site {} : composant(s) d'inventaire écarté(s) : {:?}",
+                    received.site,
+                    received.dropped
+                );
+            }
+            StatusCode::NO_CONTENT
+        }
+        Ok(Err(refusal)) => refuse_inventory(refusal),
+        Err(err) => refuse_inventory(interrupted(err)),
+    }
+}
+
+fn refuse_inventory(refusal: Refusal) -> StatusCode {
+    let rid = crate::request_id::current();
+    if matches!(refusal.reason, Reason::Internal(_)) {
+        log::error!("[{rid}] inventaire : {refusal}");
+    } else {
+        log::warn!("[{rid}] inventaire : {refusal}");
+    }
+    StatusCode::NOT_FOUND
 }
 
 fn refuse_logs(refusal: Refusal) -> StatusCode {
@@ -651,6 +770,7 @@ mod tests {
                 interval: 300,
                 agent_silence: 900,
                 logs: None,
+                inventory: None,
             }],
         }
     }
@@ -748,6 +868,7 @@ mod tests {
             "/r/v1/report",
             "/r/v1/commands",
             "/r/v1/logs",
+            "/r/v1/inventory",
             "/r/v1",
             "/api/v1",
             "/api/v1/inconnu",

@@ -1,0 +1,96 @@
+{
+  "v": 1,
+  "type": "inventory",
+  "site": "site-b",
+  "seq": 1,
+  "sent_at": 1792152000,
+  "agent": "vigie-agent-php/0.5.0",
+  "complete": true,
+  "skipped": 0,
+  "bom": {
+    "bomFormat": "CycloneDX",
+    "specVersion": "1.7",
+    "serialNumber": "urn:uuid:3e671687-395b-41f5-a30f-a58921a69b79",
+    "metadata": {
+      "timestamp": "2026-10-16T12:00:00Z",
+      "component": {
+        "type": "application",
+        "name": "site-b"
+      }
+    },
+    "components": [
+      {
+        "type": "application",
+        "name": "prestashop",
+        "version": "8.1.0",
+        "purl": "pkg:prestashop/core/prestashop@8.1.0",
+        "scope": "required",
+        "properties": [
+          {
+            "name": "vigie:path",
+            "value": "app/AppKernel.php"
+          },
+          {
+            "name": "vigie:scope",
+            "value": "required"
+          }
+        ]
+      },
+      {
+        "type": "library",
+        "name": "exemplemodule",
+        "version": "1.2.0",
+        "purl": "pkg:prestashop/module/exemplemodule@1.2.0",
+        "scope": "required",
+        "properties": [
+          {
+            "name": "vigie:path",
+            "value": "modules/exemplemodule"
+          },
+          {
+            "name": "vigie:scope",
+            "value": "required"
+          },
+          {
+            "name": "vigie:config-version",
+            "value": "1.1.0"
+          }
+        ]
+      },
+      {
+        "type": "library",
+        "name": "exemple_paiement",
+        "version": "3.0.1",
+        "purl": "pkg:prestashop/module/exemple_paiement@3.0.1",
+        "scope": "required",
+        "properties": [
+          {
+            "name": "vigie:path",
+            "value": "modules/exemple_paiement"
+          },
+          {
+            "name": "vigie:scope",
+            "value": "required"
+          }
+        ]
+      },
+      {
+        "type": "library",
+        "name": "exemple/bibliotheque",
+        "version": "0.9.0",
+        "purl": "pkg:composer/exemple/bibliotheque@0.9.0",
+        "scope": "required",
+        "properties": [
+          {
+            "name": "vigie:path",
+            "value": "composer.lock"
+          },
+          {
+            "name": "vigie:scope",
+            "value": "required"
+          }
+        ]
+      }
+    ]
+  }
+}

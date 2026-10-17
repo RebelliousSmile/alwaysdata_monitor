@@ -90,6 +90,7 @@ fn config(dir: &Path, base: &str) -> Config {
             interval: PERIOD.unsigned_abs(),
             agent_silence: 900,
             logs: None,
+            inventory: None,
         }],
     }
 }
