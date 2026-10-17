@@ -1,0 +1,24 @@
+# Exceptions osv-scanner pour vigie/app/src-tauri/Cargo.lock (issue #22).
+#
+# Règles (vigie/docs/decisions.md, section « Dépendances (issue #22) ») :
+# - remédier d'abord : une exception seulement quand aucun correctif n'est
+#   atteignable ;
+# - ce fichier ne vaut que pour le lockfile de son dossier : osv-scanner ne
+#   le lit ni pour un dossier voisin ni pour un dossier parent ;
+# - chaque entrée porte id, reason (origine, pourquoi non exploitable chez
+#   nous, condition de levée) et ignoreUntil, au plus tard 92 jours après
+#   la date du jour : vigie/scripts/check-osv-exceptions.py le vérifie en CI
+#   et refuse toute autre clé (PackageOverrides compris).
+
+# glib 0.18.5, alias de RUSTSEC-2024-0429, corrigé en 0.20 que gtk-rs 0.18
+# (gtk3, figé) n'adopte pas.
+[[IgnoredVulns]]
+id = "GHSA-wrw7-89jp-8q8g"
+ignoreUntil = 2027-01-17
+reason = "pile gtk3 de tauri, compilée seulement pour Linux desktop ; aucun livrable Linux (release Windows et Android uniquement, console-release.yml) ; lever si une cible Linux est publiée ou si tauri quitte gtk-rs 0.18"
+
+# proc-macro-error 1.0.4, non maintenu, tiré par glib-macros / gtk3-macros 0.18.
+[[IgnoredVulns]]
+id = "RUSTSEC-2024-0370"
+ignoreUntil = 2027-01-17
+reason = "proc-macro-error non maintenu, macro de compilation de la pile gtk3 de tauri (glib-macros, gtk3-macros 0.18) : aucun code à l'exécution, aucun livrable Linux (release Windows et Android uniquement, console-release.yml) ; lever si une cible Linux est publiée ou si tauri quitte gtk-rs 0.18"
