@@ -34,6 +34,7 @@ journey
     Chargement KEV fictif (3 CVE-2099) => StoreTables.kev rend dateAdded, échéance, known_ransomware: 5: lib
     Chargement EPSS fictif => StoreTables.epss rend score, percentile en millionièmes et génération ; TablesState porte version et date: 5: lib
     Faille à CVE-2099-90001, KEV gen 1 sans ce CVE puis gen 2 avec => assess passe d'avertissement à critique sans autre changement: 5: lib
+    StoreTables::open sur Store::open_read (query_only) => KEV, EPSS et TablesState lus, aucune écriture tentée ; même résultat que sur la connexion de l'écrivain: 5: lib
   section Générations
     Second chargement => un lecteur ne voit que l'ancien ou le nouveau jeu complet: 1: lib
     Deux EnrichLoad concurrents sur epss => le second refusé tant que le bail court ; aucune génération réutilisée: 1: lib
@@ -78,9 +79,9 @@ journey
    - `finish_unchanged` : la primitive générique de F2 `finish_unchanged(source, g, expected, validators: Validators::{Keep, Set(..)}, outcome, now) -> bool` (une seule instruction en compare-and-swap, partagée par `Load` et `EnrichLoad`, colonnes extensibles) ; F4 y ajoute deux colonnes : `validator_url` (écrite avec `Set(..)`, laissée avec `Keep`) et `stale_count` (`+ 1` sur le chemin périmé) ; zéro ligne → `false`, rien écrit (issue `busy`) ;
    - `release(self)` : celle de F2 appliquée à la source (abandon) ; aucune ligne active touchée ;
    - `active(source) -> Option<ActiveDataset { released, rows }>` (pour l'`EnrichSink` de la phase 3) ;
-   - `StoreTables::open(&Store)` : `TablesState` et KEV entier de la génération active dans une même transaction de lecture ; `epss(&Cve)` par une instruction préparée jointe sur `active_generation` (`EpssFact.generation` rempli), cache `HashMap` pour la durée d'un passage ;
+   - `StoreTables::open(&Store)` : construit sur une **connexion de lecture** (`Store::open_read`, `query_only`), utilisable par `serve` (API) et la CLI comme par `tick` ; aucune écriture, aucune table temporaire ni migration ; `TablesState` et KEV entier de la génération active dans une même transaction de lecture (différée) ; `epss(&Cve)` par une instruction préparée jointe sur `active_generation` (`EpssFact.generation` rempli), cache `HashMap` pour la durée d'un passage ;
    - `datasets()` pour `vigie vulns sources`.
-4. **Tests** : `vulns_enrich_store.rs` (cas « Happy path », « Générations », « Purge », « Validateurs », « Edge case », horloge injectée pour le bail) ; montée de gravité par `StoreTables` avant et après le commit de la génération 2 ; `store_concurrency.rs` étendu (cas « Contention », durée maximale d'une transaction d'écriture affirmée en release seulement) ; tests de migration et instantané du schéma.
+4. **Tests** : `vulns_enrich_store.rs` (cas « Happy path » dont `StoreTables::open` sur `Store::open_read`, « Générations », « Purge », « Validateurs », « Edge case », horloge injectée pour le bail) ; montée de gravité par `StoreTables` avant et après le commit de la génération 2 ; `store_concurrency.rs` étendu (cas « Contention », durée maximale d'une transaction d'écriture affirmée en release seulement) ; tests de migration et instantané du schéma.
 
 ## Test acceptance criteria
 
@@ -88,6 +89,6 @@ journey
 | ---- | ------------------- |
 | 1 | Migration depuis la version précédente verte ; `MIGRATIONS.len() == SCHEMA_ENRICHMENT` ; rejouée sans effet ; instantané à jour ; `validator_url` rempli pour les sources OSV qui avaient un ETag |
 | 2 | Tests de F1 et F2 verts sans modification de leurs attentes ; purge `GenerationCve` sans jamais toucher l'active, même CVE commun compris |
-| 3 | Aucun lecteur ne voit un jeu partiel ; aucune génération réutilisée ; commit supplanté sans mélange ; `finish_unchanged` et `release` sans effet sur un bail repris ; aucun chemin « inchangé » n'écrit en plus d'une instruction ; aucune transaction d'écriture au-delà d'un lot ; un ETag n'est jamais écrit sans la génération ou le succès qui lui correspond, ni sans son URL |
+| 3 | Aucun lecteur ne voit un jeu partiel ; `StoreTables::open` marche sur `Store::open_read` sans erreur `query_only` ; aucune génération réutilisée ; commit supplanté sans mélange ; `finish_unchanged` et `release` sans effet sur un bail repris ; aucun chemin « inchangé » n'écrit en plus d'une instruction ; aucune transaction d'écriture au-delà d'un lot ; un ETag n'est jamais écrit sans la génération ou le succès qui lui correspond, ni sans son URL |
 | 4 | Montée d'avertissement à critique prouvée par le stockage réel ; contention sans `SQLITE_BUSY` ni écriture perdue, sur Linux et Windows |
 | 1-4 | fmt, clippy, tests verts sur Linux et Windows ; musl vert ; `Cargo.toml` inchangé |
