@@ -242,3 +242,61 @@ F0). Les marques [V], [S] et [NV] des faits cités y sont.
 | Typologie : contrôle `vulns` dans le registre de capacités (#4), surveillé si une source d'inventaire est déclarée (agent PHP avec inventaire activé, ou clé d'inventaire enregistrée, #20), ce qui couvre `node` et `static`. Sans inventaire depuis plus de 7 jours : avertissement « inventaire périmé », jamais une perte de surveillance. Sources par site : Wordfence pour `wordpress`, Friends-Of-Presta pour `prestashop`, OSV pour tout composant `composer`, `npm` ou `cargo` | `capability.rs` est la seule déclaration des contrôles ; un inventaire qui cesse d'arriver doit se voir |
 | Réseau : wordfence.com, cisa.gov et les hôtes EPSS ne sont joignables que depuis le VPS. Les tests utilisent des fixtures locales. La liste des hôtes à autoriser est dans `failles.md` | Le conteneur de développement refuse ces hôtes ; un test ne doit dépendre d'aucun réseau |
 | Fixtures : jamais l'inventaire d'un client. Wordfence et Friends-Of-Presta toujours fictives, de même structure ; vrais enregistrements OSV ou GHSA admis seulement avec un fichier `NOTICE` dans leur dossier (source, licence, lien, modifications) | Dépôt public : c'est une redistribution |
+
+## Dépendances (issue #22)
+
+Plan : `aidd_docs/tasks/2026_10/2026_10_17_osv-scanner/plan.md`. Job `deps`
+(« osv-scanner ») de `.github/workflows/garde-fous.yml`.
+
+| Décision du 2026-10-17 | Raison |
+| --- | --- |
+| osv-scanner **2.6.0** (`google/osv-scanner`, Apache-2.0), binaire `osv-scanner_linux_amd64` épinglé par sa SHA-256 (`ca69b3d3…b108`, lue dans `osv-scanner_SHA256SUMS` de la release et recalculée sur le binaire), téléchargé à chaque run, jamais mis en cache. 2.7.0 est écartée | 2.7.0 avait cinq jours à l'épinglage : trop récente pour qu'une compromission ait été signalée. 2.6.0 lit déjà RUSTSEC-2026-0253 et détecte et filtre comme 2.7.0 (essais locaux) |
+| Provenance SLSA de la release (`multiple.intoto.jsonl`) à vérifier une fois, à l'épinglage, avec `slsa-verifier verify-artifact osv-scanner_linux_amd64 --provenance-path multiple.intoto.jsonl --source-uri github.com/google/osv-scanner --source-tag v2.6.0` (slsa-verifier vérifié par sa propre somme). Pas en CI. **Non faite le 2026-10-17** : le conteneur de développement n'atteint pas `tuf-repo-cdn.sigstore.dev` ; à faire depuis un poste qui l'atteint, sortie masquée consignée dans la PR | La somme dit « même binaire qu'à l'épinglage », la provenance « construit par google/osv-scanner depuis ce tag » ; une vérification suffit pour un binaire figé par sa somme |
+| Quatre lockfiles nommés : `vigie/Cargo.lock`, `vigie/app/src-tauri/Cargo.lock`, `vigie/app/pnpm-lock.yaml`, `composer.lock` ; base en ligne `api.osv.dev` ; ni `--recursive`, ni `--config`, ni `--call-analysis` | Un lockfile absent ou renommé sort en 127 au lieu d'être sauté. L'analyse d'appels Rust exécuterait les scripts de build |
+| Fail-closed : tout code non nul fait échouer le job (1 = faille, 127 = erreur, réseau compris, 128 = aucun paquet). Aucune tolérance de sévérité ; un « non maintenu » RustSec compte comme une faille | Une panne réseau ne doit pas passer pour « aucune faille » |
+| Workflow aussi lancé chaque lundi à 05:17 UTC (`schedule`) ; gitleaks et `tls-deps` repassent avec lui | Une faille se publie sans qu'aucun commit ne change |
+| Remédier avant d'excepter : `rqrr` 0.10 → 0.11 (dev-dependency de `tests/cli.rs`), `lru` 0.16.4 → 0.18.5, hors de RUSTSEC-2026-0253 | Un correctif existait |
+| **Exceptions au plus près du lockfile** : `vigie/app/osv-scanner.toml` (braces `GHSA-vfj7-8cjw-p6xm`, postcss-selector-parser `GHSA-rj75-hqrm-r3gf`) et `vigie/app/src-tauri/osv-scanner.toml` (glib `GHSA-wrw7-89jp-8q8g`, proc-macro-error `RUSTSEC-2024-0370`), échéance 2027-01-17. Aucun fichier à la racine ni dans `vigie/` | Chaque lockfile ne lit que le `osv-scanner.toml` de son dossier, sans remontée vers le parent : une exception de la console ne masque pas la même faille dans le veilleur ou le module |
+| Raison glib, mot pour mot : « pile gtk3 de tauri, compilée seulement pour Linux desktop ; aucun livrable Linux (release Windows et Android uniquement, console-release.yml) ; lever si une cible Linux est publiée ou si tauri quitte gtk-rs 0.18 ». proc-macro-error : macro de compilation de la même pile, levée aux mêmes conditions. braces et postcss-selector-parser 6 : outils de build de la console (devDependencies), absents du `dist` embarqué ; lever si un correctif amont est publié, au passage à tailwind 4, ou si l'un d'eux entre dans `dependencies` | Pas de correctif atteignable sans migration ; aucune de ces dépendances n'est dans un livrable publié ni dans le veilleur du VPS ; chaque raison dit quand elle cesse d'être vraie |
+| **Script de contrôle** `vigie/scripts/check-osv-exceptions.py`, lancé avant le scan sur tous les `osv-scanner.toml` suivis par git : chaque `[[IgnoredVulns]]` a un `id`, une `reason` non vide et un `ignoreUntil` en date TOML au plus tard 92 jours après la date UTC du run ; toute autre clé de premier niveau est refusée, **`PackageOverrides` compris** (il ignore un paquet entier sans échéance). Une échéance passée n'est pas une erreur du script : osv-scanner rend la faille | osv-scanner accepte une exception sans échéance ou à 2099 : la règle « datée, motivée, ≤ 3 mois » ne tient pas à la seule relecture. 92 jours = trois mois calendaires au plus long |
+| **Le script et le job `deps` sont la règle.** Les exceptions et le refus de `PackageOverrides` passent par ce script : une PR qui modifie `check-osv-exceptions.py` ou le job `deps` de `garde-fous.yml` se relit avec le même soin qu'une PR qui ajoute une exception | Affaiblir le contrôle (limite, clés admises, lockfiles, code de sortie) ouvre la même porte qu'une exception, sans en avoir l'air |
+| `composer.lock` régénéré d'après `composer.json` (0 paquet, `require-dev` retiré en 1.10.0) et toujours scanné ; `composer validate --no-check-publish` fait échouer le job si le lock redevient périmé | Scanner un lock qui ne reflète pas `composer.json` ne prouve rien ; le lock vide reste le point d'entrée d'une future dépendance |
+| cargo-deny écarté pour l'instant ; à réévaluer si une politique de licences devient nécessaire | osv-scanner lit déjà RustSec ; les crates TLS interdites restent gardées par `check-tls-deps.sh` |
+
+### Quand le job `osv-scanner` est rouge
+
+1. Lire l'étape en échec. **Exceptions** : corriger le `osv-scanner.toml`
+   nommé. **composer.lock** : `composer update --no-install`, puis commit.
+   **Scan** : lire chaque faille sur `https://osv.dev/<id>`.
+2. Mettre à jour la dépendance si un correctif est atteignable
+   (`cargo update -p <crate>`, `pnpm update <paquet>`, `composer update
+   <paquet>`), puis vérifier que les tests restent verts.
+3. Sinon seulement, ajouter en PR une exception dans le `osv-scanner.toml` du
+   **dossier du lockfile** : `id`, `reason` (origine, pourquoi non
+   exploitable chez nous, condition de levée), `ignoreUntil` au plus tard
+   92 jours après le jour (le script la refuse sinon). À l'échéance, la
+   faille revient : remédier ou renouveler, motif revu.
+4. Une exception signalée « unused ignores » (faille corrigée, ou échéance
+   passée) : la retirer, ou la renouveler si la faille est toujours là.
+5. Sortie 127 (réseau, `api.osv.dev` injoignable) : relancer le job,
+   **jamais** excepter.
+6. Le cron hebdomadaire notifie l'auteur du dernier changement du cron.
+   GitHub désactive les crons d'un dépôt public sans activité depuis
+   60 jours : le réactiver depuis l'onglet Actions (workflow garde-fous).
+7. Reproduire en local, à la racine du dépôt, avec les commandes du job :
+
+```sh
+python3 -I vigie/scripts/check-osv-exceptions.py $(git ls-files ':(glob)**/osv-scanner.toml')
+composer validate --no-check-publish
+OSV_SCANNER_VERSION=2.6.0
+OSV_SCANNER_SHA256=ca69b3d3cd08f889a49dc0a383122f71cc528b83803671df5fd874d97485b108
+curl -sSfL -o osv-scanner "https://github.com/google/osv-scanner/releases/download/v${OSV_SCANNER_VERSION}/osv-scanner_linux_amd64"
+echo "${OSV_SCANNER_SHA256}  osv-scanner" | sha256sum -c -
+chmod +x osv-scanner
+./osv-scanner scan source --lockfile=vigie/Cargo.lock --lockfile=vigie/app/src-tauri/Cargo.lock --lockfile=vigie/app/pnpm-lock.yaml --lockfile=composer.lock
+```
+
+Sans accès à `api.osv.dev`, ajouter au scan `--offline-vulnerabilities
+--download-offline-databases` (bases OSV complètes téléchargées une fois,
+puis `--offline-vulnerabilities` seul). Supprimer le binaire `osv-scanner` après usage : il n'est pas
+ignoré par git.
