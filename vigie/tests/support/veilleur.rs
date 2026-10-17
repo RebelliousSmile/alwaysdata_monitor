@@ -34,6 +34,7 @@ pub fn config(database: PathBuf) -> Config {
         api: None,
         commands: None,
         logs: Default::default(),
+        vulns: None,
         sites: vec![site_a()],
     }
 }
