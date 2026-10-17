@@ -51,7 +51,7 @@ libc = "0.2"
 flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
 rcgen = { version = "0.14", default-features = false, features = ["ring", "pem", "crypto"] }
 # Relit le QR code de `vigie device pair` sans dépendre d'une image.
-rqrr = { version = "0.10", default-features = false }
+rqrr = { version = "0.11", default-features = false }
 tempfile = "3"
 tower = { version = "0.5", features = ["util"] }
 
