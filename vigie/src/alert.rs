@@ -1,6 +1,11 @@
 //! Alertes par e-mail : un relais SMTP authentifié (port 587, STARTTLS
 //! obligatoire), un seul destinataire, jamais un client.
 //!
+//! Incidents `vulns` (#21) : objet = première ligne du détail ; au-delà de
+//! cinq e-mails en attente pour un site (ouvertures, rappels ou clôtures),
+//! un seul e-mail groupé ([`vulns_grouped_open`], [`vulns_grouped_reminder`],
+//! [`vulns_grouped_close`]).
+//!
 //! Le mot de passe est lu dans `password_file` à chaque envoi. Le fichier est
 //! refusé, avant toute connexion, s'il est lisible par le groupe ou les autres
 //! ou s'il appartient à un autre utilisateur. Aucune erreur ne cite son contenu.
@@ -17,6 +22,7 @@ use lettre::{Message, SmtpTransport, Transport};
 
 use crate::capability::WATCHER_SITE;
 use crate::config::Alerts;
+use crate::finding::Severity;
 use crate::store::{CloseReason, Incident};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -258,9 +264,168 @@ fn watcher_email(incident: &Incident, kind: Mail) -> Email {
     }
 }
 
+/// Incident du contrôle `vulns` (#21).
+pub fn is_vulns(incident: &Incident) -> bool {
+    incident.check_name == crate::vulns::matching::finding::CHECK
+}
+
+/// Première ligne du détail d'un incident `vulns`, sur une ligne, 200
+/// caractères au plus : l'objet de ses e-mails.
+fn vulns_first_line(incident: &Incident) -> String {
+    one_line(incident.detail.lines().next().unwrap_or(""))
+        .chars()
+        .take(crate::vulns::matching::finding::MAX_SUBJECT_CHARS)
+        .collect()
+}
+
+fn vulns_hint(site: &str) -> String {
+    format!(
+        "\nFailles, versions corrigées et dérogations, sur le veilleur :\n  ~/vigie/bin/vigie site vulns {site}\n"
+    )
+}
+
+fn vulns_email(incident: &Incident, site_url: &str, kind: Mail) -> Email {
+    let first = vulns_first_line(incident);
+    let closed = incident
+        .closed_at
+        .map(crate::iso_utc)
+        .unwrap_or_else(|| "?".into());
+    let (subject, tail) = match kind {
+        Mail::Open => (
+            format!("[vigie] {} : {first}", incident.site),
+            format!("{}{}", vulns_hint(&incident.site), ack_hint(incident)),
+        ),
+        Mail::Reminder => (
+            format!("[vigie] {} : toujours en cours — {first}", incident.site),
+            format!("{}{}", vulns_hint(&incident.site), ack_hint(incident)),
+        ),
+        Mail::Close => match incident.close_reason {
+            Some(CloseReason::Unwatched) => (
+                format!("[vigie] {} : plus surveillé — {first}", incident.site),
+                format!(
+                    "Plus surveillé : {closed}\nAucune source d'inventaire ne voit plus ce composant, ou la source qui le voyait est retirée : l'incident est clos sans que l'état du composant soit connu.\n"
+                ),
+            ),
+            Some(CloseReason::Resolved) | None => (
+                format!("[vigie] {} : rétabli — {first}", incident.site),
+                format!("Rétabli : {closed}\n"),
+            ),
+        },
+    };
+    Email {
+        subject: one_line(&subject),
+        body: format!("{}{tail}", header(site_url, incident)),
+    }
+}
+
+/// Compte par gravité et les dix plus graves d'un envoi groupé.
+fn vulns_digest(incidents: &[Incident]) -> String {
+    let count = |s: Severity| incidents.iter().filter(|i| i.severity == s).count();
+    let mut sorted: Vec<&Incident> = incidents.iter().collect();
+    sorted.sort_by(|a, b| b.severity.cmp(&a.severity).then(a.id.cmp(&b.id)));
+    let mut text = format!(
+        "Constats : {} ({} critique(s), {} avertissement(s), {} information(s))\n\nLes {} plus graves :\n",
+        incidents.len(),
+        count(Severity::Critical),
+        count(Severity::Warning),
+        count(Severity::Info),
+        sorted.len().min(10),
+    );
+    for i in sorted.iter().take(10) {
+        text.push_str(&format!(
+            "  n° {} — {} — {}\n",
+            i.id,
+            i.severity,
+            vulns_first_line(i)
+        ));
+    }
+    if incidents.iter().any(|i| {
+        i.detail
+            .contains(crate::vulns::matching::finding::INTERNAL_NOTE)
+    }) {
+        text.push('\n');
+        text.push_str(crate::vulns::matching::finding::INTERNAL_NOTE);
+        text.push('\n');
+    }
+    text
+}
+
+fn grouped_header(site: &str, site_url: &str) -> String {
+    format!("Site : {site} ({site_url})\nContrôle : vulns\n")
+}
+
+/// Un seul e-mail pour plus de cinq ouvertures `vulns` en attente sur un
+/// site (premier rapprochement, faille entrée dans KEV…).
+pub fn vulns_grouped_open(site: &str, site_url: &str, incidents: &[Incident]) -> Email {
+    Email {
+        subject: one_line(&format!(
+            "[vigie] {site} : {} constats de failles à traiter",
+            incidents.len()
+        )),
+        body: format!(
+            "{}{}{}\nPour arrêter les rappels d'un incident, sur le veilleur :\n  ~/vigie/bin/vigie ack <n°>\n",
+            grouped_header(site, site_url),
+            vulns_digest(incidents),
+            vulns_hint(site)
+        ),
+    }
+}
+
+/// Un seul rappel pour plus de cinq rappels `vulns` dus sur un site.
+pub fn vulns_grouped_reminder(site: &str, site_url: &str, incidents: &[Incident]) -> Email {
+    Email {
+        subject: one_line(&format!(
+            "[vigie] {site} : {} constats de failles toujours en cours",
+            incidents.len()
+        )),
+        body: format!(
+            "{}{}{}\nPour arrêter les rappels d'un incident, sur le veilleur :\n  ~/vigie/bin/vigie ack <n°>\n",
+            grouped_header(site, site_url),
+            vulns_digest(incidents),
+            vulns_hint(site)
+        ),
+    }
+}
+
+/// Un seul e-mail pour plus de cinq clôtures `vulns` à annoncer sur un site,
+/// rétablis et plus surveillés séparés.
+pub fn vulns_grouped_close(site: &str, site_url: &str, incidents: &[Incident]) -> Email {
+    let mut sorted: Vec<&Incident> = incidents.iter().collect();
+    sorted.sort_by_key(|i| i.id);
+    let (unwatched, resolved): (Vec<&Incident>, Vec<&Incident>) = sorted
+        .into_iter()
+        .partition(|i| i.close_reason == Some(CloseReason::Unwatched));
+    let mut body = grouped_header(site, site_url);
+    for (title, list) in [
+        ("Rétablis", &resolved),
+        ("Plus surveillés (état du composant inconnu)", &unwatched),
+    ] {
+        if list.is_empty() {
+            continue;
+        }
+        body.push_str(&format!("\n{title} : {}\n", list.len()));
+        for i in list.iter() {
+            body.push_str(&format!("  n° {} — {}\n", i.id, vulns_first_line(i)));
+        }
+    }
+    body.push_str(&vulns_hint(site));
+    Email {
+        subject: one_line(&format!(
+            "[vigie] {site} : {} constats de failles clos ({} rétabli(s), {} plus surveillé(s))",
+            incidents.len(),
+            resolved.len(),
+            unwatched.len()
+        )),
+        body,
+    }
+}
+
 pub fn open_email(incident: &Incident, site_url: &str) -> Email {
     if is_watcher(incident) {
         return watcher_email(incident, Mail::Open);
+    }
+    if is_vulns(incident) {
+        return vulns_email(incident, site_url, Mail::Open);
     }
     Email {
         subject: one_line(&format!("[vigie] {} : {}", incident.site, incident.detail)),
@@ -271,6 +436,9 @@ pub fn open_email(incident: &Incident, site_url: &str) -> Email {
 pub fn reminder_email(incident: &Incident, site_url: &str) -> Email {
     if is_watcher(incident) {
         return watcher_email(incident, Mail::Reminder);
+    }
+    if is_vulns(incident) {
+        return vulns_email(incident, site_url, Mail::Reminder);
     }
     Email {
         subject: one_line(&format!(
@@ -287,6 +455,9 @@ pub fn reminder_email(incident: &Incident, site_url: &str) -> Email {
 pub fn close_email(incident: &Incident, site_url: &str) -> Email {
     if is_watcher(incident) {
         return watcher_email(incident, Mail::Close);
+    }
+    if is_vulns(incident) {
+        return vulns_email(incident, site_url, Mail::Close);
     }
     let closed = incident
         .closed_at
@@ -326,7 +497,6 @@ pub fn test_email(now: i64) -> Email {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::finding::Severity;
 
     fn incident() -> Incident {
         Incident {

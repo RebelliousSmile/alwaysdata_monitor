@@ -11,9 +11,9 @@
 //!   l'admettent ; un site sans runtime (`generic` non déclaré) n'en admet
 //!   aucune.
 //! - L'**inventaire** des composants (#19, #20) : [`inventory_sources`]
-//!   ouvre `/r/v1/inventory` et sera la condition d'existence du contrôle
-//!   `vulns` (F7, [`Needs::InventorySource`]) ; [`inventory_ecosystems`] fixe les écosystèmes purl admis selon le
-//!   CMS du site.
+//!   ouvre `/r/v1/inventory` et est la condition d'existence du contrôle
+//!   `vulns` (F7, #21, [`Needs::InventorySource`]) ; [`inventory_ecosystems`]
+//!   fixe les écosystèmes purl admis selon le CMS du site.
 //! - Les **contrôles du veilleur** (`vulns-sync`, #16) ne visent aucun site :
 //!   jamais surveillés pour un site de la configuration, ils le sont pour le
 //!   pseudo-site réservé [`WATCHER_SITE`], selon la configuration du
@@ -146,6 +146,9 @@ pub enum Control {
     Typology,
     /// Fraîcheur des bases de failles (#16), une clé par source.
     VulnsSync,
+    /// Failles connues des composants du site (#21) : un constat par purl
+    /// sans version, et « inventaire périmé » par source.
+    Vulns,
 }
 
 /// Pseudo-site des contrôles du veilleur : le `_` est hors de la grammaire
@@ -161,7 +164,7 @@ pub const TYPOLOGY_KEY: &str = "agent-runtime";
 
 impl Control {
     /// Tous les contrôles, dans l'ordre d'affichage.
-    pub const ALL: [Self; 14] = [
+    pub const ALL: [Self; 15] = [
         Self::Check(CheckKind::Content),
         Self::Check(CheckKind::Installer),
         Self::Check(CheckKind::Exposed),
@@ -176,6 +179,7 @@ impl Control {
         Self::Logs,
         Self::Typology,
         Self::VulnsSync,
+        Self::Vulns,
     ];
 
     /// Nom du contrôle, tel qu'il figure dans les incidents et les passages.
@@ -188,6 +192,7 @@ impl Control {
             Self::Logs => crate::analysis::findings::CHECK,
             Self::Typology => TYPOLOGY,
             Self::VulnsSync => VULNS_SYNC,
+            Self::Vulns => crate::vulns::matching::finding::CHECK,
         }
     }
 
@@ -206,9 +211,12 @@ impl Control {
                 }
             },
             Self::Agent(family) => family.cms(),
-            Self::Heartbeat | Self::Integrity | Self::Logs | Self::Typology | Self::VulnsSync => {
-                ALL_CMS
-            }
+            Self::Heartbeat
+            | Self::Integrity
+            | Self::Logs
+            | Self::Typology
+            | Self::VulnsSync
+            | Self::Vulns => ALL_CMS,
         }
     }
 
@@ -221,6 +229,7 @@ impl Control {
             Self::Logs => Needs::LogSource,
             Self::Typology => Needs::AgentWithoutPhp,
             Self::VulnsSync => Needs::Watcher,
+            Self::Vulns => Needs::InventorySource,
         }
     }
 
@@ -245,9 +254,12 @@ impl Control {
     pub fn is_agent(self) -> bool {
         match self {
             Self::Integrity | Self::Agent(_) => true,
-            Self::Check(_) | Self::Heartbeat | Self::Logs | Self::Typology | Self::VulnsSync => {
-                false
-            }
+            Self::Check(_)
+            | Self::Heartbeat
+            | Self::Logs
+            | Self::Typology
+            | Self::VulnsSync
+            | Self::Vulns => false,
         }
     }
 }

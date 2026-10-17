@@ -3,7 +3,7 @@
 //! F6), est confronté aux failles connues de F1 à F4. Règles écrites dans
 //! `docs/failles.md`, section « Rapprochement (F7) ».
 //!
-//! Cette partie est pure : ni base, ni horloge, ni configuration.
+//! Partie pure (ni base, ni horloge, ni configuration) :
 //!
 //! - [`group`] : failles candidates d'un purl sans version fusionnées par
 //!   identifiant et alias (union-find), verdict du groupe ;
@@ -14,10 +14,20 @@
 //!   version ;
 //! - [`finding`] : au plus un constat par (site, purl sans version), et les
 //!   constats « inventaire périmé ».
+//!
+//! Stockage et passage de `tick` :
+//!
+//! - [`epoch`] : époques comparées (failles, KEV/EPSS, dérogations) ;
+//! - [`store`] : état par (site, source), runs, bascule et réconciliation
+//!   dans une transaction ;
+//! - [`pass`] : l'étape F7 de `tick`, sous un budget qui réserve les envois.
 
 pub mod assess;
+pub mod epoch;
 pub mod finding;
 pub mod group;
+pub mod pass;
+pub mod store;
 pub mod waiver;
 
 use sha2::{Digest, Sha256};

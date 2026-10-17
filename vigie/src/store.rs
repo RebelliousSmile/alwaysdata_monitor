@@ -106,6 +106,12 @@ const MIGRATIONS: &[&str] = &[
     // version est sa position dans la liste à la fusion, et
     // [`SCHEMA_INVENTORY_KEYS`] suit.
     include_str!("../migrations/0020.sql"),
+    // Fichier 0021 : rapprochement inventaire × failles (#21, F7,
+    // `vulns/matching/`) : runs à séquence globale, état comparé par
+    // (site, source), composants et groupes de chaque run, provenance des
+    // purl, date de perte de vue des incidents, dérogations. Version :
+    // [`SCHEMA_VULNS_MATCH`].
+    include_str!("../migrations/0021.sql"),
 ];
 
 /// Version d'une migration : sa place dans [`MIGRATIONS`], plus un.
@@ -179,6 +185,10 @@ pub const SCHEMA_ENRICHMENT: usize = version_of(include_str!("../migrations/0019
 /// des inventaires existent (issue #20) : position de `0020.sql` dans
 /// [`MIGRATIONS`], la suivante de celle qui la précède à la fusion.
 pub const SCHEMA_INVENTORY_KEYS: usize = version_of(include_str!("../migrations/0020.sql"));
+/// Version de schéma à partir de laquelle les résultats du rapprochement
+/// inventaire × failles et les dérogations existent (issue #21, fichier
+/// `0021.sql`).
+pub const SCHEMA_VULNS_MATCH: usize = version_of(include_str!("../migrations/0021.sql"));
 /// Une adresse source de retrait est oubliée 30 jours après le dernier.
 pub const AGENT_SOURCE_RETENTION: i64 = 30 * 86_400;
 
@@ -252,6 +262,14 @@ impl CloseReason {
             _ => Self::Resolved,
         })
     }
+}
+
+/// E-mail d'un incident déjà envoyé : ouverture, clôture ou rappel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Notified {
+    Open,
+    Close,
+    Reminder,
 }
 
 /// Issue du dernier passage d'un contrôle.
@@ -719,7 +737,7 @@ fn check_run_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CheckRun> {
 }
 
 /// Enregistre le dernier passage d'un contrôle, à la place du précédent.
-fn record_result_in(
+pub(crate) fn record_result_in(
     conn: &Connection,
     site: &str,
     check: &str,
@@ -1162,6 +1180,27 @@ impl Store {
         Ok(())
     }
 
+    /// Marque d'un coup, dans une transaction, les e-mails d'un envoi groupé
+    /// (synthèse `vulns` d'un site, #21) : tous ou aucun.
+    pub fn mark_all_notified(&mut self, kind: Notified, ids: &[i64], now: i64) -> Result<()> {
+        let column = match kind {
+            Notified::Open => "open_notified_at",
+            Notified::Close => "close_notified_at",
+            Notified::Reminder => "last_reminder_at",
+        };
+        let tx = self
+            .conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        for id in ids {
+            tx.execute(
+                &format!("UPDATE incidents SET {column} = ?2 WHERE id = ?1"),
+                params![id, now],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
     /// Arrête les rappels ; la clôture automatique et son e-mail restent.
     pub fn ack(&mut self, id: i64, now: i64) -> Result<AckOutcome> {
         let Some(incident) = self.incident(id)? else {
@@ -1269,10 +1308,15 @@ impl Store {
 
     /// Retire les clés (agent et inventaire) et l'état des rapports, et purge
     /// les logs reçus du site (entrées, lots, limites hautes), son analyse
-    /// (agrégats, curseur, instantanés, signatures notées) et tous ses
-    /// inventaires, agent et CI. `false` si le site n'avait aucune des deux
-    /// clés. Les incidents de l'agent sont clos par le `tick` suivant.
-    pub fn remove_key(&mut self, site: &str) -> Result<bool> {
+    /// (agrégats, curseur, instantanés, signatures notées), tous ses
+    /// inventaires, agent et CI, et les résultats de son rapprochement (#21) :
+    /// runs, état, provenance, dérogations (motifs compris) et passages du
+    /// contrôle `vulns`. Aucun incident n'est touché : ceux de l'agent sont
+    /// clos par le `tick` suivant ; ceux de `vulns` perdent leur vue à `now`
+    /// (provenance perdue, `vulns.removed.<site>`) et attendent une preuve.
+    /// `false` si le site n'avait aucune des deux clés.
+    pub fn remove_key(&mut self, site: &str, now: i64) -> Result<bool> {
+        let match_tables = self.schema_version()? >= SCHEMA_VULNS_MATCH;
         let tx = self
             .conn
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -1299,6 +1343,9 @@ impl Store {
             "site_inventory",
         ] {
             tx.execute(&format!("DELETE FROM {table} WHERE site = ?1"), [site])?;
+        }
+        if match_tables {
+            crate::vulns::matching::store::forget_site(&tx, site, now)?;
         }
         tx.commit()?;
         Ok(removed > 0)
@@ -2310,8 +2357,9 @@ fn same_hash(stored: &[u8], expected: &Hash) -> bool {
     <&Hash>::try_from(stored).is_ok_and(|stored| device::ct_eq(stored, expected))
 }
 
-/// Cœur de [`Store::reconcile`], dans une transaction ouverte par l'appelant.
-fn reconcile_in(
+/// Cœur de [`Store::reconcile`], dans une transaction ouverte par l'appelant
+/// (et par la bascule d'un run de F7, `vulns/matching/store.rs`).
+pub(crate) fn reconcile_in(
     conn: &Connection,
     site: &str,
     check: &str,
@@ -3028,7 +3076,7 @@ mod tests {
             store.baseline("site-a").expect("baseline"),
             Some((both, 100))
         );
-        assert!(store.remove_key("site-a").expect("remove"));
+        assert!(store.remove_key("site-a", 0).expect("remove"));
         assert_eq!(store.baseline("site-a").expect("baseline"), None);
     }
 
@@ -3080,8 +3128,8 @@ mod tests {
             ReportOutcome::Accepted
         );
 
-        assert!(store.remove_key("site-a").expect("remove"));
-        assert!(!store.remove_key("site-a").expect("again"));
+        assert!(store.remove_key("site-a", 0).expect("remove"));
+        assert!(!store.remove_key("site-a", 0).expect("again"));
         assert!(store.agents().expect("agents").is_empty());
         assert_eq!(store.last_facts("site-a").expect("facts"), None);
     }
@@ -3277,7 +3325,10 @@ mod tests {
             ("index", "vuln_affected_purl"),
             ("index", "vuln_aliases_advisory"),
             ("index", "vuln_aliases_alias"),
+            ("index", "vuln_match_components_page"),
+            ("index", "vuln_match_items_page"),
             ("index", "vuln_range_corrections_key"),
+            ("index", "vuln_waivers_site"),
             ("table", "agent_sources"),
             ("table", "audit_notified"),
             ("table", "baselines"),
@@ -3312,8 +3363,15 @@ mod tests {
             ("table", "vuln_dataset"),
             ("table", "vuln_epss"),
             ("table", "vuln_kev"),
+            ("table", "vuln_match_components"),
+            ("table", "vuln_match_items"),
+            ("table", "vuln_match_keys"),
+            ("table", "vuln_match_runs"),
+            ("table", "vuln_match_seen"),
+            ("table", "vuln_match_state"),
             ("table", "vuln_range_corrections"),
             ("table", "vuln_sources"),
+            ("table", "vuln_waivers"),
             ("trigger", "command_audit_no_delete"),
             ("trigger", "command_audit_no_update"),
             ("trigger", "vuln_range_corrections_no_delete"),
@@ -3433,6 +3491,28 @@ mod tests {
         assert_eq!(
             columns("vuln_dataset"),
             ["source", "generation", "version", "released", "rows"]
+        );
+        // Fichier 0021 (#21) : résultats du rapprochement, clés par source.
+        for table in [
+            "vuln_match_state",
+            "vuln_match_components",
+            "vuln_match_items",
+            "vuln_match_seen",
+            "vuln_match_keys",
+        ] {
+            let sql: String = store
+                .conn
+                .query_row(
+                    "SELECT sql FROM sqlite_master WHERE name = ?1",
+                    [table],
+                    |row| row.get(0),
+                )
+                .expect("sql");
+            assert!(sql.contains("WITHOUT ROWID"), "{table}");
+        }
+        assert_eq!(
+            columns("vuln_waivers")[..6],
+            ["id", "site", "source", "base", "advisory_ref", "version"]
         );
     }
 
@@ -3693,7 +3773,8 @@ mod tests {
         }
         let store = Store::open(&path).expect("open");
         assert_eq!(store.schema_version().expect("version"), MIGRATIONS.len());
-        assert_eq!(SCHEMA_INVENTORY_KEYS, MIGRATIONS.len());
+        assert_eq!(SCHEMA_VULNS_MATCH, MIGRATIONS.len());
+        assert_eq!(SCHEMA_INVENTORY_KEYS + 1, SCHEMA_VULNS_MATCH);
         assert_eq!(store.last_tick().expect("tick"), Some(42));
         let agent = store.agent("site-a").expect("agent").expect("clé");
         assert_eq!((agent.last_seq, agent.last_valid_at), (5, Some(20)));
