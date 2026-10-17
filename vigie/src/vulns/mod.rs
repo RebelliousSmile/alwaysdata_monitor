@@ -9,6 +9,7 @@ pub mod advisory;
 pub mod cvss;
 pub mod purl;
 pub mod range;
+pub mod sources;
 pub mod store;
 pub mod sync;
 pub mod version;

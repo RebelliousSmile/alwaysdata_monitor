@@ -74,7 +74,34 @@ const MIGRATIONS: &[&str] = &[
     // générations sous bail, failles, alias et lignes `affected` par
     // génération, index de purge et de rapprochement par purl.
     include_str!("../migrations/0015.sql"),
+    // 17 : synchronisation des failles (`vulns/sync/`, issue #16) :
+    // validateurs HTTP, mesures et issue de la dernière tentative, version du
+    // lecteur, débit par source, failles retenues des derniers chargements.
+    // Le numéro 16 revient à l'inventaire (#19), fusionné en parallèle : la
+    // version réelle est la place dans cette liste ([`SCHEMA_VULNS_SYNC`]).
+    include_str!("../migrations/0017.sql"),
 ];
+
+/// Version d'une migration : sa place dans [`MIGRATIONS`], plus un.
+/// Calculée à la compilation, pour qu'un numéro de fichier pris d'avance
+/// reste juste quand une migration parallèle est fusionnée avant lui.
+const fn version_of(sql: &str) -> usize {
+    let mut i = 0;
+    while i < MIGRATIONS.len() {
+        let (a, b) = (MIGRATIONS[i].as_bytes(), sql.as_bytes());
+        if a.len() == b.len() {
+            let mut j = 0;
+            while j < a.len() && a[j] == b[j] {
+                j += 1;
+            }
+            if j == a.len() {
+                return i + 1;
+            }
+        }
+        i += 1;
+    }
+    panic!("migration absente de MIGRATIONS")
+}
 
 /// Version de schéma à partir de laquelle les incidents existent.
 pub const SCHEMA_INCIDENTS: usize = 2;
@@ -110,6 +137,9 @@ pub const SCHEMA_REGISTRY: usize = 14;
 /// Version de schéma à partir de laquelle les failles connues existent
 /// (issue #15).
 pub const SCHEMA_VULNS: usize = 15;
+/// Version de schéma à partir de laquelle l'état de synchronisation des
+/// sources de failles existe (issue #16, fichier `0017.sql`).
+pub const SCHEMA_VULNS_SYNC: usize = version_of(include_str!("../migrations/0017.sql"));
 /// Une adresse source de retrait est oubliée 30 jours après le dernier.
 pub const AGENT_SOURCE_RETENTION: i64 = 30 * 86_400;
 
@@ -2670,6 +2700,23 @@ mod tests {
             columns("vuln_affected")[3..7],
             ["purl_type", "purl_namespace", "purl_name", "scheme"]
         );
+        // Migration 0017 : synchronisation des failles.
+        assert_eq!(
+            columns("vuln_sources")[16..],
+            [
+                "etag",
+                "http_last_modified",
+                "dump_bytes",
+                "unpacked_bytes",
+                "last_duration_ms",
+                "last_outcome",
+                "loader_version",
+                "last_request_at",
+                "retry_after_until",
+                "recent_entries",
+                "revision"
+            ]
+        );
     }
 
     #[test]
@@ -2687,8 +2734,7 @@ mod tests {
                 .expect("données v14");
         }
         let store = Store::open(&path).expect("open");
-        assert_eq!(store.schema_version().expect("version"), SCHEMA_VULNS);
-        assert_eq!(SCHEMA_VULNS, MIGRATIONS.len());
+        assert_eq!(store.schema_version().expect("version"), MIGRATIONS.len());
         assert_eq!(store.last_tick().expect("tick"), Some(42));
         let sources: i64 = store
             .conn
@@ -2698,7 +2744,49 @@ mod tests {
         drop(store);
         // Rejouées sans effet.
         let store = Store::open(&path).expect("réouverture");
-        assert_eq!(store.schema_version().expect("version"), SCHEMA_VULNS);
+        assert_eq!(store.schema_version().expect("version"), MIGRATIONS.len());
+    }
+
+    #[test]
+    fn migrates_a_vulns_database_to_vulns_sync() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("vigie.db");
+        let before = SCHEMA_VULNS_SYNC - 1;
+        {
+            let conn = Connection::open(&path).expect("open");
+            for migration in &MIGRATIONS[..before] {
+                conn.execute_batch(migration).expect("migration");
+            }
+            conn.pragma_update(None, "user_version", before as i64)
+                .expect("user_version");
+            conn.execute(
+                "INSERT INTO vuln_sources (id, active_generation, next_generation, entries)
+                 VALUES ('osv-npm', 3, 4, 12)",
+                [],
+            )
+            .expect("source v15");
+        }
+        let store = Store::open(&path).expect("open");
+        assert_eq!(store.schema_version().expect("version"), SCHEMA_VULNS_SYNC);
+        assert_eq!(SCHEMA_VULNS_SYNC, MIGRATIONS.len());
+        let row: (i64, i64, String, Option<String>, Option<String>) = store
+            .conn
+            .query_row(
+                "SELECT active_generation, entries, recent_entries, etag, last_outcome
+                 FROM vuln_sources WHERE id = 'osv-npm'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+            )
+            .expect("source migrée");
+        assert_eq!(row, (3, 12, "[]".into(), None, None));
+        let refused = store.conn.execute(
+            "UPDATE vuln_sources SET last_outcome = 'inconnue' WHERE id = 'osv-npm'",
+            [],
+        );
+        assert!(refused.is_err(), "issue hors liste refusée");
+        drop(store);
+        let store = Store::open(&path).expect("réouverture");
+        assert_eq!(store.schema_version().expect("version"), SCHEMA_VULNS_SYNC);
     }
 
     #[test]

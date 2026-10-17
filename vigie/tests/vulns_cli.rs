@@ -10,11 +10,16 @@ use vigie::vulns::advisory::{
     Advisory, Draft, DraftAffected, DraftEvent, DraftRange, Score, ScoreOrigin, Tally,
 };
 use vigie::vulns::purl::Purl;
-use vigie::vulns::store::Load;
+use vigie::vulns::store::{LEASE, Load, SyncMeta};
 use vigie::vulns::version::{Scheme, SourceEcosystem};
 
+#[path = "support/dump_server.rs"]
+mod dump_server;
 #[path = "support/vulns_data.rs"]
 mod vulns_data;
+#[path = "support/zipgen.rs"]
+mod zipgen;
+use dump_server::{DumpServer, Reply};
 use vulns_data::{fixture, source};
 
 fn vigie(config: &Path, args: &[&str]) -> Output {
@@ -102,15 +107,17 @@ fn filled() -> (tempfile::TempDir, PathBuf) {
         source(&mut store, id);
         let mut tally = Tally::default();
         let advisories: Vec<_> = files.iter().map(|f| fixture(f, dump, &mut tally)).collect();
-        let mut load = Load::begin(&mut store, id, &clock).unwrap();
+        let mut load = Load::begin(&mut store, id, &clock, LEASE).unwrap();
         load.tally_mut().merge(&tally);
         load.push(&advisories).unwrap();
-        load.commit(None).unwrap();
+        load.commit(&Tally::default(), &SyncMeta::default())
+            .unwrap();
     }
     source(&mut store, "wordfence");
-    let mut load = Load::begin(&mut store, "wordfence", &clock).unwrap();
+    let mut load = Load::begin(&mut store, "wordfence", &clock, LEASE).unwrap();
     load.push(&[wordfence_like()]).unwrap();
-    load.commit(None).unwrap();
+    load.commit(&Tally::default(), &SyncMeta::default())
+        .unwrap();
     (dir, config)
 }
 
@@ -293,4 +300,134 @@ fn no_database_or_an_older_one_says_so() {
     );
     assert_eq!(out.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&out.stderr).contains("aucune base de failles"));
+}
+
+// --- vigie vulns sync (#16) ---
+
+/// Configuration avec `[vulns] sources`.
+fn config_with_sources(dir: &Path, sources: &str) -> PathBuf {
+    let path = write_config(dir);
+    let mut raw = std::fs::read_to_string(&path).unwrap();
+    raw.push_str(&format!("[vulns]\nsources = [{sources}]\n"));
+    std::fs::write(&path, raw).unwrap();
+    path
+}
+
+#[test]
+fn sync_without_declared_sources_says_so_and_exits_0() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = write_config(dir.path());
+    let out = vigie(&config, &["vulns", "sync"]);
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
+    assert_eq!(stdout(&out), "aucune source de failles déclarée\n");
+    assert!(!dir.path().join("vigie.db").exists(), "aucune base créée");
+    let config = config_with_sources(dir.path(), "");
+    let out = vigie(&config, &["vulns", "sync"]);
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
+}
+
+#[test]
+fn sync_usage_and_configuration_errors_exit_2() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = config_with_sources(dir.path(), "\"osv-npm\"");
+    for args in [
+        vec!["vulns", "sync", "--source", "osv-crates-io"],
+        vec!["vulns", "sync", "--source", "osv-pypi"],
+        vec!["vulns", "sync", "--accept-shrink"],
+    ] {
+        let out = vigie(&config, &args);
+        assert_eq!(out.status.code(), Some(2), "{args:?} {out:?}");
+    }
+    for sources in ["\"osv-pypi\"", "\"osv-npm\", \"osv-npm\""] {
+        let config = config_with_sources(dir.path(), sources);
+        let out = vigie(&config, &["vulns", "sync"]);
+        assert_eq!(out.status.code(), Some(2), "{sources} {out:?}");
+    }
+}
+
+#[test]
+fn rate_limited_sources_exit_0_and_sources_shows_why() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = config_with_sources(
+        dir.path(),
+        "\"osv-crates-io\", \"osv-packagist\", \"osv-npm\"",
+    );
+    {
+        let mut store = Store::open(&dir.path().join("vigie.db")).unwrap();
+        for id in ["osv-crates-io", "osv-packagist", "osv-npm"] {
+            source(&mut store, id);
+        }
+    }
+    // Retry-After en cours (reçu d'OSV) : aucune requête ne part.
+    let conn = rusqlite::Connection::open(dir.path().join("vigie.db")).unwrap();
+    conn.execute(
+        "UPDATE vuln_sources SET retry_after_until = ?1",
+        [vigie::now() + 3_600],
+    )
+    .unwrap();
+    let out = vigie(&config, &["vulns", "sync"]);
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
+    let text = stdout(&out);
+    for id in ["osv-crates-io", "osv-packagist", "osv-npm"] {
+        assert!(text.contains(&format!("{id} : rate_limited")), "{text}");
+    }
+    let out = vigie(&config, &["vulns", "sources"]);
+    assert!(out.status.success(), "{out:?}");
+    let text = stdout(&out);
+    assert!(text.contains(": rate_limited"), "{text}");
+    assert!(
+        text.contains("Retry-After : pas de requête avant"),
+        "{text}"
+    );
+    assert!(text.contains("dernière réussite : jamais"), "{text}");
+    assert!(!dir.path().join("vulns-work").join("osv-npm").exists());
+}
+
+#[test]
+fn sources_prints_the_sync_state_after_a_load() {
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = config_with_sources(dir.path(), "\"osv-crates-io\"");
+    let config = vigie::config::load(&config_path).unwrap();
+    let server = DumpServer::start();
+    let rustsec = std::fs::read(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/vulns/osv/RUSTSEC-2017-0004.json"),
+    )
+    .unwrap();
+    server.route(
+        "/crates.io/all.zip",
+        Reply::ok_etag(
+            zipgen::zip_of(vec![zipgen::ZEntry::new(
+                "RUSTSEC-2017-0004.json",
+                &rustsec,
+            )]),
+            "\"c1\"",
+            "Sat, 17 Oct 2026 03:00:00 GMT",
+        ),
+    );
+    let options = vigie::vulns::sync::SyncOptions {
+        trust: vigie::http::Trust::Custom(vec![server.ca.clone()]),
+        endpoint_override: Some(server.base()),
+        ..Default::default()
+    };
+    let clock = FakeClock::new(vigie::now() - 3_600);
+    let report = vigie::vulns::sync::run(&config, &options, &clock, None, false).unwrap();
+    assert_eq!(report.failures(), 0, "{report:?}");
+    let out = vigie(&config_path, &["vulns", "sources"]);
+    assert!(out.status.success(), "{out:?}");
+    let text = stdout(&out);
+    for want in [
+        "osv-crates-io  licence par enregistrement  chargée il y a 1 h  entrées 1",
+        "dernière réussite : il y a 1 h",
+        "dernière tentative : il y a 1 h : loaded",
+        "ETag oui  lecteur 1",
+        "attribution : OSV.dev, licence de chaque enregistrement selon son préfixe",
+    ] {
+        assert!(text.contains(want), "{want}\n{text}");
+    }
+    let out = vigie(&config_path, &["vulns", "match", "pkg:cargo/base64@0.5.0"]);
+    assert!(
+        stdout(&out).contains("RUSTSEC-2017-0004  touché"),
+        "{out:?}"
+    );
 }

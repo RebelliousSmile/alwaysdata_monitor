@@ -90,8 +90,8 @@ enum Command {
         #[command(subcommand)]
         action: CommandsAction,
     },
-    /// Failles connues : sources, détail d'une faille, rapprochement d'un
-    /// composant (lecture seule, docs/failles.md)
+    /// Failles connues : synchronisation des bases (timer systemd), sources,
+    /// détail d'une faille, rapprochement d'un composant (docs/failles.md)
     Vulns {
         #[command(subcommand)]
         action: VulnsAction,
@@ -100,7 +100,19 @@ enum Command {
 
 #[derive(Debug, Subcommand)]
 enum VulnsAction {
-    /// Sources de failles : licence, âge, entrées, écarts par raison
+    /// Synchronise les bases de [vulns] sources (lancé chaque jour par
+    /// vigie-vulns-sync.timer) ; code 1 si une source a échoué
+    Sync {
+        /// Une seule source de [vulns] sources
+        #[arg(long)]
+        source: Option<String>,
+        /// Accepte une fois un dump qui rétrécit de plus de 20 % (exige
+        /// --source) ; il devient la nouvelle référence
+        #[arg(long, requires = "source")]
+        accept_shrink: bool,
+    },
+    /// Sources de failles : licence, âge, entrées, écarts par raison, état
+    /// de synchronisation
     Sources,
     /// Détail d'une faille, par identifiant ou alias (CVE-…)
     Show {
@@ -1149,9 +1161,40 @@ fn tenths(t: u8) -> String {
 
 fn vulns_cli(config: &config::Config, action: VulnsAction, now: i64) -> anyhow::Result<()> {
     match action {
+        VulnsAction::Sync {
+            source,
+            accept_shrink,
+        } => {
+            let declared = vulns::sync::registry::declared(config);
+            if source.is_none() && declared.is_empty() {
+                println!("aucune source de failles déclarée");
+                return Ok(());
+            }
+            let report = vulns::sync::run(
+                config,
+                &vulns::sync::SyncOptions::default(),
+                &SystemClock,
+                source.as_deref(),
+                accept_shrink,
+            )?;
+            for s in &report.sources {
+                println!("{}", clean(&s.line));
+            }
+            let failures = report.failures();
+            if failures > 0 {
+                bail!("{failures} source(s) de failles en échec");
+            }
+            Ok(())
+        }
         VulnsAction::Sources => {
             let store = vulns_store_read(config)?;
             let sources = vulns_store::sources(&store)?;
+            let states: std::collections::HashMap<String, vulns_store::SyncState> =
+                if vulns_store::sync_available(&store)? {
+                    vulns_store::sync_states(&store)?.into_iter().collect()
+                } else {
+                    Default::default()
+                };
             if sources.is_empty() {
                 println!("aucune source de failles");
             }
@@ -1184,6 +1227,9 @@ fn vulns_cli(config: &config::Config, action: VulnsAction, now: i64) -> anyhow::
                 }
                 if let Some(since) = s.loading_since {
                     println!("  chargement en cours depuis {}", human_age(now - since));
+                }
+                if let Some(state) = states.get(&s.id) {
+                    print_sync_state(state, now);
                 }
                 if let Some(err) = s.last_error {
                     println!("  dernière erreur : {}", clean(&err));
@@ -1275,6 +1321,39 @@ fn vulns_cli(config: &config::Config, action: VulnsAction, now: i64) -> anyhow::
             }
             Ok(())
         }
+    }
+}
+
+/// État de synchronisation d'une source, pour `vigie vulns sources`.
+fn print_sync_state(state: &vulns_store::SyncState, now: i64) {
+    let success = state.last_success_at.map_or("jamais".to_owned(), |t| {
+        format!("il y a {} ({})", human_age(now - t), iso_utc(t))
+    });
+    let attempt = match (state.last_attempt_at, state.last_outcome) {
+        (Some(t), Some(o)) => format!("il y a {} : {}", human_age(now - t), o.as_str()),
+        (Some(t), None) => format!("il y a {}", human_age(now - t)),
+        _ => "aucune".to_owned(),
+    };
+    println!("  dernière réussite : {success}  dernière tentative : {attempt}");
+    let size = |b: Option<i64>| b.map_or("-".to_owned(), |b| format!("{b} o"));
+    println!(
+        "  dump {}  décompressé {}  durée {}  ETag {}  lecteur {}",
+        size(state.dump_bytes),
+        size(state.unpacked_bytes),
+        state
+            .last_duration_ms
+            .map_or("-".to_owned(), |ms| format!("{ms} ms")),
+        if state.etag.is_some() { "oui" } else { "non" },
+        state
+            .loader_version
+            .map_or("-".to_owned(), |v| v.to_string())
+    );
+    if let Some(until) = state.retry_after_until.filter(|u| *u > now) {
+        println!(
+            "  Retry-After : pas de requête avant {} (dans {})",
+            iso_utc(until),
+            human_age(until - now)
+        );
     }
 }
 

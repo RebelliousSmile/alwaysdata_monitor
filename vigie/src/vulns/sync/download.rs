@@ -122,6 +122,8 @@ pub struct Download {
     deadline: Instant,
     workdir: WorkDir,
     files: usize,
+    /// URL du dump de la source, origine remplacée par les tests.
+    url: Option<Url>,
 }
 
 impl Download {
@@ -141,7 +143,18 @@ impl Download {
             deadline,
             workdir,
             files: 0,
+            url: None,
         }
+    }
+
+    /// URL du dump de la source (posée par le moteur).
+    pub fn with_url(mut self, url: Url) -> Self {
+        self.url = Some(url);
+        self
+    }
+
+    pub fn url(&self) -> Option<&Url> {
+        self.url.as_ref()
     }
 
     pub fn limits(&self) -> &Limits {

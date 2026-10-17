@@ -46,8 +46,22 @@ pub struct Config {
     /// Règles de l'analyse de logs communes à tous les sites.
     #[serde(default)]
     pub logs: Logs,
+    /// Bases de failles synchronisées par `vigie vulns sync`
+    /// (`docs/failles.md`) ; sans elle, aucune synchronisation ni constat
+    /// `vulns-sync`.
+    #[serde(default)]
+    pub vulns: Option<Vulns>,
     #[serde(default)]
     pub sites: Vec<Site>,
+}
+
+/// `[vulns]` : sources de failles à synchroniser, parmi la liste fermée
+/// `vulns::sync::registry::KNOWN`. Aucune URL n'est configurable.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Vulns {
+    #[serde(default)]
+    pub sources: Vec<String>,
 }
 
 /// `[logs]` : règles par défaut à désactiver et règles ajoutées
@@ -528,6 +542,21 @@ impl Config {
         }
         if self.logs.protect_ips.len() > MAX_PROTECT_IPS {
             return Err(format!("logs.protect_ips : {MAX_PROTECT_IPS} IP au plus"));
+        }
+        if let Some(vulns) = &self.vulns {
+            let known = crate::vulns::sync::registry::KNOWN;
+            let mut seen = HashSet::new();
+            for id in &vulns.sources {
+                if !known.contains(&id.as_str()) {
+                    return Err(format!(
+                        "vulns.sources : source inconnue « {id} » (admises : {})",
+                        known.join(", ")
+                    ));
+                }
+                if !seen.insert(id.as_str()) {
+                    return Err(format!("vulns.sources : « {id} » déclarée deux fois"));
+                }
+            }
         }
         let mut seen = HashSet::new();
         for site in &self.sites {
