@@ -201,6 +201,12 @@ l'IP cliente dans `X-Forwarded-For`, que Caddy écrit lui-même
 (`reverse_proxy` sans `trusted_proxies`) : ne pas lui ajouter de
 `trusted_proxies`.
 
+Pagination (issue #5, phase 2) : `config.toml` refuse plus de 200 sites.
+Avant de déployer ce binaire, compter les sites de la configuration du VPS
+(`grep -c '^\[\[sites\]\]' ~/vigie/config.toml`) : au-delà, `tick` et `serve`
+la refuseraient. Au démarrage, `serve` applique la migration 12 (index des
+incidents clos), un simple index : aucun arrêt.
+
 Contrat de l'API et correspondance avec les écrans :
 [`api-console.md`](./api-console.md).
 

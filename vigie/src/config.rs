@@ -89,6 +89,10 @@ pub struct SiteLogs {
 /// Hôtes de `[sites.logs]` au plus.
 pub const MAX_LOG_HOSTS: usize = 20;
 
+/// Sites au plus : les listes bornées par la configuration (sites, contrôles
+/// d'un site) ne se paginent pas dans `/api/v1` (`docs/api-console.md`).
+pub const MAX_SITES: usize = 200;
+
 /// Source des logs d'un site.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -502,6 +506,12 @@ impl Config {
         }
         rules::compile_rules(&self.logs.disable, &self.logs.rules, &[])
             .map_err(|err| format!("logs : {err}"))?;
+        if self.sites.len() > MAX_SITES {
+            return Err(format!(
+                "{MAX_SITES} sites au plus (reçu : {})",
+                self.sites.len()
+            ));
+        }
         let mut seen = HashSet::new();
         for site in &self.sites {
             if !is_valid_id(&site.id) {
@@ -602,6 +612,26 @@ url = "https://www.example.org/"
         assert!(err.to_string().contains("« exemple »"), "{err}");
         let err = site("runtime = \"python\"\n").unwrap_err();
         assert!(matches!(err, ConfigError::Parse { .. }), "{err}");
+    }
+
+    #[test]
+    fn more_than_200_sites_are_refused() {
+        let sites = |n: usize| {
+            let mut text = VALID.replace(
+                "[[sites]]\nid = \"exemple\"\nurl = \"https://www.example.org/\"\n",
+                "",
+            );
+            for i in 0..n {
+                text.push_str(&format!(
+                    "[[sites]]\nid = \"site-{i}\"\nurl = \"https://site-{i}.example.org/\"\n"
+                ));
+            }
+            parse_str(&text)
+        };
+        assert_eq!(sites(MAX_SITES).expect("200 sites").sites.len(), MAX_SITES);
+        let err = sites(MAX_SITES + 1).unwrap_err();
+        assert!(matches!(err, ConfigError::Invalid { .. }), "{err}");
+        assert!(err.to_string().contains("200 sites au plus"), "{err}");
     }
 
     #[test]
