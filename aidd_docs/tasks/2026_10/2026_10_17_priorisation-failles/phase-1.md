@@ -4,7 +4,7 @@ status: pending
 
 # Instruction: Règle de gravité `vulns/severity.rs` et tables en mémoire
 
-Prérequis : F1 phase 2 livrée (`Advisory`, `Score { tenths, origin }`, `Score::select`, alias normalisés, `malicious`, `informational`, `UnknownReason`).
+Prérequis : F1 phase 2 livrée (`Advisory`, `Score::select`, alias normalisés, `malicious`, `informational`, `UnknownReason`) avec **`Score { tenths: u8 (0..=100), origin }`**, acquis pour F1 : GHSA 90/70/50/30, `Roundup` CVSS v3.1 en entiers, colonne `score` en dixièmes. Le texte de la phase 2 de F1 (`Score { value, origin }`) est à aligner avant de commencer ; F4 n'ajoute aucune conversion depuis un flottant.
 
 ## Architecture projection
 
@@ -70,8 +70,8 @@ journey
 1. **`exploit.rs`** :
    - `Cve` : `parse(&str) -> Option<Cve>` selon `^CVE-[0-9]{4}-[0-9]{4,19}$` (préfixe déjà normalisé par F1, aucune autre réécriture), `as_str()` ;
    - `KevFact { date_added: jiff::civil::Date, due_date: Date, known_ransomware: bool, name: String }` ; `EpssFact { generation: i64, epss_ppm: u32, percentile_ppm: u32 }` (0 ..= 1 000 000) ;
-   - `parse_ppm(&str) -> Option<u32>`, entiers seulement : `0`, `1`, `0.d{1,9}`, `1.0{1,9}`, ou `d.d{0,9}e-NN` (mantisse et exposant en entiers, `NN` de 1 à 2 chiffres), tronqué au millionième ; refus de tout le reste ;
-   - `DatasetInfo { generation, version, released: Date }` ; `TablesState { kev: Option<DatasetInfo>, epss: Option<DatasetInfo> }` ;
+   - `parse_ppm(&str) -> Option<u32>`, entiers seulement : `0`, `1`, `0.d{1,9}`, `1.0{1,9}`, ou `d(.d{1,9})?e-NN` (mantisse et exposant en entiers, `NN` de 1 à 2 chiffres), tronqué au millionième ; refus de tout le reste ;
+   - `DatasetInfo { generation, version, released: jiff::Timestamp }` (KEV : `dateReleased` complet ; EPSS : `score_date` à minuit UTC) ; `TablesState { kev: Option<DatasetInfo>, epss: Option<DatasetInfo> }` ;
    - `trait Exploitation { fn kev(&self, &Cve) -> Option<KevFact>; fn epss(&self, &Cve) -> Option<EpssFact>; fn state(&self) -> TablesState; }` ;
    - `MemoryTables`, construite depuis des itérateurs de lignes (tests de F4 et de F7).
 2. **`severity.rs`** :
@@ -88,7 +88,7 @@ journey
    - grille exhaustive : KEV {non, oui} × `malicious` × score {absent, 0, 69, 70, 89, 90, 100} × EPSS {absent, 0, 99 999, 100 000, 1 000 000} × `informational` × `fix_available` ; monotonie vérifiée entre scores présents seulement ; propriétés d'absence séparées ;
    - groupes : cas du Test Scope et propriété `assess_group ≥ max(assess(membre))` ;
    - bout à bout : `Draft` fictifs → `Advisory::build` → `AdvisoryFacts::from_advisory` → `assess`, pour l'ordre du score ;
-   - `parse_ppm` : `0.1` → 100 000, `0.0999999` → 99 999, `0.100000999` → 100 000, `1` → 1 000 000, `1.0e-05` → 10, `9.99e-01` → 999 000 ; refus de `-0.1`, `1.1`, `1e-5` (sans point), `.5`, `0.1234567890`, `2.0e+01`, vide.
+   - `parse_ppm` : `0.1` → 100 000, `0.0999999` → 99 999, `0.100000999` → 100 000, `1` → 1 000 000, `1.0e-05` → 10, `1e-5` → 10, `9.99e-01` → 999 000 ; refus de `-0.1`, `1.1`, `1.e-5`, `.5`, `0.1234567890`, `2.0e+01`, `1e-123`, vide.
 
 ## Test acceptance criteria
 
