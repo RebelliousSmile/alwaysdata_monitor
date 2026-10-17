@@ -734,6 +734,7 @@ fn status(config: &config::Config, now: i64) -> anyhow::Result<()> {
             );
         }
     }
+    print_vulns_status(config, store.as_ref(), now)?;
     if let Some(store) = &store {
         let open = store.open_incidents()?;
         let (info, alarming): (Vec<_>, Vec<_>) =
@@ -775,6 +776,45 @@ fn status(config: &config::Config, now: i64) -> anyhow::Result<()> {
     } else {
         bail!("tick en retard ou absent")
     }
+}
+
+/// Une ligne par source de `[vulns] sources` : dernière réussite, dernière
+/// issue, bail en cours. Rien sans `[vulns]`.
+fn print_vulns_status(
+    config: &config::Config,
+    store: Option<&Store>,
+    now: i64,
+) -> anyhow::Result<()> {
+    let declared = vulns::sync::registry::declared(config);
+    if declared.is_empty() {
+        return Ok(());
+    }
+    let states = match store {
+        Some(store) if vulns_store::sync_available(store)? => vulns_store::sync_states(store)?,
+        _ => {
+            println!("failles : aucune base de failles");
+            return Ok(());
+        }
+    };
+    for id in declared {
+        let state = states.iter().find(|(s, _)| s == id).map(|(_, st)| st);
+        let mut line = match state.and_then(|s| s.last_success_at) {
+            Some(t) => format!("failles : {id} réussie il y a {}", human_age(now - t)),
+            None => format!("failles : {id} jamais synchronisée"),
+        };
+        let mut notes = Vec::new();
+        if let Some(outcome) = state.and_then(|s| s.last_outcome) {
+            notes.push(format!("dernière issue : {}", outcome.as_str()));
+        }
+        if let Some(since) = state.and_then(|s| s.loading_since) {
+            notes.push(format!("bail en cours depuis {}", human_age(now - since)));
+        }
+        if !notes.is_empty() {
+            line.push_str(&format!(" ({})", notes.join(" ; ")));
+        }
+        println!("{line}");
+    }
+    Ok(())
 }
 
 /// Clé d'audit de `[commands]`, si le canal est configuré.

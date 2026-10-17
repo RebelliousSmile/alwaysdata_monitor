@@ -537,8 +537,9 @@ attribution (`copyrights` de Wordfence) par `Draft` et la même validation
 Migration 15 : `vuln_sources`, `vuln_advisories`, `vuln_aliases`,
 `vuln_affected` (`src/vulns/store.rs`). Seule la synchronisation (F2) écrit ;
 `serve` lit. Un chargement réserve une génération (`next_generation`,
-jamais réutilisée) sous bail de 6 h ; un second chargement est refusé tant
-que le bail court, le reprend après. Les failles s'écrivent par lots de 500
+jamais réutilisée) sous bail (6 h au plus ; F2 : plafond de durée de la
+source + 30 min) ; un second chargement est refusé tant que le bail court,
+le reprend après. Les failles s'écrivent par lots de 500
 (une transaction IMMEDIATE chacun, bail revérifié à chaque lot) ; la bascule
 de `active_generation` est un compare-and-swap (génération active attendue
 et bail détenu, sinon échec et génération orpheline) ; la purge retire par
@@ -587,6 +588,183 @@ FIRST) sont propres au Rust.
 - La forme canonique d'un purl ne garde ni qualificatifs ni sous-chemin
   (validés, hors clé de rapprochement) ; elle encode chaque segment comme
   `rawurlencode` (`@` en `%40`, `+` d'une version en `%2B`).
+
+## Synchronisation (F2)
+
+Issue #16, plan `aidd_docs/tasks/2026_10/2026_10_17_synchro-failles/`. Code :
+`src/vulns/sync/` (cadre, téléchargeur, lecteur zip, moteur, registre,
+constat de fraîcheur) et `src/vulns/sources/osv.rs`.
+
+### Commande et timer
+
+`vigie vulns sync [--source <id>] [--accept-shrink]`, lancée chaque jour par
+`vigie-vulns-sync.timer` (`OnCalendar=*-*-* 03:40:00`,
+`RandomizedDelaySec=45min`, `Persistent=true`), distincte de `tick` : le
+passage d'une minute ne télécharge jamais de dump. Seule cette commande écrit
+les tables de failles ; `tick` lit `vuln_sources`, `serve` lit les failles.
+
+| Situation | Sortie |
+| --- | --- |
+| aucune source déclarée (`[vulns]` absente ou `sources = []`) | « aucune source de failles déclarée », code 0 |
+| sources chargées, inchangées (304, même empreinte), `busy` ou `rate_limited` | une ligne par source, code 0 |
+| une source `failed` ou `refused_shrink` | les autres continuent, code 1 (unité `failed`) |
+| configuration invalide, `--source` hors de `[vulns] sources`, `--accept-shrink` sans `--source` | code 2 |
+
+`rate_limited` sort en code 0, accepté : un 429 ou un 503 d'OSV avec
+`Retry-After`, ou une fenêtre de débit pas encore rouverte, n'est pas une
+panne du veilleur. `retry_after_until` garde la date ; si l'attente dure, le
+constat `vulns-sync` le signale à 3 jours.
+
+### Sources et ordre
+
+`[vulns] sources` est une liste fermée (`vulns::sync::registry::KNOWN`) :
+`osv-crates-io`, `osv-packagist`, `osv-npm`, synchronisées dans cet ordre
+(petites d'abord), une échéance par source. Identifiant inconnu, doublon ou
+clé inconnue : erreur de configuration (code 2). Aucune URL n'est
+configurable : l'origine `https://osv-vulnerabilities.storage.googleapis.com`
+(port 443) est codée en dur, chaque redirection revérifiée (3 au plus).
+Les tests épinglent leur propre origine par le code (`SyncOptions`), jamais
+par la configuration.
+
+### Plafonds
+
+Facteur ≈ 3 sur la mesure du 2026-10-17, à confirmer par le relevé réel
+(`hebergement.md`) :
+
+| Source | Compressé | Décompressé | Entrées | Durée | Mesure (compressé, décompressé, entrées) |
+| --- | --- | --- | --- | --- | --- |
+| `osv-crates-io` | 32 Mio | 64 Mio | 20 000 | 15 min | 3 610 436 o, 7 206 166 o, 2 940 |
+| `osv-packagist` | 64 Mio | 256 Mio | 50 000 | 15 min | 10 956 660 o, 26 601 548 o, 7 303 |
+| `osv-npm` | 640 Mio | 1,5 Gio | 700 000 | 90 min | 218 455 616 o, 386 676 813 o, 230 382 |
+
+Pour toutes : 4 Mio par entrée (borne F1 ; au-delà, entrée sautée et
+comptée `too_large`), répertoire central de 64 Mio, taux d'écart de 1 %.
+Contrôle **avant** décompression (`Content-Length`, nombre d'entrées, somme
+des tailles déclarées) et **pendant** (octets reçus, octets réellement
+décompressés, échéance) : une bombe zip est arrêtée par les tailles
+déclarées, puis par les tailles réelles si elles mentent.
+
+### Lecteur zip
+
+Lecteur maison (`vulns/sync/zip.rs`), pas la crate `zip` : les dumps OSV
+n'emploient qu'un sous-ensemble minuscule du format (mesuré), tout le reste
+est refusé.
+
+- **Admis** : fin de fichier classique ou ZIP64 (enregistrement, localisateur
+  et fin classique chaînés, chacun exactement à sa place, un seul disque),
+  méthodes 0 (tailles égales) et 8, bits 1, 2 et 11 des drapeaux.
+- **Refusé, dump entier** : répertoire central qui n'est pas contigu juste
+  avant la fin, qui n'est pas consommé exactement ou dont le nombre d'entrées
+  diffère du nombre déclaré ; chiffrement, données « patchées », ZIP64 par
+  entrée, autre méthode ; descripteur de données (« descripteurs de données
+  non pris en charge : format de l'export changé ? ») ; en-tête local
+  différent du répertoire central ; enregistrements locaux qui se
+  recouvrent ou passent sous le répertoire central ; CRC faux, longueur réelle
+  différente de la déclarée, flux deflate corrompu ; tout dépassement
+  d'offset ou de taille (`u64` vérifié).
+- **Sauté et compté** : entrée de plus de 4 Mio déclarés (`too_large`, jamais
+  décompressée), nom hors de `[A-Za-z0-9._-]{1,64}\.json` ou dossier
+  (`bad_entry_name`).
+
+**Rien n'est extrait sur le disque** : seul le dump compressé est écrit, dans
+`<dossier de la base>/vulns-work/<source>/` (0700, fichier 0600 créé en
+`create_new`, lien symbolique refusé), vidé au début et à la fin par le seul
+détenteur du bail. Chaque entrée est décompressée en mémoire (taille
+déclarée + 1 octet lus au plus), analysée par `from_osv`, puis poussée par
+lots de 500 ; le nom d'une entrée n'est jamais un chemin. Un test
+différentiel relit les zips de test avec `zipfile` de Python en CI.
+
+### Requête conditionnelle et empreinte
+
+`Accept-Encoding: identity` (toute autre `Content-Encoding` est refusée),
+`If-None-Match` et `If-Modified-Since` depuis l'état de la source ; 304 et
+SHA-256 du dump égale à celle de la génération active (calculée en flux, le
+zip n'est alors pas ouvert) donnent « inchangé » : **aucune génération
+écrite**, le bail rendu et le succès daté en une seule instruction
+compare-and-swap (`finish_unchanged`), validateurs gardés (304) ou remplacés
+par ceux de la réponse (même empreinte). Après un chargement, ETag (ASCII
+imprimable, 256 caractères au plus) et `Last-Modified` (date HTTP valide)
+sont écrits **dans la même instruction que la bascule**, jamais avant : un
+ETag sans sa génération figerait la base sur un 304 perpétuel.
+
+`LOADER_VERSION` (1 pour OSV) est enregistrée avec la génération ; si elle
+diffère de celle du binaire, la requête part sans en-têtes conditionnels et
+l'empreinte n'est pas comparée : une correction du lecteur s'applique au
+passage suivant. À incrémenter à chaque changement du lecteur zip, de
+`from_osv` ou des bornes F1 qui change ce qui est stocké.
+
+### Seuil d'écart et garde contre le rétrécissement
+
+- **Taux d'écart** : failles perdues (raisons `Reason::is_drop` : `too_large`,
+  `bad_json`, `bad_id`, `bad_date`, `duplicate_id`, `no_affected`,
+  `bad_entry_name`) sur les entrées lues du dump ; au-delà de 1 %, le dump est
+  refusé (`failed`, compteurs par raison dans `last_error`). Les retraits
+  (`withdrawn`), les failles d'un autre écosystème
+  (`no_affected_out_of_scope`) et les simples notes (`bad_reference`,
+  `bad_purl`…) ne comptent jamais.
+- **Rétrécissement**, ensuite : un dump dont les failles retenues font moins
+  de 80 % du maximum des 7 derniers chargements réussis (`recent_entries`,
+  dès 100 failles) est refusé (`refused_shrink`, ancien jeu gardé, code 1).
+  `vigie vulns sync --source <id> --accept-shrink` l'accepte une fois, le
+  journalise, et ce chargement devient la seule référence.
+
+### Bail, débit et échecs
+
+Le bail de F1 est pris **avant** toute requête, pour le plafond de durée de
+la source + 30 min : un second `vulns sync` sur la même source répond `busy`
+sans rien télécharger (code 0) ; `vigie vulns sources` montre l'âge du bail en
+cours. Puis le débit, en compare-and-swap : `last_request_at` (intervalle
+minimal de la source, 0 pour OSV ; 30 min pour Wordfence en F3) et
+`retry_after_until` (`Retry-After` borné à 24 h). Un refus de débit rend le
+bail sans toucher `last_request_at`.
+
+Toute erreur (réseau, statut, plafond, structure, CRC, échéance, bail perdu,
+disque) rend le bail : la génération en cours reste vide ou partielle,
+orpheline, purgée au chargement suivant ; la base précédente reste en
+service ; `last_error` est assaini (500 caractères). Disque : espace libre
+(`statvfs`, `f_bavail × f_frsize`) contrôlé avant d'écrire le dump (taille
+annoncée ou plafond compressé, plus 1 Gio de réserve), puis après lecture du
+répertoire central (somme des tailles déclarées, plus 1 Gio) ; sans contrôle
+sous Windows.
+
+### Constat `vulns-sync`
+
+Évalué par `tick` à chaque passage, pas par la synchronisation : un timer
+cassé ou jamais installé se voit. Pour chaque source déclarée, âge = maintenant
+− dernière réussite (`loaded`, `unchanged`, `not_modified`), ou, jamais
+réussie, depuis le premier passage qui l'a vue déclarée (`meta
+vulns.declared.<source>`, supprimée quand elle ne l'est plus). Au-delà de
+3 jours : avertissement `_veilleur/vulns-sync/<source>`, sur le pseudo-site
+réservé `_veilleur` (hors de la grammaire des identifiants de site), déclaré
+au registre des capacités (`Control::VulnsSync`, jamais surveillé pour un
+site). Clos « rétabli » au premier passage après une réussite, « plus
+surveillé » quand la source est retirée de `[vulns] sources`. Une lecture de
+l'état en échec ne réconcilie rien. E-mails propres au veilleur (« [vigie]
+veilleur : base de failles osv-npm non synchronisée »), avec la commande à
+lancer. L'incident est lisible et acquittable par `/api/v1/incidents/{id}`,
+absent des vues par site jusqu'à la vue « veilleur » de F7 (#21).
+
+### Mise à jour incrémentale : évaluée, écartée
+
+`modified_id.csv` n'est lu par personne. Le stockage de F1 remplace une
+source par génération entière : appliquer des deltas exigerait de copier la
+génération active ou d'écrire dans l'active, ce que le bail et le
+compare-and-swap interdisent. Le CSV ne dit pas les suppressions et n'est pas
+strictement trié (désordre ligne 765 sur npm, 2026-10-17). Mesure : 38
+failles npm modifiées en 24 h, 247 en 7 jours, 1 784 en 30 jours ; le dump
+complet coûte ≈ 218 Mo par jour (≈ 6,4 Gio par mois). À revoir si la durée
+npm relevée sur le VPS dépasse 30 min.
+
+### Licences et volumes
+
+Licence et attribution par enregistrement, d'après le préfixe de son
+identifiant ([Licences et attribution](#licences-et-attribution)) ;
+`vuln_sources` porte « OSV.dev, licence de chaque enregistrement selon son
+préfixe ». Volumes au 2026-10-17 : crates.io 2 940 entrées, Packagist 7 303,
+npm 230 382 (dont 222 536 `MAL-`, 7 844 GHSA, 1 EEF, 1 GSD, ce dernier de
+licence inconnue, gardé). Les zips des tests sont construits par le test
+depuis les fixtures de F1 (`NOTICE`) et des failles fictives ; aucun zip
+hostile n'est commité.
 
 ## Gravité
 
@@ -682,7 +860,10 @@ lockfiles de Vigie (F8) appelle `api.osv.dev` depuis la CI, pas depuis le VPS.
 
 ## À vérifier depuis le VPS
 
-1. Joignabilité de chaque hôte de la liste ci-dessus.
+1. Joignabilité de chaque hôte de la liste ci-dessus ; pour
+   `osv-vulnerabilities.storage.googleapis.com`, cochée par le relevé de la
+   première synchronisation réelle (`hebergement.md`, « Synchronisation des
+   failles ») : **non fait au 2026-10-17**.
 2. Wordfence : relire https://www.wordfence.com/wordfence-intelligence-terms-and-conditions/
    et https://www.wordfence.com/help/wordfence-intelligence/v3-accessing-and-consuming-the-vulnerability-data-feed/ ;
    forme exacte de l'en-tête (`Bearer <jeton>` ?), conditions propres au jeton

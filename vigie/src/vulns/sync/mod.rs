@@ -30,6 +30,7 @@ use crate::vulns::version::SourceEcosystem;
 
 pub mod download;
 pub mod engine;
+pub mod freshness;
 pub mod origin;
 pub mod registry;
 pub mod workdir;

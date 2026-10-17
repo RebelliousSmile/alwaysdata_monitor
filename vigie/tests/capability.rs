@@ -555,7 +555,7 @@ async fn the_api_tick_and_ingestion_give_the_same_verdict_on_the_whole_matrix() 
                 assert_eq!(tick_keeps, registry, "tick : {id} {name} {seed:?}");
             }
             assert_eq!(
-                tick_watched(id, name),
+                tick_watched(seed),
                 registry,
                 "prédicat de tick : {id} {name}"
             );
@@ -871,4 +871,46 @@ fn the_logs_incident_is_kept_only_with_a_source() {
     let incident = without.store().incident(id).expect("lu").expect("présent");
     assert_eq!(incident.close_reason, Some(CloseReason::Unwatched));
     assert_never_restored(&emails);
+}
+
+// --- Contrôles du veilleur (#16) --------------------------------------------
+
+#[test]
+fn vulns_sync_is_a_watcher_control_never_watched_for_a_site() {
+    assert_eq!(Control::ALL.len(), 14);
+    assert_eq!(Control::from_name("vulns-sync"), Some(Control::VulnsSync));
+    for (kind, runtime) in KINDS {
+        for ctx in CONTEXTS {
+            let site = site("site-a", kind, runtime, true);
+            assert!(!capability::watched(&site, "vulns-sync", &ctx));
+        }
+    }
+    // Le pseudo-site est hors de la grammaire des identifiants de site.
+    assert!(!vigie::config::is_valid_id(capability::WATCHER_SITE));
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut config = config(dir.path(), Vec::new());
+    assert!(!capability::watched_by_watcher(
+        &config,
+        "vulns-sync",
+        Some("osv-npm")
+    ));
+    config.vulns = Some(vigie::config::Vulns {
+        sources: vec!["osv-npm".into()],
+    });
+    assert!(capability::watched_by_watcher(
+        &config,
+        "vulns-sync",
+        Some("osv-npm")
+    ));
+    for (check, key) in [
+        ("vulns-sync", Some("osv-crates-io")),
+        ("vulns-sync", None),
+        ("exposed", Some("osv-npm")),
+        ("inconnu", Some("osv-npm")),
+    ] {
+        assert!(
+            !capability::watched_by_watcher(&config, check, key),
+            "{check} {key:?}"
+        );
+    }
 }

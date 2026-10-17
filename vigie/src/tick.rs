@@ -32,7 +32,9 @@ use crate::finding::Finding;
 use crate::http::{Http, REQUEST_TIMEOUT, Trust};
 use crate::logs::alwaysdata::AlwaysdataSource;
 use crate::logs::source::{Cursor, LogSource, SourceError};
-use crate::store::{Agent, META_TYPOLOGY_TICK, RunRecord, Store};
+use crate::store::{Agent, Incident, META_TYPOLOGY_TICK, RunRecord, Store};
+use crate::vulns::store as vulns_store;
+use crate::vulns::sync::{freshness, registry};
 
 #[derive(Debug, Clone)]
 pub struct Options {
@@ -91,19 +93,34 @@ pub fn default_source(config: &Config, site: &Site) -> Option<Box<dyn LogSource>
 
 /// Verdict « surveillé » de `close_unwatched` : celui du registre
 /// (`capability::watched`) pour le site de la configuration, avec ses clé
-/// d'agent et référence d'empreintes en base. Un site absent de la
-/// configuration n'a plus rien de surveillé.
+/// d'agent et référence d'empreintes en base ; pour le pseudo-site du
+/// veilleur, celui de `capability::watched_by_watcher` (source de failles
+/// toujours déclarée). Un site absent de la configuration n'a plus rien de
+/// surveillé.
 pub fn watched_by_tick<'a>(
     config: &'a Config,
     agents: &'a [Agent],
     baselines: &'a [String],
-) -> impl Fn(&str, &str) -> bool + 'a {
-    move |site_id, check| {
+) -> impl Fn(&Incident) -> bool + 'a {
+    move |incident| {
+        if incident.site == capability::WATCHER_SITE {
+            return capability::watched_by_watcher(
+                config,
+                &incident.check_name,
+                incident.finding_key(),
+            );
+        }
         config
             .sites
             .iter()
-            .find(|s| s.id == site_id)
-            .is_some_and(|site| capability::watched(site, check, &context(site, agents, baselines)))
+            .find(|s| s.id == incident.site)
+            .is_some_and(|site| {
+                capability::watched(
+                    site,
+                    &incident.check_name,
+                    &context(site, agents, baselines),
+                )
+            })
     }
 }
 
@@ -331,12 +348,17 @@ pub fn run_with_sources(
 
     // La référence a pu naître d'un rapport pendant le passage : relue.
     let baselines = store.baseline_sites()?;
+    // Seul appel de `close_unwatched`, en fin de passage : un appel plus tôt
+    // pourrait clore un incident `integrity` ouvert pendant le passage. Une
+    // source de failles retirée est close « plus surveillé » ici, avant que
+    // `vulns_freshness` ne réconcilie les autres.
     let closed = store.close_unwatched(watched_by_tick(config, &agents, &baselines), now)?;
     if closed > 0 {
         log::info!(
             "{closed} incident(s) clos « plus surveillé » : contrôle hors du registre des capacités pour son site"
         );
     }
+    vulns_freshness(&mut store, config, now);
 
     summary.emails_sent = notify(
         &mut store,
@@ -354,6 +376,73 @@ pub fn run_with_sources(
     );
     summary.emails_pending = store.pending_notifications(now)?;
     Ok(summary)
+}
+
+/// Fraîcheur des bases de failles (#16), avant `notify` pour que l'e-mail
+/// parte dans le même passage : date de première vue de chaque source
+/// déclarée (`meta vulns.declared.<source>`, supprimée quand elle ne l'est
+/// plus), puis constat `vulns-sync` réconcilié sur le pseudo-site du
+/// veilleur. Une lecture de l'état en échec ne vaut pas « aucun constat » :
+/// rien n'est réconcilié, le passage continue. `tick` ne fait que lire
+/// `vuln_sources`.
+fn vulns_freshness(store: &mut Store, config: &Config, now: i64) {
+    if store.schema_version().unwrap_or(0) < crate::store::SCHEMA_VULNS_SYNC {
+        return;
+    }
+    let declared = registry::declared(config);
+    let mut since = std::collections::HashMap::new();
+    for id in registry::KNOWN {
+        let key = format!("{}{id}", freshness::META_DECLARED);
+        let result = if declared.contains(id) {
+            match store.meta(&key) {
+                Ok(Some((value, _))) => {
+                    since.insert(*id, value.parse::<i64>().unwrap_or(now));
+                    Ok(())
+                }
+                Ok(None) => {
+                    since.insert(*id, now);
+                    store.set_meta(&key, &now.to_string(), now)
+                }
+                Err(err) => Err(err),
+            }
+        } else {
+            store.delete_meta(&key)
+        };
+        if let Err(err) = result {
+            log::error!("failles : date de déclaration de {id} : {err:#}");
+        }
+    }
+    if declared.is_empty() {
+        return;
+    }
+    let states = match vulns_store::sync_states(store) {
+        Ok(states) => states,
+        Err(err) => {
+            log::error!(
+                "failles : état des sources illisible, constat vulns-sync non évalué : {err:#}"
+            );
+            return;
+        }
+    };
+    let findings = freshness::findings(&declared, &states, |id| since.get(id).copied(), now);
+    let result = store
+        .record_result(
+            capability::WATCHER_SITE,
+            capability::VULNS_SYNC,
+            now,
+            &RunRecord::concluded(&findings),
+        )
+        .and_then(|()| {
+            store.reconcile(
+                capability::WATCHER_SITE,
+                capability::VULNS_SYNC,
+                &findings,
+                now,
+            )
+        });
+    if let Err(err) = result {
+        log::error!("failles : constat vulns-sync non réconcilié : {err:#}");
+    }
 }
 
 /// Purges de l'analyse de logs, pour tous les sites, y compris ceux qui
