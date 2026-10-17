@@ -91,10 +91,12 @@ install -m 440 -o root -g root "$SUDOERS" /etc/sudoers.d/vigie
 rm -f "$SUDOERS"
 
 step "Unités systemd"
-install -m 644 "$HERE/systemd/vigie-serve.service" "$HERE/systemd/vigie-tick.service" "$HERE/systemd/vigie-tick.timer" /etc/systemd/system/
+install -m 644 "$HERE/systemd/vigie-serve.service" "$HERE/systemd/vigie-tick.service" "$HERE/systemd/vigie-tick.timer" \
+  "$HERE/systemd/vigie-vulns-sync.service" "$HERE/systemd/vigie-vulns-sync.timer" /etc/systemd/system/
 systemctl daemon-reload
 # Avant le premier déploiement, les conditions des unités les font ignorer.
-systemctl enable --now vigie-serve.service vigie-tick.timer
+# La synchronisation des failles ne fait rien tant que [vulns] sources est vide.
+systemctl enable --now vigie-serve.service vigie-tick.timer vigie-vulns-sync.timer
 
 step "Caddy"
 if [ -n "$DOMAIN" ]; then

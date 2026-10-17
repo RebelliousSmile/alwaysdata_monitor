@@ -82,6 +82,7 @@ fn config(dir: &Path) -> Config {
         api: None,
         commands: None,
         logs: Default::default(),
+        vulns: None,
         alerts: Alerts {
             to: "alertes@example.org".into(),
             from: "vigie@example.org".into(),
