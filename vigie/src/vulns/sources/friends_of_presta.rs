@@ -608,6 +608,7 @@ impl VulnSource for FriendsOfPresta {
             min_interval: Duration::ZERO,
             loader_version: LOADER_VERSION,
             redistribution: REDISTRIBUTION,
+            raw_content_encodings: &[],
         }
     }
 
@@ -618,17 +619,24 @@ impl VulnSource for FriendsOfPresta {
         tally: &mut Tally,
     ) -> Result<FetchOutcome, SyncError> {
         let url = dl.url().cloned().ok_or(SyncError::OriginRefused)?;
+        // URL qui sert les validateurs (F4 : requête conditionnelle vers elle
+        // seule).
+        let served = Some(url.to_string());
         let dump = match dl.get_to_file(&Request::get(url))? {
             Fetched::NotModified => {
                 return Ok(FetchOutcome::Unchanged {
                     not_modified: true,
                     validators: None,
+                    stale: false,
+                    served: served.clone(),
                 });
             }
             Fetched::SameDigest { validators, .. } => {
                 return Ok(FetchOutcome::Unchanged {
                     not_modified: false,
                     validators: Some(validators),
+                    stale: false,
+                    served: served.clone(),
                 });
             }
             Fetched::Dump(dump) => dump,
@@ -651,6 +659,7 @@ impl VulnSource for FriendsOfPresta {
             unpacked_bytes: read.unpacked,
             entries: read.entries,
             revision: read.revision,
+            served,
         }))
     }
 }

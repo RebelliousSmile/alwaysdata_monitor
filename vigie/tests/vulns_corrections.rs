@@ -87,6 +87,7 @@ impl Env {
                 endpoint_override: Some(self.server.base()),
                 limits_override: None,
                 free_space_override: None,
+                skip_enrichment: true,
             },
             &self.clock,
             false,

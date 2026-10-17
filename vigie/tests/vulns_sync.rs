@@ -146,6 +146,8 @@ impl Env {
             endpoint_override: Some(self.server.base()),
             limits_override: self.limits.clone(),
             free_space_override: None,
+            // KEV et EPSS, déclarés d'office (#18) : `vulns_enrich_sync.rs`.
+            skip_enrichment: true,
         }
     }
 

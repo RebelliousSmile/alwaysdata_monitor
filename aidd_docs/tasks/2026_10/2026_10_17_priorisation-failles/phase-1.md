@@ -1,5 +1,5 @@
 ---
-status: pending
+status: done
 ---
 
 # Instruction: Règle de gravité `vulns/severity.rs` et tables en mémoire
