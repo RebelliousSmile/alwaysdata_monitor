@@ -1,0 +1,21 @@
+# Exceptions osv-scanner pour vigie/app/pnpm-lock.yaml (issue #22).
+#
+# Règles (vigie/docs/decisions.md, section « Dépendances (issue #22) ») :
+# - remédier d'abord : une exception seulement quand aucun correctif n'est
+#   atteignable ;
+# - ce fichier ne vaut que pour le lockfile de son dossier : osv-scanner ne
+#   le lit ni pour un dossier voisin ni pour un sous-dossier ;
+# - chaque entrée porte id, reason (origine, pourquoi non exploitable chez
+#   nous, condition de levée) et ignoreUntil, au plus tard 92 jours après
+#   la date du jour : vigie/scripts/check-osv-exceptions.py le vérifie en CI
+#   et refuse toute autre clé (PackageOverrides compris).
+
+[[IgnoredVulns]]
+id = "GHSA-vfj7-8cjw-p6xm"
+ignoreUntil = 2027-01-17
+reason = "braces 3.0.3 (épuisement de pile), aucun correctif publié : outil de build de la console (micromatch/chokidar de tailwindcss 3 et des outils de build, devDependencies), motifs écrits par nous, absent du dist embarqué ; lever si un correctif amont est publié, au passage à tailwind 4 (issue à ouvrir si l'échéance arrive sans correctif), ou si l'un d'eux entre dans dependencies"
+
+[[IgnoredVulns]]
+id = "GHSA-rj75-hqrm-r3gf"
+ignoreUntil = 2027-01-17
+reason = "postcss-selector-parser 6.1.4 (complexité quadratique), corrigé seulement en 7.1.6, la branche 6 s'arrête non corrigée : outil de build de la console (tailwindcss 3 et postcss-nested, devDependencies), sélecteurs écrits par nous, absent du dist embarqué ; lever si un correctif amont est publié, au passage à tailwind 4 (issue à ouvrir si l'échéance arrive sans correctif), ou si l'un d'eux entre dans dependencies"

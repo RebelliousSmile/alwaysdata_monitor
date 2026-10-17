@@ -51,20 +51,24 @@ jobs:
     env:
       OSV_SCANNER_VERSION: "2.6.0"
       # Somme de osv-scanner_SHA256SUMS de la release v2.6.0 ; provenance
-      # SLSA vérifiée à l'épinglage (vigie/docs/decisions.md). Binaire
-      # téléchargé à chaque run, jamais mis en cache.
+      # SLSA : vigie/docs/decisions.md, section « Dépendances (issue #22) ».
+      # Binaire téléchargé à chaque run, jamais mis en cache.
       OSV_SCANNER_SHA256: ca69b3d3cd08f889a49dc0a383122f71cc528b83803671df5fd874d97485b108
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      # Exceptions datées (≤ 92 jours), motivées, IgnoredVulns seulement :
+      # osv-scanner accepterait une entrée sans échéance ou PackageOverrides.
+      - name: exceptions osv-scanner conformes
+        run: python3 -I vigie/scripts/check-osv-exceptions.py $(git ls-files ':(glob)**/osv-scanner.toml')
+      # Un composer.lock périmé ne reflète pas composer.json : le scanner ne
+      # prouverait rien (sortie 2 sur un lock périmé).
+      - name: composer.lock à jour
+        run: composer validate --no-check-publish
       - name: installer osv-scanner (somme vérifiée)
         run: |
           curl -sSfL -o osv-scanner "https://github.com/google/osv-scanner/releases/download/v${OSV_SCANNER_VERSION}/osv-scanner_linux_amd64"
           echo "${OSV_SCANNER_SHA256}  osv-scanner" | sha256sum -c -
           chmod +x osv-scanner
-      # Un composer.lock périmé ne reflète pas composer.json : le scanner ne
-      # prouverait rien (sortie 2 sur un lock périmé).
-      - name: composer.lock à jour
-        run: composer validate --no-check-publish
       # Lockfiles nommés : un lockfile absent sort en 127 au lieu d'être sauté.
       # Tout code non nul fait échouer le job (1 = faille, 127 = erreur,
       # 128 = aucun paquet). Exceptions : osv-scanner.toml du dossier du
