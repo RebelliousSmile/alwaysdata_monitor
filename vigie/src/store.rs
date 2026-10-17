@@ -79,7 +79,34 @@ const MIGRATIONS: &[&str] = &[
     // 30 jours d'historique) et leurs composants validés, index par purl sans
     // version et par inventaire (curseur de lecture par lots sur le rowid).
     include_str!("../migrations/0016.sql"),
+    // 17 : synchronisation des failles (`vulns/sync/`, issue #16) :
+    // validateurs HTTP, mesures et issue de la dernière tentative, version du
+    // lecteur, débit par source, failles retenues des derniers chargements.
+    // Le numéro 16 revient à l'inventaire (#19), fusionné en parallèle : la
+    // version réelle est la place dans cette liste ([`SCHEMA_VULNS_SYNC`]).
+    include_str!("../migrations/0017.sql"),
 ];
+
+/// Version d'une migration : sa place dans [`MIGRATIONS`], plus un.
+/// Calculée à la compilation, pour qu'un numéro de fichier pris d'avance
+/// reste juste quand une migration parallèle est fusionnée avant lui.
+const fn version_of(sql: &str) -> usize {
+    let mut i = 0;
+    while i < MIGRATIONS.len() {
+        let (a, b) = (MIGRATIONS[i].as_bytes(), sql.as_bytes());
+        if a.len() == b.len() {
+            let mut j = 0;
+            while j < a.len() && a[j] == b[j] {
+                j += 1;
+            }
+            if j == a.len() {
+                return i + 1;
+            }
+        }
+        i += 1;
+    }
+    panic!("migration absente de MIGRATIONS")
+}
 
 /// Version de schéma à partir de laquelle les incidents existent.
 pub const SCHEMA_INCIDENTS: usize = 2;
@@ -118,6 +145,9 @@ pub const SCHEMA_VULNS: usize = 15;
 /// Version de schéma à partir de laquelle l'inventaire des composants des
 /// sites existe (issue #19).
 pub const SCHEMA_INVENTORY: usize = 16;
+/// Version de schéma à partir de laquelle l'état de synchronisation des
+/// sources de failles existe (issue #16, fichier `0017.sql`).
+pub const SCHEMA_VULNS_SYNC: usize = version_of(include_str!("../migrations/0017.sql"));
 /// Une adresse source de retrait est oubliée 30 jours après le dernier.
 pub const AGENT_SOURCE_RETENTION: i64 = 30 * 86_400;
 
@@ -154,6 +184,18 @@ pub struct Incident {
     pub last_reminder_at: Option<i64>,
     /// `None` tant que l'incident est ouvert.
     pub close_reason: Option<CloseReason>,
+}
+
+impl Incident {
+    /// Clé du constat, sans le préfixe `<site>/<contrôle>/` (aucune découpe
+    /// sur `/` : une clé peut en contenir) ; `None` si le préfixe manque.
+    pub fn finding_key(&self) -> Option<&str> {
+        self.key
+            .strip_prefix(self.site.as_str())
+            .and_then(|k| k.strip_prefix('/'))
+            .and_then(|k| k.strip_prefix(self.check_name.as_str()))
+            .and_then(|k| k.strip_prefix('/'))
+    }
 }
 
 /// Pourquoi un incident a été clos : l'e-mail de clôture part plus tard
@@ -759,6 +801,13 @@ impl Store {
             .optional()?)
     }
 
+    /// Supprime une clé de `meta` ; sans effet si elle manque.
+    pub fn delete_meta(&mut self, key: &str) -> Result<()> {
+        self.conn
+            .execute("DELETE FROM meta WHERE key = ?1", [key])?;
+        Ok(())
+    }
+
     pub fn set_meta(&mut self, key: &str, value: &str, now: i64) -> Result<()> {
         let tx = self
             .conn
@@ -853,19 +902,20 @@ impl Store {
         Ok(())
     }
 
-    /// Clôt les incidents ouverts dont le couple (site, contrôle) n'est plus
-    /// surveillé : site retiré de la configuration, typologie changée, ou
-    /// clé d'agent retirée. La raison `unwatched` choisit l'e-mail « plus
-    /// surveillé », jamais « rétabli ».
+    /// Clôt les incidents ouverts qui ne sont plus surveillés : site retiré
+    /// de la configuration, typologie changée, clé d'agent retirée, source
+    /// de failles retirée (le prédicat reçoit l'incident entier, clé
+    /// comprise). La raison `unwatched` choisit l'e-mail « plus surveillé »,
+    /// jamais « rétabli ».
     pub fn close_unwatched(
         &mut self,
-        is_watched: impl Fn(&str, &str) -> bool,
+        is_watched: impl Fn(&Incident) -> bool,
         now: i64,
     ) -> Result<usize> {
         let stale: Vec<i64> = self
             .open_incidents()?
             .into_iter()
-            .filter(|i| !is_watched(&i.site, &i.check_name))
+            .filter(|i| !is_watched(i))
             .map(|i| i.id)
             .collect();
         let tx = self
@@ -2182,10 +2232,7 @@ mod tests {
         );
 
         // L'incident d'une famille retirée est clos « plus surveillé ».
-        assert_eq!(
-            store.close_unwatched(|_, _| false, 1_000).expect("close"),
-            1
-        );
+        assert_eq!(store.close_unwatched(|_| false, 1_000).expect("close"), 1);
         let closed = store.incident(open[0].id).expect("lu").expect("présent");
         assert_eq!(closed.closed_at, Some(1_000));
         assert_eq!(closed.close_reason, Some(CloseReason::Unwatched));
@@ -2549,13 +2596,13 @@ mod tests {
             .expect("1");
         assert_eq!(
             store
-                .close_unwatched(|site, check| site == "site-a" && check == "exposed", 10)
+                .close_unwatched(|i| i.site == "site-a" && i.check_name == "exposed", 10)
                 .expect("kept"),
             0
         );
         assert_eq!(
             store
-                .close_unwatched(|site, check| site == "site-b" && check == "exposed", 10)
+                .close_unwatched(|i| i.site == "site-b" && i.check_name == "exposed", 10)
                 .expect("closed"),
             1
         );
@@ -3033,6 +3080,23 @@ mod tests {
             columns("vuln_affected")[3..7],
             ["purl_type", "purl_namespace", "purl_name", "scheme"]
         );
+        // Migration 0017 : synchronisation des failles.
+        assert_eq!(
+            columns("vuln_sources")[16..],
+            [
+                "etag",
+                "http_last_modified",
+                "dump_bytes",
+                "unpacked_bytes",
+                "last_duration_ms",
+                "last_outcome",
+                "loader_version",
+                "last_request_at",
+                "retry_after_until",
+                "recent_entries",
+                "revision"
+            ]
+        );
     }
 
     #[test]
@@ -3087,8 +3151,8 @@ mod tests {
             .expect("données v15");
         }
         let store = Store::open(&path).expect("open");
-        assert_eq!(store.schema_version().expect("version"), SCHEMA_INVENTORY);
-        assert_eq!(SCHEMA_INVENTORY, MIGRATIONS.len());
+        assert_eq!(store.schema_version().expect("version"), MIGRATIONS.len());
+        assert!(SCHEMA_INVENTORY < MIGRATIONS.len() + 1);
         assert_eq!(store.last_tick().expect("tick"), Some(42));
         let agent = store.agent("site-a").expect("agent").expect("clé");
         assert_eq!((agent.last_seq, agent.last_valid_at), (5, Some(20)));
@@ -3114,6 +3178,64 @@ mod tests {
             })
             .expect("foreign_key_check");
         assert_eq!(violations, 0);
+    }
+
+    #[test]
+    fn finding_key_never_splits_on_slashes() {
+        let (_dir, mut store) = temp_store();
+        let finding = Finding::new("_veilleur", "vulns-sync", Severity::Warning, "a/b/c", "x");
+        store
+            .reconcile("_veilleur", "vulns-sync", &[finding], 10)
+            .expect("ouvert");
+        let mut incident = store.open_incidents().expect("lus").remove(0);
+        assert_eq!(incident.key, "_veilleur/vulns-sync/a/b/c");
+        assert_eq!(incident.finding_key(), Some("a/b/c"));
+        incident.key = "autre/vulns-sync/a".into();
+        assert_eq!(incident.finding_key(), None);
+        incident.key = "_veilleur/vulns-syncx/a".into();
+        assert_eq!(incident.finding_key(), None);
+    }
+
+    #[test]
+    fn migrates_a_vulns_database_to_vulns_sync() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("vigie.db");
+        let before = SCHEMA_VULNS_SYNC - 1;
+        {
+            let conn = Connection::open(&path).expect("open");
+            for migration in &MIGRATIONS[..before] {
+                conn.execute_batch(migration).expect("migration");
+            }
+            conn.pragma_update(None, "user_version", before as i64)
+                .expect("user_version");
+            conn.execute(
+                "INSERT INTO vuln_sources (id, active_generation, next_generation, entries)
+                 VALUES ('osv-npm', 3, 4, 12)",
+                [],
+            )
+            .expect("source v15");
+        }
+        let store = Store::open(&path).expect("open");
+        assert_eq!(store.schema_version().expect("version"), SCHEMA_VULNS_SYNC);
+        assert_eq!(SCHEMA_VULNS_SYNC, MIGRATIONS.len());
+        let row: (i64, i64, String, Option<String>, Option<String>) = store
+            .conn
+            .query_row(
+                "SELECT active_generation, entries, recent_entries, etag, last_outcome
+                 FROM vuln_sources WHERE id = 'osv-npm'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+            )
+            .expect("source migrée");
+        assert_eq!(row, (3, 12, "[]".into(), None, None));
+        let refused = store.conn.execute(
+            "UPDATE vuln_sources SET last_outcome = 'inconnue' WHERE id = 'osv-npm'",
+            [],
+        );
+        assert!(refused.is_err(), "issue hors liste refusée");
+        drop(store);
+        let store = Store::open(&path).expect("réouverture");
+        assert_eq!(store.schema_version().expect("version"), SCHEMA_VULNS_SYNC);
     }
 
     #[test]
