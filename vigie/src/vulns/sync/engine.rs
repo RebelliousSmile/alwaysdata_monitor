@@ -2,18 +2,24 @@
 //!
 //! 1. `upsert_source` (licence, attribution, URL) ;
 //! 2. `ready` : un refus note `failed`, aucune requête ;
-//! 3. bail ([`Load::begin`], plafond de durée + 30 min) **avant** toute
-//!    requête : détenu ailleurs → `busy`, aucune requête, pas un échec ;
-//! 4. débit ([`Load::claim_request`]) : fenêtre fermée ou `Retry-After` qui
-//!    court → bail rendu, `rate_limited`, aucune requête ;
+//! 3. bail ([`Load::begin`], [`EnrichLoad::begin`] pour KEV et EPSS,
+//!    plafond de durée + 30 min) **avant** toute requête : détenu ailleurs
+//!    → `busy`, aucune requête, pas un échec ;
+//! 4. débit (`claim_request`) : fenêtre fermée ou `Retry-After` qui court →
+//!    bail rendu, `rate_limited`, aucune requête ;
 //! 5. téléchargement et lecture par la source, poussée par lots dans la
-//!    génération réservée ;
-//! 6. inchangé (304, même empreinte) → `finish_unchanged` ; chargé → seuil
-//!    d'écart, puis garde contre le rétrécissement, puis bascule ;
-//! 7. toute erreur → bail rendu (génération orpheline, purgée par F1),
+//!    génération réservée ; validateurs envoyés seulement si
+//!    `LOADER_VERSION` concorde et vers l'URL qui les a servis ;
+//! 6. inchangé (304, même empreinte, jeu périmé de KEV) →
+//!    `finish_unchanged` ; refus de rétrécissement décidé par la source
+//!    (KEV) → enregistré tel quel ; chargé → seuil d'écart, puis garde
+//!    contre le rétrécissement ([`shrink_refused`]), puis bascule ;
+//! 7. toute erreur → bail rendu (génération orpheline, purgée ensuite),
 //!    `failed` ou `rate_limited`, base précédente intacte.
 //!
-//! Le dossier de travail est préparé sous le bail et vidé à la fin.
+//! Le dossier de travail est préparé sous le bail et vidé à la fin. Les
+//! deux sortes de sources ([`sync_source`], [`sync_enrichment`]) suivent ce
+//! même parcours ([`drive`]).
 
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -21,14 +27,23 @@ use std::time::{Duration, Instant};
 use url::Url;
 
 use super::download::{Download, Validators as Conditions};
+use super::enrichment::{EnrichSink, EnrichmentSource};
 use super::origin::Origins;
 use super::workdir::WorkDir;
-use super::{FetchOutcome, Sink, SourceReport, SyncContext, SyncError, SyncOptions, VulnSource};
+use super::{
+    FetchOutcome, NotReady, Sink, SourceMeta, SourceReport, SyncContext, SyncError, SyncOptions,
+    VulnSource,
+};
 use crate::clock::Clock;
 use crate::store::Store;
 use crate::vulns::advisory::{Advisory, Tally};
+use crate::vulns::enrich_store::{
+    ActiveDataset, DatasetHeader, ENRICH_BATCH, EnrichLoad, EnrichSource, EpssRow, KevRow,
+};
+use crate::vulns::exploit::Cve;
 use crate::vulns::store::{
-    self as vstore, Load, LoadError, Outcome, SyncMeta, VULN_BATCH, Validators,
+    self as vstore, Committed, Load, LoadError, Outcome, SyncMeta, SyncState, VULN_BATCH,
+    Validators,
 };
 
 /// Marge du bail sur le plafond de durée de la source.
@@ -40,6 +55,23 @@ pub const SHRINK_FLOOR: f64 = 0.8;
 pub const SHRINK_MIN: u64 = 100;
 /// Délai de connexion d'une requête de dump.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Garde contre le rétrécissement : `retained` sous 80 % du maximum des
+/// derniers chargements réussis (dès [`SHRINK_MIN`]), sauf
+/// `--accept-shrink`. Seule règle, appelée par le moteur et par KEV avant
+/// d'essayer son second hôte.
+pub fn shrink_refused(retained: u64, recent_entries: &[u64], accept_shrink: bool) -> bool {
+    let reference = recent_entries.iter().copied().max().unwrap_or(0);
+    !accept_shrink && reference >= SHRINK_MIN && (retained as f64) < SHRINK_FLOOR * reference as f64
+}
+
+/// Message d'un refus de rétrécissement.
+pub fn shrink_message(id: &str, retained: u64, recent_entries: &[u64]) -> String {
+    let reference = recent_entries.iter().copied().max().unwrap_or(0);
+    format!(
+        "rétrécissement refusé : {retained} entrées retenues, moins de 80 % du maximum récent ({reference}) ; `vigie vulns sync --source {id} --accept-shrink` pour l'accepter"
+    )
+}
 
 /// Pousse les failles par lots de [`VULN_BATCH`] dans la génération
 /// réservée.
@@ -68,9 +100,300 @@ impl Sink for LoadSink<'_, '_> {
     }
 }
 
+/// Chargement sous bail, de failles ou d'une table d'enrichissement.
+trait Target {
+    fn claim_request(&mut self, min_interval: i64) -> anyhow::Result<bool>;
+    /// Lignes retenues jusqu'ici.
+    fn entries(&self) -> u64;
+    fn tally(&self) -> &Tally;
+    fn release(self) -> Result<(), LoadError>;
+    fn finish(
+        self,
+        validators: &Validators,
+        outcome: Outcome,
+        stale: bool,
+    ) -> Result<bool, LoadError>;
+    fn commit(self, tally: &Tally, meta: &SyncMeta) -> Result<Committed, SyncError>;
+}
+
+impl Target for Load<'_> {
+    fn claim_request(&mut self, min_interval: i64) -> anyhow::Result<bool> {
+        Load::claim_request(self, min_interval)
+    }
+    fn entries(&self) -> u64 {
+        Load::entries(self)
+    }
+    fn tally(&self) -> &Tally {
+        Load::tally(self)
+    }
+    fn release(self) -> Result<(), LoadError> {
+        Load::release(self)
+    }
+    fn finish(
+        self,
+        validators: &Validators,
+        outcome: Outcome,
+        stale: bool,
+    ) -> Result<bool, LoadError> {
+        Load::finish(self, validators, outcome, stale)
+    }
+    fn commit(self, tally: &Tally, meta: &SyncMeta) -> Result<Committed, SyncError> {
+        Ok(Load::commit(self, tally, meta)?)
+    }
+}
+
+/// Chargement KEV ou EPSS : lignes tamponnées par lots de
+/// [`ENRICH_BATCH`], en-tête du jeu, et ce que la source doit savoir avant
+/// d'écrire.
+struct EnrichTarget<'a> {
+    load: EnrichLoad<'a>,
+    kev: Vec<KevRow>,
+    epss: Vec<(Cve, EpssRow)>,
+    header: Option<DatasetHeader>,
+    active: Option<ActiveDataset>,
+    recent: Vec<u64>,
+    accept_shrink: bool,
+}
+
+impl EnrichTarget<'_> {
+    fn flush(&mut self) -> Result<(), SyncError> {
+        if !self.kev.is_empty() {
+            self.load.push_kev(&self.kev)?;
+            self.kev.clear();
+        }
+        if !self.epss.is_empty() {
+            self.load.push_epss(&self.epss)?;
+            self.epss.clear();
+        }
+        Ok(())
+    }
+}
+
+impl EnrichSink for EnrichTarget<'_> {
+    fn push_kev(&mut self, row: KevRow) -> Result<(), SyncError> {
+        self.kev.push(row);
+        if self.kev.len() >= ENRICH_BATCH {
+            self.flush()?;
+        }
+        Ok(())
+    }
+    fn push_epss(&mut self, cve: Cve, row: EpssRow) -> Result<(), SyncError> {
+        self.epss.push((cve, row));
+        if self.epss.len() >= ENRICH_BATCH {
+            self.flush()?;
+        }
+        Ok(())
+    }
+    fn set_header(&mut self, header: DatasetHeader) {
+        self.header = Some(header);
+    }
+    fn active(&self) -> Option<&ActiveDataset> {
+        self.active.as_ref()
+    }
+    fn recent_entries(&self) -> &[u64] {
+        &self.recent
+    }
+    fn accept_shrink(&self) -> bool {
+        self.accept_shrink
+    }
+}
+
+impl Target for EnrichTarget<'_> {
+    fn claim_request(&mut self, min_interval: i64) -> anyhow::Result<bool> {
+        self.load.claim_request(min_interval)
+    }
+    fn entries(&self) -> u64 {
+        self.load.entries()
+    }
+    fn tally(&self) -> &Tally {
+        self.load.tally()
+    }
+    fn release(self) -> Result<(), LoadError> {
+        self.load.release()
+    }
+    fn finish(
+        self,
+        validators: &Validators,
+        outcome: Outcome,
+        stale: bool,
+    ) -> Result<bool, LoadError> {
+        self.load.finish_unchanged(validators, outcome, stale)
+    }
+    fn commit(self, tally: &Tally, meta: &SyncMeta) -> Result<Committed, SyncError> {
+        let header = self
+            .header
+            .ok_or_else(|| SyncError::Format("en-tête du jeu absent".into()))?;
+        Ok(self.load.commit(&header, tally, meta)?)
+    }
+}
+
+/// Chargement d'une source de l'une ou l'autre sorte.
+enum AnyTarget<'a> {
+    Vulns(Load<'a>),
+    Enrichment(Box<EnrichTarget<'a>>),
+}
+
+impl Target for AnyTarget<'_> {
+    fn claim_request(&mut self, min_interval: i64) -> anyhow::Result<bool> {
+        match self {
+            Self::Vulns(t) => Target::claim_request(t, min_interval),
+            Self::Enrichment(t) => Target::claim_request(t.as_mut(), min_interval),
+        }
+    }
+    fn entries(&self) -> u64 {
+        match self {
+            Self::Vulns(t) => Target::entries(t),
+            Self::Enrichment(t) => Target::entries(t.as_ref()),
+        }
+    }
+    fn tally(&self) -> &Tally {
+        match self {
+            Self::Vulns(t) => Target::tally(t),
+            Self::Enrichment(t) => Target::tally(t.as_ref()),
+        }
+    }
+    fn release(self) -> Result<(), LoadError> {
+        match self {
+            Self::Vulns(t) => Target::release(t),
+            Self::Enrichment(t) => Target::release(*t),
+        }
+    }
+    fn finish(
+        self,
+        validators: &Validators,
+        outcome: Outcome,
+        stale: bool,
+    ) -> Result<bool, LoadError> {
+        match self {
+            Self::Vulns(t) => Target::finish(t, validators, outcome, stale),
+            Self::Enrichment(t) => Target::finish(*t, validators, outcome, stale),
+        }
+    }
+    fn commit(self, tally: &Tally, meta: &SyncMeta) -> Result<Committed, SyncError> {
+        match self {
+            Self::Vulns(t) => Target::commit(t, tally, meta),
+            Self::Enrichment(t) => Target::commit(*t, tally, meta),
+        }
+    }
+}
+
+/// Une sorte de source : comment prendre son bail et lire son dump.
+trait Kind {
+    fn id(&self) -> &'static str;
+    fn meta(&self) -> SourceMeta;
+    fn ready(&self, ctx: &SyncContext) -> Result<(), NotReady>;
+    fn begin<'a>(
+        &self,
+        store: &'a mut Store,
+        clock: &'a dyn Clock,
+        lease: i64,
+        state: &SyncState,
+        accept_shrink: bool,
+    ) -> Result<AnyTarget<'a>, LoadError>;
+    fn fetch(
+        &self,
+        dl: &mut Download,
+        target: &mut AnyTarget<'_>,
+        tally: &mut Tally,
+    ) -> Result<FetchOutcome, SyncError>;
+}
+
+/// Chargement d'une autre sorte que la source : erreur de programmation.
+fn wrong_kind() -> SyncError {
+    SyncError::Store("chargement d'une autre sorte de source".into())
+}
+
+struct Vulns<'s>(&'s dyn VulnSource);
+
+impl Kind for Vulns<'_> {
+    fn id(&self) -> &'static str {
+        self.0.id()
+    }
+    fn meta(&self) -> SourceMeta {
+        self.0.meta()
+    }
+    fn ready(&self, ctx: &SyncContext) -> Result<(), NotReady> {
+        self.0.ready(ctx)
+    }
+    fn begin<'a>(
+        &self,
+        store: &'a mut Store,
+        clock: &'a dyn Clock,
+        lease: i64,
+        _state: &SyncState,
+        _accept_shrink: bool,
+    ) -> Result<AnyTarget<'a>, LoadError> {
+        Load::begin(store, self.0.id(), clock, lease).map(AnyTarget::Vulns)
+    }
+    fn fetch(
+        &self,
+        dl: &mut Download,
+        target: &mut AnyTarget<'_>,
+        tally: &mut Tally,
+    ) -> Result<FetchOutcome, SyncError> {
+        let AnyTarget::Vulns(target) = target else {
+            return Err(wrong_kind());
+        };
+        let mut sink = LoadSink {
+            load: target,
+            batch: Vec::new(),
+        };
+        let outcome = self.0.fetch(dl, &mut sink, tally)?;
+        sink.flush()?;
+        Ok(outcome)
+    }
+}
+
+struct Enrichment<'s>(&'s dyn EnrichmentSource, EnrichSource);
+
+impl Kind for Enrichment<'_> {
+    fn id(&self) -> &'static str {
+        self.0.id()
+    }
+    fn meta(&self) -> SourceMeta {
+        self.0.meta()
+    }
+    fn ready(&self, ctx: &SyncContext) -> Result<(), NotReady> {
+        self.0.ready(ctx)
+    }
+    fn begin<'a>(
+        &self,
+        store: &'a mut Store,
+        clock: &'a dyn Clock,
+        lease: i64,
+        state: &SyncState,
+        accept_shrink: bool,
+    ) -> Result<AnyTarget<'a>, LoadError> {
+        let load = EnrichLoad::begin(store, self.1, clock, lease)?;
+        let active = load.active()?;
+        Ok(AnyTarget::Enrichment(Box::new(EnrichTarget {
+            load,
+            kev: Vec::new(),
+            epss: Vec::new(),
+            header: None,
+            active,
+            recent: state.recent_entries.clone(),
+            accept_shrink,
+        })))
+    }
+    fn fetch(
+        &self,
+        dl: &mut Download,
+        target: &mut AnyTarget<'_>,
+        tally: &mut Tally,
+    ) -> Result<FetchOutcome, SyncError> {
+        let AnyTarget::Enrichment(target) = target else {
+            return Err(wrong_kind());
+        };
+        let outcome = self.0.fetch(dl, target.as_mut(), tally)?;
+        target.flush()?;
+        Ok(outcome)
+    }
+}
+
 /// URL de la source, origine remplacée par `endpoint_override` (chemin
 /// gardé).
-fn source_url(url: &str, endpoint: Option<&Url>) -> Result<Url, SyncError> {
+pub(crate) fn source_url(url: &str, endpoint: Option<&Url>) -> Result<Url, SyncError> {
     let mut url = Url::parse(url).map_err(|_| SyncError::OriginRefused)?;
     if let Some(e) = endpoint {
         url.set_host(e.host_str())
@@ -98,12 +421,60 @@ fn reasons(tally: &Tally) -> String {
     }
 }
 
-/// Synchronise une source ; ne rend jamais d'erreur : l'issue est notée en
-/// base et dans le bilan.
+/// Synchronise une source de failles ; ne rend jamais d'erreur : l'issue
+/// est notée en base et dans le bilan.
 pub fn sync_source(
     store: &mut Store,
     base_dir: &Path,
     source: &dyn VulnSource,
+    options: &SyncOptions,
+    clock: &dyn Clock,
+    accept_shrink: bool,
+) -> SourceReport {
+    drive(
+        store,
+        base_dir,
+        &Vulns(source),
+        options,
+        clock,
+        accept_shrink,
+    )
+}
+
+/// Synchronise une table d'enrichissement (KEV, EPSS) par le même
+/// parcours ; identifiant hors de `kev` et `epss` : `failed`.
+pub fn sync_enrichment(
+    store: &mut Store,
+    base_dir: &Path,
+    source: &dyn EnrichmentSource,
+    options: &SyncOptions,
+    clock: &dyn Clock,
+    accept_shrink: bool,
+) -> SourceReport {
+    let id = source.id();
+    let Some(table) = EnrichSource::from_id(id) else {
+        let line = format!("{id} : failed (table d'enrichissement inconnue)");
+        log::error!("{line}");
+        return SourceReport {
+            id,
+            outcome: Outcome::Failed,
+            line,
+        };
+    };
+    drive(
+        store,
+        base_dir,
+        &Enrichment(source, table),
+        options,
+        clock,
+        accept_shrink,
+    )
+}
+
+fn drive(
+    store: &mut Store,
+    base_dir: &Path,
+    source: &dyn Kind,
     options: &SyncOptions,
     clock: &dyn Clock,
     accept_shrink: bool,
@@ -149,8 +520,9 @@ pub fn sync_source(
     }) {
         return fail(store, &format!("source pas prête : {}", not_ready.0), None);
     }
+    let state = state.unwrap_or_default();
     let lease = i64::try_from((limits.duration + LEASE_MARGIN).as_secs()).unwrap_or(i64::MAX);
-    let mut load = match Load::begin(store, id, clock, lease) {
+    let mut load = match source.begin(store, clock, lease, &state, accept_shrink) {
         Ok(load) => load,
         Err(LoadError::Busy { since }) => {
             let now = clock.unix();
@@ -182,19 +554,16 @@ pub fn sync_source(
             return fail(store, &format!("base : {e:#}"), None);
         }
     }
-    let state = state.unwrap_or_default();
     let conditional =
         state.active_generation > 0 && state.loader_version == Some(meta.loader_version);
+    // Un validateur sans l'URL qui l'a servi n'est jamais envoyé.
+    let known = state.validator_url.is_some();
     let conditions = Conditions {
-        etag: state.etag.clone(),
-        last_modified: state.http_last_modified.clone(),
+        etag: state.etag.clone().filter(|_| known),
+        last_modified: state.http_last_modified.clone().filter(|_| known),
         active_sha256: state.dump_sha256.clone(),
         conditional,
     };
-    // URL demandée, gardée avec les validateurs qu'elle sert.
-    let requested = source_url(meta.url, options.endpoint_override.as_ref())
-        .ok()
-        .map(|u| u.to_string());
     let mut tally = Tally::default();
     let fetched = (|| {
         let url = source_url(meta.url, options.endpoint_override.as_ref())?;
@@ -211,14 +580,11 @@ pub fn sync_source(
             Instant::now() + limits.duration,
             workdir,
         )
-        .with_url(url);
-        let mut sink = LoadSink {
-            load: &mut load,
-            batch: Vec::new(),
-        };
-        let outcome = source.fetch(&mut dl, &mut sink, &mut tally)?;
-        sink.flush()?;
-        Ok::<_, SyncError>(outcome)
+        .with_url(url)
+        .with_endpoint(options.endpoint_override.clone())
+        .with_validator_url(state.validator_url.clone())
+        .with_raw_encodings(meta.raw_content_encodings);
+        source.fetch(&mut dl, &mut load, &mut tally)
     })();
     match fetched {
         Err(err) => {
@@ -247,9 +613,24 @@ pub fn sync_source(
             }
             fail(store, &err.to_string(), retry)
         }
+        Ok(FetchOutcome::RefusedShrink(err)) => {
+            // Décidé par la source avec `shrink_refused` : pas réévalué.
+            let _ = load.release();
+            let _ = vstore::record_outcome(
+                store,
+                id,
+                Outcome::RefusedShrink,
+                Some(&err),
+                None,
+                clock.unix(),
+            );
+            report(Outcome::RefusedShrink, format!("refused_shrink ({err})"))
+        }
         Ok(FetchOutcome::Unchanged {
             not_modified,
             validators,
+            stale,
+            served,
         }) => {
             let outcome = if not_modified {
                 Outcome::NotModified
@@ -261,15 +642,20 @@ pub fn sync_source(
                 Some(v) => Validators::Set {
                     etag: v.etag,
                     last_modified: v.last_modified,
-                    url: requested.clone(),
+                    url: served,
                 },
             };
-            match load.finish_unchanged(&validators, outcome) {
+            match load.finish(&validators, outcome, stale) {
                 Ok(true) => report(
                     outcome,
                     format!(
-                        "{} en {} ms, génération {} gardée",
+                        "{}{} en {} ms, génération {} gardée",
                         outcome.as_str(),
+                        if stale {
+                            " (jeu reçu plus ancien que l'actif, refusé)"
+                        } else {
+                            ""
+                        },
                         started.elapsed().as_millis(),
                         state.active_generation
                     ),
@@ -306,15 +692,9 @@ pub fn sync_source(
                 );
             }
             let retained = load.entries();
-            let reference = state.recent_entries.iter().copied().max().unwrap_or(0);
-            if !accept_shrink
-                && reference >= SHRINK_MIN
-                && (retained as f64) < SHRINK_FLOOR * reference as f64
-            {
+            if shrink_refused(retained, &state.recent_entries, accept_shrink) {
                 let _ = load.release();
-                let err = format!(
-                    "rétrécissement refusé : {retained} failles retenues, moins de 80 % du maximum récent ({reference}) ; `vigie vulns sync --source {id} --accept-shrink` pour l'accepter"
-                );
+                let err = shrink_message(id, retained, &state.recent_entries);
                 let _ = vstore::record_outcome(
                     store,
                     id,
@@ -325,9 +705,10 @@ pub fn sync_source(
                 );
                 return report(Outcome::RefusedShrink, format!("refused_shrink ({err})"));
             }
+            let reference = state.recent_entries.iter().copied().max().unwrap_or(0);
             if accept_shrink && reference >= SHRINK_MIN {
                 log::warn!(
-                    "{id} : --accept-shrink : {retained} failles retenues acceptées (maximum récent {reference}), nouvelle référence"
+                    "{id} : --accept-shrink : {retained} entrées retenues acceptées (maximum récent {reference}), nouvelle référence"
                 );
             }
             let meta = SyncMeta {
@@ -339,7 +720,7 @@ pub fn sync_source(
                 duration_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
                 loader_version: meta.loader_version,
                 accept_shrink,
-                validator_url: requested.clone(),
+                validator_url: dump.served.clone(),
             };
             match load.commit(&tally, &meta) {
                 Ok(done) => report(
@@ -354,7 +735,7 @@ pub fn sync_source(
                         done.generation
                     ),
                 ),
-                Err(e) => fail(store, &SyncError::from(e).to_string(), None),
+                Err(e) => fail(store, &e.to_string(), None),
             }
         }
     }
@@ -382,5 +763,15 @@ mod tests {
                 .as_str(),
             "https://dumps.example.org/a/all.zip"
         );
+    }
+
+    #[test]
+    fn shrink_guard_is_the_f2_rule() {
+        assert!(!shrink_refused(79, &[99], false), "sous le minimum");
+        assert!(shrink_refused(79, &[100], false));
+        assert!(!shrink_refused(80, &[100], false));
+        assert!(shrink_refused(700, &[1_000, 400], false), "maximum récent");
+        assert!(!shrink_refused(1, &[1_000], true));
+        assert!(!shrink_refused(5, &[], false));
     }
 }

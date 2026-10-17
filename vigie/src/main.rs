@@ -27,7 +27,8 @@ use vigie::store::{
     SCHEMA_AGENT_SOURCES, SCHEMA_AGENTS, SCHEMA_COMMANDS, SCHEMA_DEVICES, SCHEMA_FINDINGS,
     SCHEMA_INCIDENTS, SCHEMA_META, Store,
 };
-use vigie::vulns::{self, store as vulns_store};
+use vigie::vulns::exploit::{Cve, Exploitation, ppm_text};
+use vigie::vulns::{self, enrich_store, store as vulns_store};
 use vigie::{human_age, iso_utc, recommend, serve, tick};
 
 /// Code de retour d'une configuration invalide ou introuvable.
@@ -1235,6 +1236,15 @@ fn vulns_cli(config: &config::Config, action: VulnsAction, now: i64) -> anyhow::
                 } else {
                     Default::default()
                 };
+            let sets: std::collections::HashMap<&str, enrich_store::ActiveDataset> =
+                if enrich_store::available(&store)? {
+                    enrich_store::datasets(&store)?
+                        .into_iter()
+                        .map(|(source, set)| (source.id(), set))
+                        .collect()
+                } else {
+                    Default::default()
+                };
             if sources.is_empty() {
                 println!("aucune source de failles");
             }
@@ -1271,6 +1281,14 @@ fn vulns_cli(config: &config::Config, action: VulnsAction, now: i64) -> anyhow::
                 if let Some(state) = states.get(&s.id) {
                     print_sync_state(state, now);
                 }
+                if let Some(source) = enrich_store::EnrichSource::from_id(&s.id) {
+                    print_dataset(
+                        source,
+                        sets.get(source.id()),
+                        states.get(&s.id).map_or(0, |st| st.stale_count),
+                        now,
+                    );
+                }
                 if let Some(err) = s.last_error {
                     println!("  dernière erreur : {}", clean(&err));
                 }
@@ -1289,7 +1307,12 @@ fn vulns_cli(config: &config::Config, action: VulnsAction, now: i64) -> anyhow::
             }
             let store = vulns_store_read(config)?;
             let found = vulns_store::advisory(&store, &id)?;
-            if found.is_empty() {
+            let tables = enrich_store::StoreTables::open(&store)?;
+            let cve = vulns::advisory::normalize_alias(&id).and_then(|k| Cve::parse(&k));
+            let listed = cve
+                .as_ref()
+                .is_some_and(|c| tables.kev(c).is_some() || tables.epss(c).is_some());
+            if found.is_empty() && !listed {
                 bail!("aucune faille {}", clean(&id));
             }
             for (i, s) in found.iter().enumerate() {
@@ -1297,6 +1320,15 @@ fn vulns_cli(config: &config::Config, action: VulnsAction, now: i64) -> anyhow::
                     println!();
                 }
                 print_advisory(s);
+                // Correctif inconnu ici : seule la gravité est affichée.
+                let facts = vulns::AdvisoryFacts::from_advisory(&s.advisory, true);
+                print_exploitation(&facts.cves, &tables);
+                let a = vulns::assess(&facts, &tables);
+                println!("  gravité : {} ({})", a.severity.label(), a.rule.label());
+            }
+            if let (true, Some(cve)) = (found.is_empty(), &cve) {
+                println!("{cve}  (aucune faille connue ; tables d'enrichissement seulement)");
+                print_exploitation(std::slice::from_ref(cve), &tables);
             }
             Ok(())
         }
@@ -1388,12 +1420,82 @@ fn print_sync_state(state: &vulns_store::SyncState, now: i64) {
             .loader_version
             .map_or("-".to_owned(), |v| v.to_string())
     );
+    if let Some(url) = &state.validator_url {
+        println!("  validateurs servis par {}", clean(url));
+    }
     if let Some(until) = state.retry_after_until.filter(|u| *u > now) {
         println!(
             "  Retry-After : pas de requête avant {} (dans {})",
             iso_utc(until),
             human_age(until - now)
         );
+    }
+}
+
+/// Jeu actif de KEV ou d'EPSS, pour `vigie vulns sources` ; âge du
+/// catalogue KEV, avertissement au-delà de 14 jours (affichage seulement :
+/// le constat reste `vulns-sync/kev`).
+fn print_dataset(
+    source: enrich_store::EnrichSource,
+    set: Option<&enrich_store::ActiveDataset>,
+    stale_count: i64,
+    now: i64,
+) {
+    let Some(set) = set else {
+        println!("  jeu : jamais chargé (aucune gravité levée par cette table)");
+        return;
+    };
+    let released = set.released.as_second();
+    println!(
+        "  jeu : version {}  publié le {}  lignes {}  inchangé (périmé) : {stale_count}",
+        clean(&set.version),
+        iso_utc(released),
+        set.rows
+    );
+    if source == enrich_store::EnrichSource::Kev {
+        let age = now - released;
+        println!("  âge du catalogue KEV : {}", human_age(age.max(0)));
+        if age > vulns::sources::kev::MAX_CATALOG_AGE {
+            println!("  avertissement : catalogue KEV de plus de 14 jours");
+        }
+    }
+}
+
+/// Faits KEV et EPSS de chaque CVE, pour `vigie vulns show`.
+fn print_exploitation(cves: &[Cve], tables: &enrich_store::StoreTables<'_>) {
+    let state = tables.state();
+    if state.kev.is_none() {
+        println!("  CISA KEV : jamais chargé");
+    }
+    if state.epss.is_none() {
+        println!("  FIRST EPSS : jamais chargé");
+    }
+    for cve in cves {
+        if let Some(k) = tables.kev(cve) {
+            println!(
+                "  CISA KEV {cve} : ajoutée le {}, échéance {}, usage par rançongiciel connu : {}",
+                k.date_added,
+                k.due_date,
+                if k.known_ransomware { "oui" } else { "non" }
+            );
+            println!("    {}", clean(&k.name));
+        } else if state.kev.is_some() {
+            println!("  CISA KEV {cve} : absente du catalogue");
+        }
+        if let Some(e) = tables.epss(cve) {
+            let model = state.epss.as_ref().map_or(String::new(), |d| {
+                format!(
+                    " (modèle {} du {})",
+                    clean(&d.version),
+                    iso_utc(d.released.as_second())
+                )
+            });
+            println!(
+                "  FIRST EPSS {cve} : score {}  percentile {}{model}",
+                ppm_text(e.epss_ppm),
+                ppm_text(e.percentile_ppm)
+            );
+        }
     }
 }
 

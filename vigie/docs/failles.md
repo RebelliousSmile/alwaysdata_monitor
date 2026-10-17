@@ -277,6 +277,37 @@ entrée `cveID`, `dateAdded`, `dueDate`, `knownRansomwareCampaignUse`,
 `forensicTriage`. La correspondance se fait par CVE, à partir des `aliases`
 des autres sources.
 
+Mesures du miroir du 2026-10-17 [V] : `200`, `content-type: text/plain;
+charset=utf-8`, `cache-control: max-age=300`, pas de `Last-Modified` ; ETag
+fort (64 caractères hexadécimaux entre guillemets), `If-None-Match` → 304 ;
+1 792 713 o en clair (197 247 o si gzip était demandé, ce que Vigie ne fait
+jamais) ; `catalogVersion` `2026.10.16`, `dateReleased`
+`2026-10-16T17:15:48.8752Z`, `count` 1 748 = nombre d'entrées ; `cveID`
+uniques, 16 caractères au plus ; `knownRansomwareCampaignUse` : `Known` 361,
+`Unknown` 1 387 ; `vulnerabilityName` 161 caractères au plus. Schéma
+`known_exploited_vulnerabilities_schema.json` (draft-07) : par entrée,
+`cveID` (`^CVE-[0-9]{4}-[0-9]{4,19}$`), `vendorProject`, `product`,
+`vulnerabilityName`, `dateAdded` et `dueDate` (`format: date`),
+`shortDescription`, `requiredAction` requis.
+
+**Lecture par Vigie (F4)** (`src/vulns/sources/kev.rs`, `LOADER_VERSION` 1) :
+miroir d'abord, cisa.gov en secours (cisa.gov d'abord avec
+`--accept-shrink`, geste explicite qui porte sur la source canonique) ;
+document de 16 Mio et 20 000 entrées au plus, lu en mémoire et contrôlé
+**avant toute écriture** ; champs de la liste lus en texte puis validés
+(champ requis absent → `missing_field`, CVE hors grammaire → `bad_cve`, date
+hors `AAAA-MM-JJ` → `bad_date`, CVE répété → `duplicate`) ;
+`knownRansomwareCampaignUse` : `Known` → oui, `Unknown` ou absent → non,
+autre → non et compté `unknown_ransomware` ; `count` différent du nombre
+d'entrées → `count_mismatch` (compté, sans échec) ; `vulnerabilityName`
+assaini et coupé à 200 caractères ; autres champs ignorés. **Régression** :
+un catalogue dont `dateReleased` (horodatage complet, comparé à la seconde)
+est antérieur à celui de l'actif est refusé : le miroir peut retarder sur
+cisa.gov, et revenir au catalogue N après N+1 ferait disparaître des CVE
+ajoutés. Si aucun hôte n'offre mieux, la synchronisation réussit « inchangé
+(périmé) » (`stale_count` + 1, données et validateurs actifs gardés). Détail
+du secours : [Priorisation (F4)](#priorisation-f4).
+
 ### FIRST EPSS
 
 | Élément | Valeur |
@@ -294,6 +325,23 @@ des autres sources.
 L'API `https://api.first.org/data/v1/epss` n'est pas utilisée : elle ne sert
 pas aux téléchargements en masse [S], et l'interroger par CVE dirait quelles
 failles touchent les sites.
+
+**Lecture par Vigie (F4)** (`src/vulns/sources/epss.rs`, `LOADER_VERSION` 1),
+format toléré jusqu'au relevé du VPS (« À vérifier », point 3) : CSV gzip
+lu **en flux** (`MultiGzDecoder`, plusieurs membres admis), jamais entier en
+mémoire ; `Content-Encoding: gzip` admis **sans décodage**
+(`SourceMeta::raw_content_encodings`), octets gardés tels quels et empreinte
+calculée sur eux, tout autre encodage refusé ; lignes de 128 octets au plus,
+`\r` final et dernière ligne vide tolérés ; première ligne
+`#model_version:<v>,score_date:<date>` exigée (version de 32 caractères au
+plus, date lue par son préfixe `AAAA-MM-JJ`, gardée à minuit UTC) ; en-tête
+exactement `cve,epss,percentile` ; puis `CVE,score,percentile`, nombres de
+`[0, 1]` écrits `0`, `1`, `0.d{1,9}`, `1.0{1,9}` ou `d(.d{1,9})?e-NN`, lus
+en **millionièmes tronqués** par des entiers seuls (`parse_ppm` : 0,1 =
+100 000 ; la troncature ne fait jamais franchir 0,1). Ligne fautive écartée
+et comptée (`bad_cve`, `bad_value`, `missing_field`) ; CVE répété :
+`duplicate`. Plafonds **provisoires**, à confirmer par le relevé : 32 Mio
+compressés, 64 Mio décompressés, 2 000 000 lignes, 15 min.
 
 ## Sources écartées
 
@@ -656,7 +704,9 @@ constat `vulns-sync` le signale à 3 jours.
 
 `[vulns] sources` est une liste fermée (`vulns::sync::registry::KNOWN`) :
 `osv-crates-io`, `osv-packagist`, `osv-npm`, synchronisées dans cet ordre
-(petites d'abord), une échéance par source. Identifiant inconnu, doublon ou
+(petites d'abord), une échéance par source ; puis les tables de
+priorisation `kev` et `epss` (F4), ajoutées d'office
+([Priorisation (F4)](#priorisation-f4)). Identifiant inconnu, doublon ou
 clé inconnue : erreur de configuration (code 2). Aucune URL n'est
 configurable : l'origine `https://osv-vulnerabilities.storage.googleapis.com`
 (port 443) est codée en dur, chaque redirection revérifiée (3 au plus).
@@ -803,7 +853,100 @@ licence inconnue, gardé). Les zips des tests sont construits par le test
 depuis les fixtures de F1 (`NOTICE`) et des failles fictives ; aucun zip
 hostile n'est commité.
 
+## Priorisation (F4)
+
+Issue #18, plan `aidd_docs/tasks/2026_10/2026_10_17_priorisation-failles/`.
+Code : `src/vulns/exploit.rs` (CVE, faits KEV et EPSS, `parse_ppm`, trait
+`Exploitation`, `MemoryTables`), `src/vulns/severity.rs` (règle de gravité),
+`src/vulns/enrich_store.rs` (stockage, `StoreTables`),
+`src/vulns/sync/enrichment.rs` et `src/vulns/sources/{kev,epss}.rs`.
+
+KEV et EPSS ne détectent rien : ce sont des tables jointes par CVE aux
+alias des failles (identifiant s'il est un CVE, puis alias CVE normalisés
+par F1, grammaire du schéma KEV ; un alias hors grammaire n'entre dans
+aucune jointure ; une faille sans CVE n'a ni KEV ni EPSS).
+
+- **Déclaration d'office** : dès qu'une source de failles est dans
+  `[vulns] sources`, `kev` et `epss` sont déclarés d'office (les écrire est
+  admis, sans doublon) ; `kev` ou `epss` sans source de failles : erreur de
+  configuration (code 2). Retirés avec la dernière source de failles, leurs
+  constats sont clos « plus surveillé ».
+- **Ordre** : sources de failles, puis `kev`, puis `epss`
+  (`registry::KNOWN`). Une issue `loaded` de KEV ou d'EPSS, comme celle
+  d'une source de failles, demande le rapprochement de F7
+  (`SyncReport::loaded`).
+- **Même cadre que F2** : trait `EnrichmentSource`, voisin de `VulnSource`,
+  même moteur, même bail (plafond de durée + 30 min, pris avant toute
+  requête), même débit (`claim_request`, un seul par synchronisation même
+  si KEV fait deux requêtes ; `min_interval` 0 ; `Retry-After` honoré),
+  même `Download`, même état, mêmes issues, même constat
+  `vulns-sync/<source>` à 3 jours.
+- **Tables** (migration `0019.sql`) : `vuln_kev` et `vuln_epss` en
+  `WITHOUT ROWID`, clé `(generation, cve)` (pas de second index) ;
+  `vuln_dataset` garde une fois par génération la version et la date du
+  jeu (KEV : `catalogVersion`, `dateReleased` complet en UTC ; EPSS :
+  `model_version`, `score_date` à minuit UTC), écrite dans la transaction de
+  la bascule. Écart à l'issue (`model_date` par ligne) : pas 300 000 copies
+  de la même date.
+- **Générations** : comme F1, sous bail, par lots IMMEDIATE de 5 000 lignes
+  (bail revérifié dans chacun ; lot le plus lent ≈ 60 ms en debug pour
+  400 000 lignes EPSS face à `serve` et `tick`), bascule en compare-and-swap,
+  purge par lots selon la forme de la clé (`GenerationCve` : génération
+  orpheline trouvée par la clé, sans parcourir l'active), puis
+  `PRAGMA wal_checkpoint(PASSIVE)`. Un lecteur voit l'ancien jeu complet ou
+  le nouveau. Table fantôme puis `RENAME` et `DELETE` + 300 000 `INSERT` en
+  une transaction : rejetés.
+- **`validator_url`** : URL demandée qui a servi l'ETag ou le
+  `Last-Modified` gardés, écrite avec eux dans l'instruction unique de la
+  bascule ou de `finish_unchanged` ; une requête n'est conditionnelle que si
+  `LOADER_VERSION` concorde **et** si son URL est celle-là (un ETag du miroir
+  n'a pas de sens pour cisa.gov). Une réponse servie par une autre URL
+  remplace l'ETag et `validator_url`, ou les efface. La migration remplit
+  `validator_url` avec l'URL de la source là où un validateur existait (OSV).
+- **Ordre des contrôles avant la bascule** : (1) seuil d'écart de F2, 1 %
+  (numérateur : `bad_cve`, `bad_date`, `bad_value`, `missing_field`,
+  `duplicate` ; `unknown_ransomware` et `count_mismatch` comptés sans être
+  des écarts ; dénominateur : entrées ou lignes lues) ; (2) KEV seulement :
+  régression de `dateReleased` ; (3) garde de F2 contre le rétrécissement
+  (80 % du maximum des 7 derniers chargements, dès 100 lignes, fonction
+  `shrink_refused`) ; (4) bascule. KEV est contrôlé en mémoire avant toute
+  poussée ; EPSS est poussé en flux, contrôlé à la fin, la génération
+  abandonnée sur refus.
+- **Secours KEV** : miroir, puis cisa.gov quand le miroir échoue (réseau,
+  statut, 429 compris, plafond, format, seuil d'écart) ou est refusé
+  (régression, rétrécissement : KEV appelle `shrink_refused` sur les mêmes
+  valeurs que le moteur, seulement pour décider d'essayer l'autre hôte) ;
+  le premier jeu accepté est poussé. Les deux refusés : l'issue la plus
+  sévère, échec (dernière erreur ; deux 429 avec `Retry-After` donnent
+  `rate_limited` et `retry_after_until`, comme pour OSV), puis
+  `refused_shrink` (écrit une fois, `recent_entries` inchangé), puis
+  « inchangé (périmé) ». Un 304 ou une même empreinte sur l'un des hôtes :
+  inchangé.
+- **Âge du catalogue KEV** : `vigie vulns sources` affiche `maintenant −
+  dateReleased` et « avertissement : catalogue KEV de plus de 14 jours »
+  au-delà (CISA publie les jours ouvrés), même quand chaque synchronisation
+  réussit (304, miroir périmé). Affichage seulement : le constat reste
+  `vulns-sync/kev` à 3 jours sans succès.
+- **Lecture pour F7** : `StoreTables::open(&store)`, sur une connexion de
+  lecture (`Store::open_read`, `query_only`) ou celle de l'écrivain ; KEV
+  actif entier en mémoire (20 000 lignes au plus) et état des deux jeux lus
+  dans une même transaction de lecture ; EPSS par CVE, joint sur la
+  génération active (`EpssFact::generation` rempli), en cache le temps d'un
+  passage. Une table jamais chargée ne lève aucune gravité ; l'état
+  (`TablesState`) est porté par chaque évaluation.
+- **Attribution** : KEV `CC0-1.0`, « CISA KEV » sans logo ; EPSS « FIRST
+  EPSS Usage Agreement », « See EPSS at https://www.first.org/epss » ;
+  imprimées par `vigie vulns sources` et `show`.
+
 ## Gravité
+
+Règle codée dans un seul module, `src/vulns/severity.rs`, fonctions pures
+utilisées telles quelles par F7 : `assess` (une faille), `assess_group`
+(failles d'une même faille fusionnées par alias), `assess_unknown`
+(« version inconnue » ou « plage inconnue »). Seuils en constantes, pas en
+configuration : `CVSS_CRITICAL_TENTHS` = 90, `CVSS_WARNING_TENTHS` = 70,
+`EPSS_WARNING_PPM` = 100 000 ; changer un seuil est une décision écrite dans
+`decisions.md`.
 
 Score CVSS lu dans cet ordre, le premier présent l'emporte. Il est stocké en
 **dixièmes entiers** (98 pour 9,8, `Score { tenths }`, 0 à 100) : aucun
@@ -832,6 +975,24 @@ classe en information qu'une faille qu'aucune autre règle ne retient.
 « Version inconnue » et « plage inconnue » sont de gravité information, sauf sur une faille critique : avertissement.
 
 « Aucun correctif » est toujours affiché et ne fait jamais baisser la gravité.
+
+Règles nommées, lues de haut en bas (`Rule`) : `kev` (un CVE dans KEV,
+critique), `malicious` (`MAL-`, critique), `cvss_critical` (≥ 9,0,
+critique), `cvss_high` (≥ 7,0, avertissement), `epss` (≥ 0,1,
+avertissement), `unknown_severity` (aucun score, non `informational`,
+avertissement), `informational` (aucun score, `informational`,
+information), `default` (information). Plusieurs CVE : KEV si l'un y est
+(`dateAdded` le plus ancien retenu, rançongiciel si l'un l'est), EPSS le plus
+haut. **Groupe fusionné** (F7) : KEV et EPSS cherchés sur l'union
+dédoublonnée des CVE du groupe ; chaque membre évalué avec ses propres
+`malicious`, score et `informational` et ces faits communs ; gravité =
+maximum ; règle, score et identifiant = ceux du premier membre reçu qui
+l'atteint ; « aucun correctif » si aucun membre n'en a. Un avis Wordfence
+sans CVE et la GHSA de la même faille, dont le CVE est dans KEV, sont la
+même faille exploitée. **Inconnues** : avertissement sur une faille
+critique, information sinon ; F7 prend le maximum par composant. Écart à
+l'issue #18, qui proposait « CVSS ≥ 9 et correctif disponible →
+avertissement » : la règle de F0 fait foi.
 
 ## Dérogations
 
@@ -908,9 +1069,19 @@ lockfiles de Vigie (F8) appelle `api.osv.dev` depuis la CI, pas depuis le VPS.
    identique au v2 sur un vrai téléchargement, texte réel de `copyrights`,
    affichage permis ou non aux clients d'un prestataire. Consigner le résultat,
    daté, dans la section Wordfence.
-3. EPSS : URL finale après redirection, en-têtes (ETag, Last-Modified), poids
+3. EPSS : URL finale après redirection, en-têtes (ETag, Last-Modified,
+   **présence ou non de `Content-Encoding: gzip`** sur la réponse ; absent,
+   `raw_content_encodings` d'EPSS est vidé et la décision consignée), poids
    du fichier, conditions sur https://www.first.org/epss/#Usage-Agreement.
-4. cisa.gov : ETag et 304 sur l'URL canonique.
+   **À relever** (exploitant) : `vigie vulns sync --source epss` deux fois
+   (le second : 304 ou empreinte inchangée), relevé masqué dans
+   `hebergement.md`. Puis **grammaire EPSS à figer** : forme réelle des
+   nombres, de `score_date` et des fins de ligne consignée ici, parseur et
+   fixtures resserrés à ce qui est observé (tolérances gardées), plafonds
+   ajustés si le poids réel les approche à moins d'un facteur 2.
+4. cisa.gov : ETag et 304 sur l'URL canonique ; catalogue réel lu par
+   `vigie vulns sync --source kev` deux fois (miroir puis 304). **À
+   relever** (exploitant).
 5. Friends-Of-Presta : archive `main.tar.gz` joignable, ETag, taille, nombre
    d'avis et date du dernier commit.
 6. GitHub Advisory Database : texte d'attribution exact sur la page

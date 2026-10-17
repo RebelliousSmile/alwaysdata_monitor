@@ -173,8 +173,22 @@ fn a_never_synchronized_source_counts_from_the_first_tick_that_sees_it() {
     h.tick(T0);
     assert!(h.tick(T0 + STALE_AFTER).is_empty());
     h.tick(T0 + STALE_AFTER + 1);
-    assert_eq!(h.open_keys(), ["_veilleur/vulns-sync/osv-crates-io"]);
-    assert!(h.incidents()[0].detail.contains("jamais synchronisée"));
+    // KEV et EPSS, déclarés d'office (#18), jamais synchronisés non plus.
+    let mut keys = h.open_keys();
+    keys.sort();
+    assert_eq!(
+        keys,
+        [
+            "_veilleur/vulns-sync/epss",
+            "_veilleur/vulns-sync/kev",
+            "_veilleur/vulns-sync/osv-crates-io"
+        ]
+    );
+    assert!(
+        h.incidents()
+            .iter()
+            .all(|i| i.detail.contains("jamais synchronisée"))
+    );
     let declared = h.store().meta("vulns.declared.osv-crates-io").unwrap();
     assert_eq!(declared.map(|(v, _)| v), Some(T0.to_string()));
 }
@@ -208,7 +222,8 @@ fn removing_the_section_closes_everything_and_forgets_the_declarations() {
     let mut h = Harness::new(&["osv-npm", "osv-packagist"]);
     h.tick(T0);
     h.tick(T0 + STALE_AFTER + 1);
-    assert_eq!(h.open_keys().len(), 2);
+    // Plus KEV et EPSS, déclarés d'office (#18).
+    assert_eq!(h.open_keys().len(), 4);
     h.config.vulns = None;
     h.tick(T0 + STALE_AFTER + 60);
     assert!(h.open_keys().is_empty());
@@ -217,7 +232,7 @@ fn removing_the_section_closes_everything_and_forgets_the_declarations() {
             .iter()
             .all(|i| i.close_reason == Some(CloseReason::Unwatched))
     );
-    for id in ["osv-npm", "osv-packagist"] {
+    for id in ["osv-npm", "osv-packagist", "kev", "epss"] {
         let key = format!("vulns.declared.{id}");
         assert!(h.store().meta(&key).unwrap().is_none(), "{key}");
     }
