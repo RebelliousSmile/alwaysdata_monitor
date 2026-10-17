@@ -9,13 +9,15 @@
 //! Garde-fous transverses (issue #5) : limite de débit ([`limit`]), une ligne
 //! de journal par appel et en-têtes stricts (couche [`guard`], extérieure à
 //! celle de `request_id`), 415 pour un `POST` dont le corps n'est pas du JSON,
-//! texte d'origine log assaini ([`log_text`]).
+//! texte d'origine log assaini ([`log_text`]), pagination par clé de toute
+//! liste qui croît ([`page`]).
 //!
 //! L'état d'un site (`SiteState`) est calculé ici et nulle part ailleurs : la
 //! console l'affiche sans rien recalculer.
 
 pub mod limit;
 pub mod log_text;
+pub mod page;
 
 use std::collections::{BTreeMap, HashMap};
 use std::net::SocketAddr;
@@ -33,12 +35,15 @@ use axum::http::header::{
     X_CONTENT_TYPE_OPTIONS,
 };
 use axum::http::request::Parts;
-use axum::http::{Extensions, HeaderMap, HeaderName, HeaderValue, Method, StatusCode};
+use axum::http::{Extensions, HeaderMap, HeaderName, HeaderValue, Method, StatusCode, Uri};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post};
 use serde::{Deserialize, Serialize};
 
+use crate::analysis::catalog::BotClass;
+use crate::analysis::findings::{self as log_findings, Analysis, VERDICT_RETENTION_SECS};
+use crate::analysis::score::Level;
 use crate::checks::{CheckKind, heartbeat};
 use crate::config::{Runtime, Site};
 use crate::device;
@@ -48,11 +53,12 @@ use crate::request_id;
 use crate::serve::AppState;
 use crate::store::{
     AGENT_PREFIX, AckOutcome, Agent, CheckRun, Device, Incident, RevokeOutcome, RunResult,
-    SCHEMA_CHECK_RESULTS, Store,
+    SCHEMA_CHECK_RESULTS, SCHEMA_FINDINGS, Store,
 };
 
 use limit::{IpKey, Limiter};
 use log_text::LogText;
+use page::{IncidentCursor, Page, PageQuery, VerdictCursor};
 
 /// Taille maximale du corps de `POST /api/v1/pair`, en octets.
 pub const MAX_PAIR_BYTES: usize = 1024;
@@ -75,6 +81,14 @@ pub(crate) fn routes() -> Router<Arc<AppState>> {
         .route(
             "/api/v1/sites/{id}/incidents",
             get(site_incidents_handler).fallback(not_found),
+        )
+        .route(
+            "/api/v1/sites/{id}/logs",
+            get(site_logs_handler).fallback(not_found),
+        )
+        .route(
+            "/api/v1/sites/{id}/logs/ips",
+            get(site_log_ips_handler).fallback(not_found),
         )
         .route(
             "/api/v1/incidents/{id}",
@@ -560,7 +574,8 @@ impl FromRequestParts<Arc<AppState>> for Authenticated {
     }
 }
 
-/// Incidents fermés montrés par `GET /api/v1/sites/{id}/incidents`.
+/// Incidents fermés montrés par `GET /api/v1/sites/{id}/incidents` : clos
+/// depuis 30 jours au plus.
 pub const CLOSED_WINDOW: i64 = 30 * 86_400;
 
 /// 200, la valeur en JSON, jamais mise en cache.
@@ -961,29 +976,329 @@ fn site_index(state: &AppState, id: Result<Path<String>, PathRejection>) -> Opti
     state.site_ids.iter().position(|s| *s == id)
 }
 
+/// Incidents clos d'un site, une page. La console 0.1.1 lit `incidents` :
+/// le nom reste, la liste devient la première page.
 #[derive(Serialize)]
 struct SiteIncidents {
     site: String,
     since: i64,
     incidents: Vec<IncidentJson>,
+    next_cursor: Option<String>,
 }
 
+/// Incidents clos des 30 derniers jours, les plus récents d'abord, par pages
+/// (`limit`, `cursor`). Un incident clos pendant le parcours se place avant
+/// la première page : il n'est pas revu, et aucun autre ne manque.
 async fn site_incidents_handler(
     State(state): State<Arc<AppState>>,
     Authenticated(_device): Authenticated,
     id: Result<Path<String>, PathRejection>,
+    uri: Uri,
 ) -> Response {
     let Some(index) = site_index(&state, id) else {
         return ApiError::NOT_FOUND.into_response();
     };
+    let page = match PageQuery::parse(uri.query()) {
+        Ok(page) => page,
+        Err(err) => return err.into_response(),
+    };
+    let after = match page
+        .cursor
+        .as_deref()
+        .map(IncidentCursor::decode)
+        .transpose()
+    {
+        Ok(after) => after.map(|c| (c.closed_at, c.id)),
+        Err(err) => return err.into_response(),
+    };
     let since = state.clock.unix() - CLOSED_WINDOW;
     with_store(&state, "/api/v1/sites/incidents", move |state, store| {
         let site = &state.site_ids[index];
-        let closed = store.closed_incidents(site, since)?;
+        let mut closed = store.closed_incidents_page(site, since, after, page.limit + 1)?;
+        let more = page::split(&mut closed, page.limit);
+        let next_cursor = closed
+            .last()
+            .filter(|_| more)
+            .and_then(|last| {
+                last.closed_at.map(|closed_at| IncidentCursor {
+                    closed_at,
+                    id: last.id,
+                })
+            })
+            .map(IncidentCursor::encode);
         Ok(json(&SiteIncidents {
             site: site.clone(),
             since,
             incidents: closed.iter().map(IncidentJson::from).collect(),
+            next_cursor,
+        }))
+    })
+    .await
+}
+
+/// Rang d'un site qui a une source de logs ; `None` (404) sinon.
+fn logs_site_index(state: &AppState, id: Result<Path<String>, PathRejection>) -> Option<usize> {
+    site_index(state, id).filter(|&index| {
+        state.config.sites[index]
+            .logs
+            .as_ref()
+            .is_some_and(|logs| logs.source.is_some())
+    })
+}
+
+/// Robot du catalogue vu sur 24 h. Les textes viennent du catalogue mais
+/// sont relus du résumé en base : servis comme du texte d'origine log.
+#[derive(Serialize)]
+struct BotJson {
+    name: LogText,
+    publisher: LogText,
+    purpose: LogText,
+    robots_only: bool,
+    honours_robots: bool,
+    class: BotClass,
+    protected: bool,
+    requests: u64,
+}
+
+/// Règle sur sa fenêtre, finie à l'heure de référence ; jamais d'IP.
+#[derive(Serialize)]
+struct RuleJson {
+    rule: LogText,
+    scope: &'static str,
+    severity: &'static str,
+    window_secs: u32,
+    min_count: u32,
+    min_ips: u32,
+    count: u64,
+    distinct_ips: usize,
+    keys_over: usize,
+    exceeded: bool,
+}
+
+/// Charge d'une heure (tranche `timestamp_ms / 3 600 000`).
+#[derive(Serialize)]
+struct LoadJson {
+    hour: i64,
+    requests: u64,
+    refused: u64,
+    timed: u64,
+    service_us: u64,
+    facets: u64,
+    facets_us: u64,
+    bots: u64,
+    bots_us: u64,
+}
+
+/// Dernier instantané de l'analyse des logs d'un site, sans IP.
+#[derive(Serialize)]
+struct AnalysisJson {
+    /// Heure du veilleur, en secondes.
+    generated_at: i64,
+    /// Heure de référence des fenêtres, en ms (heure des données).
+    reference_ms: i64,
+    bots: Vec<BotJson>,
+    scored: u64,
+    unscored: u64,
+    rules: Vec<RuleJson>,
+    load: Vec<LoadJson>,
+    load_threshold_us: u64,
+}
+
+impl From<Analysis> for AnalysisJson {
+    fn from(a: Analysis) -> Self {
+        Self {
+            generated_at: a.generated_at,
+            reference_ms: a.reference_ms,
+            bots: a
+                .bots
+                .iter()
+                .map(|b| BotJson {
+                    name: LogText::detail(&b.name),
+                    publisher: LogText::detail(&b.publisher),
+                    purpose: LogText::detail(&b.purpose),
+                    robots_only: b.robots_only,
+                    honours_robots: b.honours_robots,
+                    class: b.class,
+                    protected: b.protected,
+                    requests: b.requests,
+                })
+                .collect(),
+            scored: a.scored,
+            unscored: a.unscored,
+            rules: a
+                .rules
+                .iter()
+                .map(|r| RuleJson {
+                    rule: LogText::detail(&r.rule),
+                    scope: r.scope.as_str(),
+                    severity: r.severity.as_str(),
+                    window_secs: r.window_secs,
+                    min_count: r.min_count,
+                    min_ips: r.min_ips,
+                    count: r.count,
+                    distinct_ips: r.distinct_ips,
+                    keys_over: r.keys_over,
+                    exceeded: r.exceeded,
+                })
+                .collect(),
+            load: a
+                .load
+                .iter()
+                .map(|h| LoadJson {
+                    hour: h.hour,
+                    requests: h.requests,
+                    refused: h.refused,
+                    timed: h.timed,
+                    service_us: h.service_us,
+                    facets: h.facets,
+                    facets_us: h.facets_us,
+                    bots: h.bots,
+                    bots_us: h.bots_us,
+                })
+                .collect(),
+            load_threshold_us: a.load_threshold_us,
+        }
+    }
+}
+
+#[derive(Serialize)]
+struct SiteLogs {
+    /// `null` tant que `tick` n'a écrit aucun instantané pour ce site.
+    analysis: Option<AnalysisJson>,
+}
+
+/// Dernier instantané de l'analyse des logs (#8) : robots, règles, charge.
+/// 404 pour un site sans source de logs.
+async fn site_logs_handler(
+    State(state): State<Arc<AppState>>,
+    Authenticated(_device): Authenticated,
+    id: Result<Path<String>, PathRejection>,
+) -> Response {
+    let Some(index) = logs_site_index(&state, id) else {
+        return ApiError::NOT_FOUND.into_response();
+    };
+    with_store(&state, "/api/v1/sites/logs", move |state, store| {
+        let analysis = if store.schema_version()? >= SCHEMA_FINDINGS {
+            log_findings::latest_summary(&store, &state.site_ids[index])?
+        } else {
+            None
+        };
+        Ok(json(&SiteLogs {
+            analysis: analysis.map(AnalysisJson::from),
+        }))
+    })
+    .await
+}
+
+/// Verdict d'une IP, en liste blanche : ni user-agent, ni chemin, ni
+/// libellé (il peut citer l'un ou l'autre), seulement des codes de raison.
+#[derive(Serialize)]
+struct VerdictJson {
+    ip: LogText,
+    score: u8,
+    /// `moyen` ou `eleve`.
+    level: Level,
+    reasons: Vec<&'static str>,
+    class: BotClass,
+}
+
+/// Verdicts d'un instantané, une page.
+#[derive(Serialize)]
+struct SiteLogIps {
+    site: String,
+    /// Instantané paginé ; `null` s'il n'y en a pas de moins de 48 h.
+    generated_at: Option<i64>,
+    #[serde(flatten)]
+    page: Page<VerdictJson>,
+}
+
+/// Plus longue écriture d'une adresse IP (IPv6 avec IPv4 finale).
+const MAX_IP_CHARS: usize = 45;
+
+/// Verdicts moyens et élevés du dernier instantané de moins de 48 h, du
+/// plus haut score au plus bas, par pages. Le curseur fixe l'instantané :
+/// une page suivante le relit même après un nouveau `tick` ; s'il a été
+/// purgé, 409 `cursor_expired` et le client reprend au début.
+async fn site_log_ips_handler(
+    State(state): State<Arc<AppState>>,
+    Authenticated(_device): Authenticated,
+    id: Result<Path<String>, PathRejection>,
+    uri: Uri,
+) -> Response {
+    let Some(index) = logs_site_index(&state, id) else {
+        return ApiError::NOT_FOUND.into_response();
+    };
+    let page = match PageQuery::parse(uri.query()) {
+        Ok(page) => page,
+        Err(err) => return err.into_response(),
+    };
+    let cursor = match page
+        .cursor
+        .as_deref()
+        .map(VerdictCursor::decode)
+        .transpose()
+    {
+        Ok(cursor) => cursor,
+        Err(err) => return err.into_response(),
+    };
+    let oldest = state.clock.unix() - VERDICT_RETENTION_SECS;
+    with_store(&state, "/api/v1/sites/logs/ips", move |state, store| {
+        let site = &state.site_ids[index];
+        let readable = store.schema_version()? >= SCHEMA_FINDINGS;
+        let snapshot = match &cursor {
+            Some(cursor) => {
+                if !readable
+                    || cursor.generated_at < oldest
+                    || !log_findings::snapshot_exists(&store, site, cursor.generated_at)?
+                {
+                    return Ok(ApiError::CURSOR_EXPIRED.into_response());
+                }
+                Some(cursor.generated_at)
+            }
+            None if readable => log_findings::latest_summary(&store, site)?
+                .map(|a| a.generated_at)
+                .filter(|&at| at >= oldest),
+            None => None,
+        };
+        let Some(generated_at) = snapshot else {
+            return Ok(json(&SiteLogIps {
+                site: site.clone(),
+                generated_at: None,
+                page: Page {
+                    items: Vec::new(),
+                    next_cursor: None,
+                },
+            }));
+        };
+        let after = cursor.as_ref().map(|c| (c.score, c.ip.as_str()));
+        let mut rows =
+            log_findings::verdicts_page(&store, site, generated_at, after, page.limit + 1)?;
+        let more = page::split(&mut rows, page.limit);
+        let next_cursor = rows
+            .last()
+            .filter(|_| more)
+            .map(|(score, ip, _)| VerdictCursor {
+                generated_at,
+                score: *score,
+                ip: ip.clone(),
+            })
+            .map(|c| c.encode());
+        let items = rows
+            .into_iter()
+            .filter_map(|(_, _, verdict)| verdict)
+            .filter(|v| matches!(v.level, Level::Medium | Level::High))
+            .map(|v| VerdictJson {
+                ip: LogText::new(&v.ip.to_string(), MAX_IP_CHARS),
+                score: v.score,
+                level: v.level,
+                reasons: v.reasons.iter().map(|r| r.code()).collect(),
+                class: v.class,
+            })
+            .collect();
+        Ok(json(&SiteLogIps {
+            site: site.clone(),
+            generated_at: Some(generated_at),
+            page: Page { items, next_cursor },
         }))
     })
     .await

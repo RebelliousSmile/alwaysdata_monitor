@@ -22,9 +22,14 @@ use tower::ServiceExt;
 #[path = "support/veilleur.rs"]
 mod veilleur;
 
+use vigie::analysis::catalog::BotClass;
+use vigie::analysis::findings::{self, Analysis, BotSeen, IpVerdict, RuleOutcome};
+use vigie::analysis::load::{DEFAULT_THRESHOLD_US, HourLoad};
+use vigie::analysis::rules::Scope;
+use vigie::analysis::score::{Level, Reason};
 use vigie::capability::CommandKind;
 use vigie::clock::{Clock, FakeClock};
-use vigie::config::{Api, Config, Runtime};
+use vigie::config::{Api, Config, LogSourceKind, Runtime, SiteLogs};
 use vigie::device::{self, PAIRING_TTL};
 use vigie::finding::{Finding, Severity};
 use vigie::serve;
@@ -602,13 +607,78 @@ fn open_incident(v: &Veilleur, check: &str, severity: Severity, detail: &str) ->
         .id
 }
 
+/// User-agent cité par le libellé d'une raison de l'instantané semé :
+/// jamais servi.
+const SEEDED_UA: &str = "curl/8.4.0-seme";
+
+/// Instantané d'analyse de logs du site A : un robot, une règle dépassée,
+/// une heure de charge, un verdict élevé dont la raison cite un UA.
+fn seeded_analysis() -> Analysis {
+    Analysis {
+        site: "site-a".into(),
+        generated_at: T0 - 60,
+        reference_ms: (T0 - 120) * 1000,
+        bots: vec![BotSeen {
+            name: "GPTBot".into(),
+            publisher: "OpenAI".into(),
+            purpose: "entraînement".into(),
+            robots_only: false,
+            honours_robots: true,
+            class: BotClass::AiTraining,
+            protected: false,
+            requests: 12,
+        }],
+        verdicts: vec![IpVerdict {
+            ip: "192.0.2.77".parse().expect("ip"),
+            score: 85,
+            own_score: 85,
+            level: Level::High,
+            class: BotClass::Tool,
+            bot: None,
+            requests: 40,
+            shared: false,
+            reasons: vec![Reason {
+                points: 20,
+                label: format!("user-agent d'outil, pas de navigateur ({SEEDED_UA})"),
+            }],
+        }],
+        scored: 1,
+        unscored: 0,
+        rules: vec![RuleOutcome {
+            rule: "spike-404".into(),
+            scope: Scope::Site,
+            severity: Severity::Warning,
+            window_secs: 300,
+            min_count: 100,
+            min_ips: 1,
+            count: 140,
+            distinct_ips: 1,
+            keys_over: 0,
+            exceeded: true,
+            ips: vec!["192.0.2.77".parse().expect("ip")],
+            keys: Vec::new(),
+        }],
+        load: vec![HourLoad {
+            requests: 52,
+            ..HourLoad::new((T0 - 120) / 3600)
+        }],
+        load_threshold_us: DEFAULT_THRESHOLD_US,
+    }
+}
+
 /// Base peuplée : agent et relevé, passages avec valeurs mesurées, incidents
 /// ouverts, acquittés et fermés, canal de commandes et son audit, mot de
-/// passe SMTP dans `password_file`, adresse publique.
+/// passe SMTP dans `password_file`, adresse publique, instantané d'analyse
+/// de logs.
 async fn populated() -> (Veilleur, Seeds) {
     let v = Veilleur::with(|config| {
         config.api = Some(Api {
             public_url: "https://vigie.example.org".into(),
+        });
+        config.sites[0].logs = Some(SiteLogs {
+            source: Some(LogSourceKind::Alwaysdata),
+            hosts: vec!["site-a.example.org".into()],
+            ..SiteLogs::default()
         });
     });
     let password = "mot-de-passe-smtp-seme-5f2c9a".to_owned();
@@ -686,6 +756,7 @@ async fn populated() -> (Veilleur, Seeds) {
         .map(|r| r.signature)
         .collect::<Vec<_>>();
     assert!(!signatures.is_empty());
+    findings::persist(&mut store, &seeded_analysis()).expect("instantané");
     drop(store);
     open_incident(&v, "exposed", Severity::Critical, "/.env lisible");
 
@@ -772,6 +843,14 @@ async fn every_route_serves_only_the_reviewed_keys_and_no_seeded_secret() {
             "/api/v1/incidents/1".to_owned(),
         ),
         ("GET /api/v1/settings", "/api/v1/settings".to_owned()),
+        (
+            "GET /api/v1/sites/{id}/logs",
+            "/api/v1/sites/site-a/logs".to_owned(),
+        ),
+        (
+            "GET /api/v1/sites/{id}/logs/ips",
+            "/api/v1/sites/site-a/logs/ips".to_owned(),
+        ),
         ("erreur", "/api/v1/sites/inconnu".to_owned()),
     ] {
         bodies.push((route.to_owned(), v.get(&path, &token).await));
@@ -812,6 +891,7 @@ async fn every_route_serves_only_the_reviewed_keys_and_no_seeded_secret() {
             reply.status
         );
         let text = String::from_utf8_lossy(&reply.body);
+        assert!(!text.contains(SEEDED_UA), "{route} : user-agent servi");
         let headers = format!("{:?}", reply.headers);
         for forbidden in seeds
             .forbidden(true)

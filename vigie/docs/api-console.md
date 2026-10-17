@@ -115,7 +115,9 @@ révocation.
 | `POST /api/v1/pair` | `{token, device_id, name}` (voir Appairage) | appairage |
 | `GET /api/v1/overview` | sites triés par état, avec leur constat le plus grave | Main, ATraiter, Etats |
 | `GET /api/v1/sites/{id}` | incidents ouverts, contrôles et dernier relevé de l'agent | ATraiter, Dispo, Controles, Parametres, Etats |
-| `GET /api/v1/sites/{id}/incidents` | incidents fermés depuis 30 jours | Dispo |
+| `GET /api/v1/sites/{id}/incidents` | incidents fermés depuis 30 jours, par pages | Dispo |
+| `GET /api/v1/sites/{id}/logs` | dernier instantané de l'analyse des logs : robots, règles, charge | — |
+| `GET /api/v1/sites/{id}/logs/ips` | verdicts d'IP moyens et élevés, par pages | — |
 | `GET /api/v1/incidents/{id}` | un incident, ouvert ou fermé | Alerte |
 | `POST /api/v1/incidents/{id}/ack` | l'incident acquitté | Alerte |
 | `GET /api/v1/settings` | sites, fréquences, destinataire masqué, appareils | Parametres, Reglages |
@@ -124,6 +126,24 @@ révocation.
 Toutes, sauf `pair`, exigent le jeton. Les heures sont des secondes Unix (UTC) ;
 un champ sans valeur connue vaut `null`, jamais zéro ni une valeur par défaut.
 Les tableaux ne sont jamais `null` : vides, ils valent `[]`.
+
+### Pagination
+
+Toute liste qui croît se lit par pages, par clé (jamais par rang) :
+
+- `limit` : de 1 à 100, 50 par défaut ; hors de ces bornes ou illisible,
+  400 `bad_request`.
+- `cursor` : opaque (base64url), 256 caractères au plus avant décodage ;
+  illisible, trop long, vide ou émis par une autre liste, 400 `bad_request`.
+  Un paramètre répété est aussi un 400. Les autres paramètres sont ignorés.
+- La réponse porte la page (`items`, ou `incidents` pour les incidents, voir
+  plus bas) et `next_cursor`, le curseur de la page suivante, `null` sur la
+  dernière. La page suivante se demande avec ce curseur et le même `limit`.
+
+Le curseur porte la clé du dernier élément servi : une page lue plus tard
+reprend juste après lui, sans doublon ni trou dû aux éléments arrivés
+entre-temps. Les listes bornées par la configuration ne se paginent pas :
+sites (200 au plus, `config.toml` en refuse davantage) et contrôles d'un site.
 
 ### Incident
 
@@ -248,12 +268,101 @@ Forme commune à toutes les routes qui renvoient un incident :
 ### `GET /api/v1/sites/{id}/incidents`
 
 ```json
-{ "site": "site-a", "since": 1789408000, "incidents": [ { "...": "un incident" } ] }
+{ "site": "site-a", "since": 1789408000, "incidents": [ { "...": "un incident" } ], "next_cursor": "aTF8…" }
 ```
 
 Incidents du site fermés depuis `since` (maintenant moins 30 jours), du plus
-récemment fermé au plus ancien. Les incidents ouverts sont dans
+récemment fermé au plus ancien (`closed_at`, puis `id` décroissants), par
+pages (voir [Pagination](#pagination)) : `incidents` est la page,
+`next_cursor` le curseur de la suivante. Les incidents ouverts sont dans
 `GET /api/v1/sites/{id}`. Identifiant absent de la configuration : 404.
+
+- Un incident fermé pendant un parcours se place avant la première page : il
+  n'est pas revu par les pages suivantes, et aucun autre n'y manque. Un
+  nouveau parcours le voit en tête.
+- **Changement depuis la console 0.1.1** : sans paramètre, la réponse ne porte
+  plus tous les incidents des 30 jours, mais la première page (les 50 derniers
+  fermés). Le nom `incidents` est gardé pour que la console 0.1.1 continue de
+  lire la réponse ; elle ignore `next_cursor` (son client n'a pas de
+  `deny_unknown_fields`) et ne voit donc que ces 50 incidents.
+
+### `GET /api/v1/sites/{id}/logs`
+
+```json
+{
+  "analysis": {
+    "generated_at": 1792000000,
+    "reference_ms": 1791999940000,
+    "bots": [
+      { "name": "GPTBot", "publisher": "OpenAI", "purpose": "…", "robots_only": false,
+        "honours_robots": true, "class": "ai_training", "protected": false, "requests": 120 }
+    ],
+    "scored": 81,
+    "unscored": 0,
+    "rules": [
+      { "rule": "spike-404", "scope": "site", "severity": "warning", "window_secs": 300,
+        "min_count": 100, "min_ips": 1, "count": 140, "distinct_ips": 12, "keys_over": 0,
+        "exceeded": true }
+    ],
+    "load": [
+      { "hour": 497777, "requests": 5120, "refused": 30, "timed": 5000, "service_us": 900000000,
+        "facets": 800, "facets_us": 300000000, "bots": 400, "bots_us": 20000000 }
+    ],
+    "load_threshold_us": 1800000000
+  }
+}
+```
+
+Dernier instantané de l'analyse des logs du site (#8), écrit par `tick` :
+
+- `generated_at` : heure du veilleur à l'écriture, en secondes ;
+  `reference_ms` : heure de référence des fenêtres, en ms (heure des données).
+- `bots` : robots du catalogue vus sur 24 h, du plus actif au moins actif,
+  avec leurs métadonnées (`class`, `protected` : jamais visé par les actions
+  robots.txt et UA de #13).
+- `rules` : chaque règle sur sa fenêtre finie à la référence ; `exceeded`
+  dit si elle est dépassée. Aucune IP.
+- `load` : charge des 24 heures, par tranche horaire (`timestamp_ms / 3 600
+  000`), temps de service en µs.
+- `scored` et `unscored` : IP notées, et IP sans score fiable.
+
+Site qui a une source de logs mais aucune analyse encore : 200
+`{"analysis": null}`. Site sans source (`[sites.logs] source`) ou absent de
+la configuration : 404.
+
+### `GET /api/v1/sites/{id}/logs/ips`
+
+```json
+{
+  "site": "site-a",
+  "generated_at": 1792000000,
+  "items": [
+    { "ip": "192.0.2.10", "score": 85, "level": "eleve", "reasons": ["facets", "tool_user_agent"], "class": "tool" }
+  ],
+  "next_cursor": "djF8…"
+}
+```
+
+Verdicts d'IP d'un instantané de l'analyse, du plus haut score au plus bas
+(puis par IP), par pages (voir [Pagination](#pagination)). Données
+personnelles en liste blanche : l'IP, le score (0 à 100), le niveau
+(`moyen` ou `eleve`, jamais les autres), les raisons en codes, la classe du
+premier robot vu (`browser` sans robot). Ni user-agent, ni chemin, ni le
+libellé des raisons, qui peut citer l'un ou l'autre.
+
+- `reasons` : `fake_search_engine`, `search_engine`, `declared_bot`,
+  `facets`, `no_static_resources`, `no_referer`, `tool_user_agent`,
+  `user_agent_rotation`, `burst`, `hosting_network`, `consumer_isp`,
+  `no_reverse_dns`, `shared_signature` ; `other` pour une raison inconnue de
+  ce binaire.
+- Rien au-delà de 48 heures : seul un instantané de `generated_at` ≥
+  maintenant moins 48 h est servi, même avant la purge de `tick`. Sinon,
+  `generated_at` vaut `null` et `items` `[]`.
+- La première page lit le dernier instantané ; le curseur le fixe : une page
+  suivante le relit même après un nouveau `tick` (l'instantané précédent est
+  gardé 15 minutes). Instantané purgé depuis, ou de plus de 48 h : 409
+  `cursor_expired`, le client reprend au début, sans curseur.
+- Site sans source de logs ou absent de la configuration : 404.
 
 ### `GET /api/v1/incidents/{id}`
 
@@ -318,10 +427,12 @@ servi (`LogText`, `vigie/src/api/log_text.rs`) : caractères de contrôle C0,
 DEL et C1, U+2028, U+2029 et contrôles bidirectionnels (U+061C, U+200E,
 U+200F, U+202A à U+202E, U+2066 à U+2069) deviennent U+FFFD. Aujourd'hui :
 `key` et `detail` des incidents du contrôle `logs`, `detail` de son passage
-(analyse de #8, déjà assainie à l'écriture ; la lecture ne s'y fie pas). Les
-champs à venir de l'analyse suivent la même règle : user-agent et chemin
-coupés à 512 caractères, chemin servi sans query string, referer réduit à son
-origine. La console n'injecte jamais de HTML brut (`vue/no-v-html` en erreur
+(analyse de #8, déjà assainie à l'écriture ; la lecture ne s'y fie pas) ;
+`ip` des verdicts de `logs/ips`, et les textes du résumé de `logs` (`name`,
+`publisher`, `purpose` des robots, `rule`), tirés du catalogue et de la
+configuration mais relus de la base. Un user-agent ou un chemin, s'il en est
+servi un jour, suit la même règle : coupé à 512 caractères, chemin sans query
+string, referer réduit à son origine. La console n'injecte jamais de HTML brut (`vue/no-v-html` en erreur
 dans `vigie/app/eslint.config.js`).
 
 ## État d'un site
@@ -426,9 +537,11 @@ qu'indicatif et ne dit jamais la cause d'un refus ou d'une erreur interne.
 | ---- | ------------ | --- |
 | 200 | — | Succès, avec `Cache-Control: no-store`. |
 | 204 | — | `DELETE /api/v1/devices/self` réussi, corps vide. |
+| 400 | `bad_request` | `limit` hors de 1 à 100 ou illisible, curseur illisible, trop long ou d'une autre liste, paramètre de pagination répété (voir [Pagination](#pagination)). Vérifié après le 404 d'un site. |
 | 401 | `unauthorized` | Code inconnu, expiré, déjà utilisé, corps illisible, trop gros ou trop lent ; jeton absent, mal formé, inconnu ou révoqué ; base absente ou antérieure au schéma 6. **Le même corps**, quelle qu'en soit la raison : le journal du veilleur seul dit laquelle. Toujours vérifié avant le 404 d'un site ou d'un incident : leur existence ne se devine pas sans jeton. |
 | 404 | `not_found` | Site absent de la configuration, incident inconnu, méthode refusée sur une route de l'API. |
 | 409 | `conflict` | Acquittement d'un incident fermé. |
+| 409 | `cursor_expired` | Curseur de `logs/ips` dont l'instantané a été purgé ou a plus de 48 h : reprendre au début. |
 | 415 | `unsupported_media_type` | `POST` dont le corps annoncé n'est pas `application/json`. |
 | 429 | `too_many_requests` | Limite de débit dépassée (voir [Limite de débit](#limite-de-débit)), avec `Retry-After`. |
 | 500 | `internal` | Erreur interne (base illisible, tirage aléatoire impossible). |
@@ -437,8 +550,10 @@ Hors de ces routes, une route inconnue, y compris sous `/api/v1`, reçoit le 404
 sans corps du reste du veilleur, comme tout refus de `POST /r/v1/report` (sous
 `/api/v1`, avec les en-têtes stricts et sa ligne de journal).
 
-La console 0.1.1 ne connaît pas 415 ni 429 : elle les affiche comme « le
-veilleur a répondu N ». Aucune de ses requêtes ne les reçoit sous la limite.
+La console 0.1.1 ne connaît pas 400, 409 `cursor_expired`, 415 ni 429 : elle
+les affiche comme « le veilleur a répondu N ». Aucune de ses requêtes ne les
+reçoit sous la limite : elle n'envoie ni `limit` ni `cursor`, et ne lit pas
+les routes `logs`.
 
 ## Base de données
 
@@ -446,3 +561,8 @@ L'API ne crée jamais la base et ne la migre pas : `vigie serve` applique les
 migrations au démarrage, `vigie device pair` aussi. Tant que la base est
 absente ou antérieure au schéma 6 (appareils au schéma 5, résultat des
 passages au schéma 6), toute requête reçoit 401.
+
+Avant le schéma 11 (instantanés de l'analyse des logs), `logs` répond
+`{"analysis": null}` et `logs/ips` une liste vide. Le schéma 12 ajoute
+l'index `(site, closed_at, id)` des incidents clos, lu par
+`sites/{id}/incidents`.

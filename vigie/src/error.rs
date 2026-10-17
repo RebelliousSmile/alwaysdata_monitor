@@ -20,9 +20,14 @@ use serde::Serialize;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ErrorCode {
+    /// Paramètre de requête invalide : `limit` hors bornes, curseur illisible.
+    BadRequest,
     Unauthorized,
     NotFound,
     Conflict,
+    /// Curseur d'un instantané purgé depuis : le client reprend au début.
+    /// Distinct de `conflict`, qui refuse une écriture.
+    CursorExpired,
     TooManyRequests,
     UnsupportedMediaType,
     Internal,
@@ -31,9 +36,10 @@ pub enum ErrorCode {
 impl ErrorCode {
     pub fn status(self) -> StatusCode {
         match self {
+            Self::BadRequest => StatusCode::BAD_REQUEST,
             Self::Unauthorized => StatusCode::UNAUTHORIZED,
             Self::NotFound => StatusCode::NOT_FOUND,
-            Self::Conflict => StatusCode::CONFLICT,
+            Self::Conflict | Self::CursorExpired => StatusCode::CONFLICT,
             Self::TooManyRequests => StatusCode::TOO_MANY_REQUESTS,
             Self::UnsupportedMediaType => StatusCode::UNSUPPORTED_MEDIA_TYPE,
             Self::Internal => StatusCode::INTERNAL_SERVER_ERROR,
@@ -44,9 +50,11 @@ impl ErrorCode {
     /// pourquoi un jeton ou un code est refusé.
     pub fn message(self) -> &'static str {
         match self {
+            Self::BadRequest => "requête invalide",
             Self::Unauthorized => "authentification requise",
             Self::NotFound => "introuvable",
             Self::Conflict => "conflit avec l'état actuel",
+            Self::CursorExpired => "curseur expiré, reprendre au début",
             Self::TooManyRequests => "trop de requêtes",
             Self::UnsupportedMediaType => "type de contenu non pris en charge",
             Self::Internal => "erreur interne",
@@ -60,9 +68,11 @@ impl ErrorCode {
 pub struct ApiError(pub ErrorCode);
 
 impl ApiError {
+    pub const BAD_REQUEST: Self = Self(ErrorCode::BadRequest);
     pub const UNAUTHORIZED: Self = Self(ErrorCode::Unauthorized);
     pub const NOT_FOUND: Self = Self(ErrorCode::NotFound);
     pub const CONFLICT: Self = Self(ErrorCode::Conflict);
+    pub const CURSOR_EXPIRED: Self = Self(ErrorCode::CursorExpired);
     pub const TOO_MANY_REQUESTS: Self = Self(ErrorCode::TooManyRequests);
     pub const UNSUPPORTED_MEDIA_TYPE: Self = Self(ErrorCode::UnsupportedMediaType);
     pub const INTERNAL: Self = Self(ErrorCode::Internal);
@@ -152,6 +162,20 @@ mod tests {
             response.extensions().get::<ApiError>(),
             Some(&ApiError::TOO_MANY_REQUESTS)
         );
+    }
+
+    #[tokio::test]
+    async fn an_expired_cursor_is_a_409_with_its_own_code() {
+        let response = ApiError::CURSOR_EXPIRED.render("abc");
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["error"]["code"], "cursor_expired");
+        let response = ApiError::BAD_REQUEST.render("abc");
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["error"]["code"], "bad_request");
     }
 
     #[test]
