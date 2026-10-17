@@ -448,6 +448,56 @@ pub fn run_components(
     Ok(out)
 }
 
+/// Composant d'une page de l'API : jamais son chemin.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ComponentRow {
+    pub source: Source,
+    pub base: String,
+    pub version: Option<String>,
+    pub scope: String,
+    pub groups: i64,
+    pub severity: Option<Severity>,
+}
+
+/// Composants des runs donnés (un par source au plus), triés par gravité,
+/// purl, source puis chemin : `limit` à partir du rang `offset`. Les runs ne
+/// changent jamais en place : le rang est stable tant qu'ils sont actifs.
+pub fn components_page(
+    store: &Store,
+    site: &str,
+    runs: &[(Source, i64)],
+    offset: usize,
+    limit: usize,
+) -> anyhow::Result<Vec<ComponentRow>> {
+    let run = |s: Source| runs.iter().find(|(r, _)| *r == s).map_or(-1, |(_, id)| *id);
+    let mut stmt = store.conn.prepare_cached(
+        "SELECT source, base, version, scope, groups, severity FROM vuln_match_components
+         WHERE site = ?1 AND ((source = 'agent' AND run = ?2) OR (source = 'ci' AND run = ?3))
+         ORDER BY rank DESC, base, source, path LIMIT ?4 OFFSET ?5",
+    )?;
+    let rows = stmt.query_map(
+        params![
+            site,
+            run(Source::Agent),
+            run(Source::Ci),
+            i64::try_from(limit).unwrap_or(i64::MAX),
+            i64::try_from(offset).unwrap_or(i64::MAX)
+        ],
+        |r| {
+            let severity: Option<String> = r.get(5)?;
+            Ok(ComponentRow {
+                source: source_name(&r.get::<_, String>(0)?)?,
+                base: r.get(1)?,
+                version: r.get(2)?,
+                scope: r.get(3)?,
+                groups: r.get(4)?,
+                severity: severity.as_deref().and_then(Severity::parse),
+            })
+        },
+    )?;
+    Ok(rows.collect::<rusqlite::Result<_>>()?)
+}
+
 /// Dérogations non retirées d'un site.
 pub fn waivers(conn: &Connection, site: &str) -> anyhow::Result<Vec<Waiver>> {
     let mut stmt = conn.prepare_cached(
