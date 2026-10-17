@@ -15,7 +15,7 @@ status: pending
     │   └── vulns/
     │       ├── mod.rs                 ✅ rôle du module, renvoi à docs/failles.md
     │       └── version/
-    │           ├── mod.rs             ✅ Scheme { Semver, Composer, Php } ; SourceEcosystem → Scheme ; Bound { Floor, At(Version) } ; parse(scheme, &str) -> Result<Version, Unparsable> ; MAX_VERSION_CHARS = 64, MAX_NUMERIC_DIGITS = 18
+    │           ├── mod.rs             ✅ Scheme { Semver, Composer, Php } ; SourceEcosystem → Scheme ; Bound { Floor, At(Version) } ; parse(scheme, &str) -> Result<Version, Unparsable> ; MAX_VERSION_CHARS = 128, MAX_NUMERIC_DIGITS = 18
     │           ├── semver.rs          ✅ semver 2.0 strict, précédence §11, préversions numériques par (longueur, lexical), build ignoré
     │           ├── php.rs             ✅ canonize() exacte de versioning.c, puis Token { Num, Special(rank) } et compare_tokens()
     │           └── composer.rs        ✅ normalize() de VersionParser (composer/semver), jetons injectés (patch au rang pl), puis compare_tokens()
@@ -48,7 +48,7 @@ journey
   section Edge case - non analysable
     Composer dev-main, 1.x-dev, majeur à 6 chiffres hors format date, chaîne vide => Unparsable: 1: lib
     npm et Cargo 01.2.3, 1.2, v1.2.3, =1.2.3, numérique de 19 chiffres => Unparsable: 1: lib
-    PHP 1.0-bogus, 1.0-ALPHA, 1.0-patch, octets de contrôle, U+202E, 65 caractères => Unparsable: 1: lib
+    PHP 1.0-bogus, 1.0-ALPHA, 1.0-patch, octets de contrôle, U+202E, 129 caractères => Unparsable: 1: lib
     Préversion npm 1.0.0-99999999999999999999999 => analysée sans débordement: 1: lib
   section Plancher
     Bound::Floor sous toute version de chaque schéma ; parse("0") en semver => Unparsable: 1: lib
