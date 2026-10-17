@@ -2,6 +2,7 @@
   "cmp": [
     {"a": "5.9", "b": "5.9.0", "order": -1, "why": "un composant numérique restant rend la version plus grande, comme PHP"},
     {"a": "5.9", "b": "5.9", "order": 0, "why": "égalité"},
+    {"a": "1.0.0", "b": "1.0", "order": 1, "why": "version_compare(\"1.0.0\", \"1.0\") vaut 1 : une borne last_affected 1.0 n'inclut pas 1.0.0 (limite de la sémantique PHP)"},
     {"a": "6.4-beta1", "b": "6.4-RC1", "order": -1, "why": "beta < RC"},
     {"a": "6.4-RC1", "b": "6.4", "order": -1, "why": "un mot restant (RC) est sous #"},
     {"a": "6.4", "b": "6.4.1", "order": -1, "why": "composant restant numérique"},

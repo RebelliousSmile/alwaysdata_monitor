@@ -1,0 +1,5 @@
+Fixtures hostiles fictives, écrites pour Vigie. Nom de fichier :
+`<issue>-<raison>-<détail>.json`, où l'issue est `drop` (faille non gardée,
+pour la raison nommée), `keep` (faille gardée, raison comptée) ou `texte`
+(texte hostile assaini, sans écart). Identifiants, paquets et URL
+(example.org) inventés. Aucune donnée réelle.

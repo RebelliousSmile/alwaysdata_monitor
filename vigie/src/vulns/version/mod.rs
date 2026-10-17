@@ -31,7 +31,10 @@ pub const MAX_VERSION_CHARS: usize = 128;
 pub const MAX_NUMERIC_DIGITS: usize = 18;
 
 /// Comparateur de versions.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
+#[serde(rename_all = "lowercase")]
 pub enum Scheme {
     Semver,
     Composer,

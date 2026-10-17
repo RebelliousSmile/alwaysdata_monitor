@@ -1,0 +1,5 @@
+Fixtures fictives, écrites pour Vigie : identifiants, paquets (exemple/*,
+@exemple/*, prestashop/exemplemodule, wpackagist-plugin/exemple-plugin) et
+URL (example.org) inventés. Aucune donnée réelle, aucune donnée Wordfence ni
+Friends-Of-Presta (leurs formes sont imitées par `Draft` dans
+tests/vulns_model.rs).

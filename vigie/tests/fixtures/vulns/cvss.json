@@ -1,0 +1,38 @@
+{
+  "v3": [
+    {"vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N", "tenths": 61, "why": "FIRST, CVSS v3.1 Examples, https://www.first.org/cvss/v3.1/examples, CVE-2013-1937 (phpMyAdmin)"},
+    {"vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:C/C:L/I:L/A:N", "tenths": 64, "why": "FIRST, CVSS v3.1 Examples, https://www.first.org/cvss/v3.1/examples, CVE-2013-0375 (MySQL)"},
+    {"vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:R/S:U/C:L/I:N/A:N", "tenths": 31, "why": "FIRST, CVSS v3.1 Examples, https://www.first.org/cvss/v3.1/examples, CVE-2014-3566 (SSLv3 POODLE)"},
+    {"vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:C/C:H/I:H/A:H", "tenths": 99, "why": "FIRST, CVSS v3.1 Examples, https://www.first.org/cvss/v3.1/examples, CVE-2012-1516 (VMware)"},
+    {"vector": "CVSS:3.1/AV:L/AC:L/PR:H/UI:N/S:U/C:L/I:L/A:L", "tenths": 42, "why": "FIRST, CVSS v3.1 Examples, https://www.first.org/cvss/v3.1/examples, CVE-2009-0783 (Tomcat)"},
+    {"vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:H", "tenths": 88, "why": "FIRST, CVSS v3.1 Examples, https://www.first.org/cvss/v3.1/examples, CVE-2012-0384 (Cisco IOS)"},
+    {"vector": "CVSS:3.1/AV:L/AC:L/PR:N/UI:R/S:U/C:H/I:H/A:H", "tenths": 78, "why": "FIRST, CVSS v3.1 Examples, https://www.first.org/cvss/v3.1/examples, CVE-2015-1098 (iWork)"},
+    {"vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N", "tenths": 75, "why": "FIRST, CVSS v3.1 Examples, https://www.first.org/cvss/v3.1/examples, CVE-2014-0160 (Heartbleed)"},
+    {"vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H", "tenths": 98, "why": "FIRST, CVSS v3.1 Examples, https://www.first.org/cvss/v3.1/examples, CVE-2014-6271 (Shellshock)"},
+    {"vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:C/C:N/I:H/A:N", "tenths": 68, "why": "FIRST, CVSS v3.1 Examples, https://www.first.org/cvss/v3.1/examples, CVE-2008-1447 (DNS)"},
+    {"vector": "CVSS:3.1/AV:P/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H", "tenths": 68, "why": "FIRST, CVSS v3.1 Examples, https://www.first.org/cvss/v3.1/examples, CVE-2014-2005 (Sophos)"},
+    {"vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:L/I:N/A:N", "tenths": 58, "why": "FIRST, CVSS v3.1 Examples, https://www.first.org/cvss/v3.1/examples, CVE-2010-0467 (Joomla)"},
+    {"vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:N", "tenths": 0, "why": "aucun impact : 0"},
+    {"vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H", "tenths": 100, "why": "plafond 10,0"},
+    {"vector": "CVSS:3.0/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H", "tenths": 98, "why": "v3.0 calculé par la formule 3.1 (RUSTSEC-2017-0004)"},
+    {"vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/E:P/RL:O/RC:C", "tenths": 98, "why": "métriques temporelles admises, ignorées"},
+    {"vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/CR:H/MAV:L", "tenths": 98, "why": "métriques environnementales admises, ignorées"}
+  ],
+  "v4_valid": [
+    {"vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:L/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N", "why": "v4 validé, jamais calculé"},
+    {"vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N/E:A", "why": "v4 validé, jamais calculé"},
+    {"vector": "CVSS:4.0/AV:L/AC:H/AT:P/PR:H/UI:A/VC:L/VI:N/VA:N/SC:L/SI:H/SA:N/U:Amber", "why": "v4 validé, jamais calculé"}
+  ],
+  "invalid": [
+    {"vector": "CVSS:3.1/AV:N/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H", "why": "métrique répétée"},
+    {"vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H", "why": "métrique de base absente"},
+    {"vector": "CVSS:3.1/AV:X/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H", "why": "valeur hors domaine"},
+    {"vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/ZZ:A", "why": "métrique inconnue"},
+    {"vector": "CVSS:2.0/AV:N/AC:L/Au:N/C:P/I:P/A:P", "why": "version 2 hors modèle"},
+    {"vector": "AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H", "why": "préfixe absent"},
+    {"vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H/", "why": "barre finale"},
+    {"vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:L/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N", "why": "v4 sans SA"},
+    {"vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:L/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N/SA:N", "why": "v4 métrique répétée"},
+    {"vector": "cvss:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H", "why": "préfixe en minuscules"}
+  ]
+}

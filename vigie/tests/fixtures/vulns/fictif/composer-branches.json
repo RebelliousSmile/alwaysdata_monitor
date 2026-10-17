@@ -1,0 +1,120 @@
+{
+ "schema_version": "1.9.0",
+ "id": "GHSA-ex01-ex01-ex01",
+ "modified": "2026-10-01T00:00:00Z",
+ "published": "2026-09-01T00:00:00Z",
+ "summary": "Faille fictive de test",
+ "affected": [
+  {
+   "package": {
+    "ecosystem": "Packagist",
+    "name": "exemple/paquet"
+   },
+   "ranges": [
+    {
+     "type": "ECOSYSTEM",
+     "events": [
+      {
+       "introduced": "1.0.0"
+      },
+      {
+       "fixed": "1.2.1"
+      }
+     ]
+    }
+   ],
+   "versions": [
+    "1.0.0",
+    "1.1.0",
+    "1.2.0",
+    "0.9.0"
+   ]
+  },
+  {
+   "package": {
+    "ecosystem": "Packagist",
+    "name": "exemple/paquet"
+   },
+   "ranges": [
+    {
+     "type": "ECOSYSTEM",
+     "events": [
+      {
+       "introduced": "2.0.0"
+      },
+      {
+       "fixed": "2.0.3"
+      }
+     ]
+    }
+   ],
+   "versions": [
+    "2.0.0",
+    "2.0.1",
+    "2.0.2"
+   ]
+  },
+  {
+   "package": {
+    "ecosystem": "PyPI",
+    "name": "exemple"
+   },
+   "ranges": [
+    {
+     "type": "ECOSYSTEM",
+     "events": [
+      {
+       "introduced": "0"
+      },
+      {
+       "fixed": "1.0"
+      }
+     ]
+    }
+   ]
+  }
+ ],
+ "aliases": [
+  "cve-2026-0001"
+ ],
+ "severity": [
+  {
+   "type": "CVSS_V3",
+   "score": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
+  },
+  {
+   "type": "CVSS_V4",
+   "score": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N"
+  }
+ ],
+ "references": [
+  {
+   "type": "PACKAGE",
+   "url": "https://example.org/paquet"
+  },
+  {
+   "type": "WEB",
+   "url": "https://example.org/web"
+  },
+  {
+   "type": "WEB",
+   "url": "javascript:alert(1)"
+  },
+  {
+   "type": "FIX",
+   "url": "https://user:pass@example.org/fix"
+  },
+  {
+   "type": "ADVISORY",
+   "url": "https://example.org/avis"
+  }
+ ],
+ "database_specific": {
+  "severity": "HIGH",
+  "cwe_ids": [
+   "CWE-79",
+   "CWE-79",
+   "pas-un-cwe"
+  ]
+ }
+}

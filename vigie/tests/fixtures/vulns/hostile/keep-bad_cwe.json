@@ -1,0 +1,42 @@
+{
+ "schema_version": "1.9.0",
+ "id": "GHSA-ex33-ex33-ex33",
+ "modified": "2026-10-01T00:00:00Z",
+ "published": "2026-09-01T00:00:00Z",
+ "summary": "Faille fictive de test",
+ "affected": [
+  {
+   "package": {
+    "ecosystem": "Packagist",
+    "name": "exemple/paquet"
+   },
+   "ranges": [
+    {
+     "type": "ECOSYSTEM",
+     "events": [
+      {
+       "introduced": "0"
+      }
+     ]
+    }
+   ]
+  }
+ ],
+ "database_specific": {
+  "cwe_ids": [
+   "CWE-1234567",
+   "XSS",
+   "CWE-1",
+   "CWE-2",
+   "CWE-3",
+   "CWE-4",
+   "CWE-5",
+   "CWE-6",
+   "CWE-7",
+   "CWE-8",
+   "CWE-9",
+   "CWE-10",
+   "CWE-11"
+  ]
+ }
+}

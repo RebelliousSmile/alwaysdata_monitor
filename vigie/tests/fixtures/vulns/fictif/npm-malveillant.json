@@ -1,0 +1,25 @@
+{
+ "schema_version": "1.9.0",
+ "id": "MAL-2026-0001",
+ "modified": "2026-10-01T00:00:00Z",
+ "published": "2026-09-01T00:00:00Z",
+ "summary": "Paquet malveillant fictif",
+ "affected": [
+  {
+   "package": {
+    "ecosystem": "npm",
+    "name": "@exemple/malveillant"
+   },
+   "ranges": [
+    {
+     "type": "SEMVER",
+     "events": [
+      {
+       "introduced": "0"
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}
