@@ -326,6 +326,22 @@ Seul `composer` passe en minuscules ; `npm` et `cargo` sont comparés tels
 quels. Les types `wordpress` et `prestashop` ne sont pas enregistrés : ces
 conventions sont à revoir si la spécification officialise autre chose.
 
+**Grammaire commune** (un seul module `vigie/src/vulns/purl.rs`, écrit en F1 et
+importé par l'inventaire F5 ; un seul fichier de vecteurs partagé par le Rust
+et l'agent PHP) :
+
+| Élément | Grammaire | Casse |
+| --- | --- | --- |
+| slug WordPress (extension, thème) | `[A-Za-z0-9._-]{1,200}` | tel quel |
+| module PrestaShop | `[A-Za-z0-9_-]{1,64}` (règle `Validate::isModuleName` : pas de `.`) | tel quel |
+| nom Composer | `vendor/nom` de Composer, longueur ≤ 214 | minuscules |
+| nom npm, crate | définitions purl officielles | tel quel |
+| version | `[0-9A-Za-z.+_-]{1,64}` | telle quelle |
+
+Un composant hors grammaire est écarté et compté, côté agent comme côté
+veilleur ; les deux appliquent la même grammaire, si bien qu'aucun composant
+émis n'est écarté en silence à la réception.
+
 Bedrock : un site WordPress géré par Composer déclare ses extensions comme
 `wpackagist-plugin/<slug>` et ses thèmes comme `wpackagist-theme/<slug>`.
 Ces paquets sont traduits en `pkg:wordpress/plugin/<slug>` et
@@ -357,7 +373,7 @@ avec celui d'une autre extension de wordpress.org.
   CVE : une seule faille, les deux sources et leurs attributions.
 - Côté extension (F5) : dans une boutique PrestaShop, un composant Composer de
   type `prestashop-module` est remplacé par le module de même nom, avec la
-  version lue dans `modules/<x>/config.xml`, celle qui tourne réellement.
+  version du module lue d'abord dans le littéral `$this->version` de son fichier principal (`config.xml` n'est qu'un cache régénéré par PrestaShop), avec repli sur `modules/<x>/config.xml` ; un écart entre les deux est signalé.
 - Côté WordPress : voir Bedrock ci-dessus.
 - Les avis Friends-Of-Presta de catégorie `dependancies` visent des
   bibliothèques tierces embarquées dans des modules. Ces bibliothèques sont
