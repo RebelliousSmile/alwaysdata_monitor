@@ -203,12 +203,51 @@ fn listener(response: &'static str) -> (String, Arc<AtomicUsize>) {
         for stream in socket.incoming() {
             let Ok(mut stream) = stream else { continue };
             seen.fetch_add(1, Ordering::SeqCst);
-            let mut buffer = [0u8; 4096];
-            let _ = stream.read(&mut buffer);
+            read_request(&mut stream);
             let _ = stream.write_all(response.as_bytes());
+            let _ = stream.flush();
         }
     });
     (address, count)
+}
+
+/// Plafond de la requête lue par [`listener`].
+const MAX_REQUEST: usize = 8 * 1024 * 1024;
+
+/// Lit toute la requête avant de répondre : en-têtes jusqu'à `\r\n\r\n`,
+/// puis exactement `Content-Length` octets de corps (plafonnés). Sous
+/// Windows, fermer un socket aux données non lues envoie un RST, que le
+/// client reçoit avant la réponse.
+fn read_request(stream: &mut std::net::TcpStream) {
+    let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(10)));
+    let mut request = Vec::new();
+    let mut chunk = [0u8; 8192];
+    let head_end = loop {
+        if let Some(i) = request.windows(4).position(|w| w == b"\r\n\r\n") {
+            break i + 4;
+        }
+        if request.len() > MAX_REQUEST {
+            return;
+        }
+        match stream.read(&mut chunk) {
+            Ok(0) | Err(_) => return,
+            Ok(n) => request.extend_from_slice(&chunk[..n]),
+        }
+    };
+    let length = String::from_utf8_lossy(&request[..head_end])
+        .lines()
+        .filter_map(|line| line.split_once(':'))
+        .find(|(name, _)| name.trim().eq_ignore_ascii_case("content-length"))
+        .and_then(|(_, value)| value.trim().parse::<usize>().ok())
+        .unwrap_or(0)
+        .min(MAX_REQUEST);
+    let mut body = request.len() - head_end;
+    while body < length {
+        match stream.read(&mut chunk) {
+            Ok(0) | Err(_) => return,
+            Ok(n) => body += n,
+        }
+    }
 }
 
 #[test]
