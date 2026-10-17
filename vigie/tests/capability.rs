@@ -309,14 +309,13 @@ fn only_a_declared_section_opens_the_inventory() {
         capability::inventory_sources(&wp),
         [InventorySource::AgentPhp]
     );
-    // L'inventaire n'ouvre aucun contrôle en F5 et F6 : `vulns` viendra avec F7.
+    // L'inventaire n'ouvre qu'un contrôle : `vulns` (F7, #21).
     for ctx in CONTEXTS {
         let mut without = wp.clone();
         without.inventory = None;
-        assert_eq!(
-            capability::allowed_controls(&wp, &ctx),
-            capability::allowed_controls(&without, &ctx)
-        );
+        let mut expected = capability::allowed_controls(&without, &ctx);
+        expected.push(Control::Vulns);
+        assert_eq!(capability::allowed_controls(&wp, &ctx), expected);
     }
 }
 
@@ -913,7 +912,7 @@ fn a_typology_warning_closes_as_unwatched_when_the_key_is_removed() {
     let h = Harness::new(site("site-a", SiteKind::Generic, None, false), true);
     h.tick(T0 + 60);
     assert_eq!(h.open_checks(), [TYPOLOGY]);
-    assert!(h.store().remove_key("site-a").expect("retrait"));
+    assert!(h.store().remove_key("site-a", 0).expect("retrait"));
     let emails = h.tick(T0 + 120);
     assert_eq!(h.incidents()[0].close_reason, Some(CloseReason::Unwatched));
     assert_eq!(emails.len(), 1, "{emails:?}");
@@ -930,7 +929,7 @@ fn agent_incidents_close_as_unwatched_when_the_key_is_removed() {
     open.sort();
     assert_eq!(open, ["agent:critical-file", "agent:uploads-php"]);
 
-    assert!(h.store().remove_key("site-a").expect("retrait"));
+    assert!(h.store().remove_key("site-a", 0).expect("retrait"));
     let emails = h.tick(T0 + 180);
     assert!(h.open_checks().is_empty());
     for incident in h.incidents() {
@@ -961,11 +960,28 @@ fn the_logs_incident_is_kept_only_with_a_source() {
     assert_never_restored(&emails);
 }
 
+#[test]
+fn vulns_is_watched_only_with_a_declared_inventory_source() {
+    use vigie::config::{InventorySource, SiteInventory};
+    assert_eq!(Control::from_name("vulns"), Some(Control::Vulns));
+    for (kind, runtime) in KINDS {
+        for ctx in CONTEXTS {
+            let mut site = site("site-a", kind, runtime, false);
+            assert!(!capability::watched(&site, "vulns", &ctx), "{kind:?}");
+            site.inventory = Some(SiteInventory::new(&[InventorySource::Ci]));
+            assert!(capability::watched(&site, "vulns", &ctx), "{kind:?}");
+            site.inventory = Some(SiteInventory::new(&[InventorySource::AgentPhp]));
+            let php = site.effective_runtime() == Some(Runtime::Php);
+            assert_eq!(capability::watched(&site, "vulns", &ctx), php, "{kind:?}");
+        }
+    }
+}
+
 // --- Contrôles du veilleur (#16) --------------------------------------------
 
 #[test]
 fn vulns_sync_is_a_watcher_control_never_watched_for_a_site() {
-    assert_eq!(Control::ALL.len(), 14);
+    assert_eq!(Control::ALL.len(), 15);
     assert_eq!(Control::from_name("vulns-sync"), Some(Control::VulnsSync));
     for (kind, runtime) in KINDS {
         for ctx in CONTEXTS {

@@ -921,7 +921,7 @@ async fn remove_purges_and_rotate_keeps_the_inventory() {
             .is_some()
     );
 
-    assert!(h.store().remove_key("site-a").expect("retrait"));
+    assert!(h.store().remove_key("site-a", 0).expect("retrait"));
     assert_eq!(
         h.count("SELECT count(*) FROM site_inventory WHERE site = 'site-a'"),
         0

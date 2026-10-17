@@ -957,7 +957,8 @@ async fn site_handler(
                 | Control::Agent(_)
                 | Control::Logs
                 | Control::Typology
-                | Control::VulnsSync => {
+                | Control::VulnsSync
+                | Control::Vulns => {
                     if let Some(run) = run_of(name) {
                         checks.push(CheckJson::new(name, None, Some(run)));
                     }
@@ -1457,7 +1458,8 @@ async fn settings_handler(
                         | Control::Agent(_)
                         | Control::Logs
                         | Control::Typology
-                        | Control::VulnsSync => None,
+                        | Control::VulnsSync
+                        | Control::Vulns => None,
                     })
                     .collect(),
             })

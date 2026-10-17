@@ -28,6 +28,7 @@ use vigie::store::{
     SCHEMA_INCIDENTS, SCHEMA_META, Store,
 };
 use vigie::vulns::exploit::{Cve, Exploitation, ppm_text};
+use vigie::vulns::matching::store as matching_store;
 use vigie::vulns::{self, enrich_store, store as vulns_store};
 use vigie::{human_age, iso_utc, recommend, serve, tick};
 
@@ -610,7 +611,7 @@ fn site(config: &config::Config, action: SiteAction, now: i64) -> anyhow::Result
             }
             let mut store = Store::open(&config.database)?;
             store.reset_commands(&id, now, audit_key(config)?.as_ref(), "site remove")?;
-            if !store.remove_key(&id)? {
+            if !store.remove_key(&id, now)? {
                 bail!("{id} n'a pas de clé");
             }
             println!(
@@ -934,6 +935,7 @@ fn status(config: &config::Config, now: i64) -> anyhow::Result<()> {
                 "    constats écartés au dernier rapport : {dropped} (famille hors du registre des capacités ou non admise pour le site)"
             );
         }
+        print_site_vulns(store.as_ref(), site)?;
     }
     print_vulns_status(config, store.as_ref(), now)?;
     if let Some(store) = &store {
@@ -977,6 +979,22 @@ fn status(config: &config::Config, now: i64) -> anyhow::Result<()> {
     } else {
         bail!("tick en retard ou absent")
     }
+}
+
+/// Ligne « failles » d'un site surveillé par le contrôle `vulns` (#21) :
+/// rapprochement en échec, s'il l'est.
+fn print_site_vulns(store: Option<&Store>, site: &config::Site) -> anyhow::Result<()> {
+    if capability::inventory_sources(site).is_empty() {
+        return Ok(());
+    }
+    let Some(store) = store.filter(|s| matching_store::available(s).unwrap_or(false)) else {
+        return Ok(());
+    };
+    let errors = matching_store::site_errors(store, &site.id)?;
+    if errors > 0 {
+        println!("    failles : avertissement, rapprochement en échec depuis {errors} passage(s)");
+    }
+    Ok(())
 }
 
 /// Une ligne par source de `[vulns] sources` : dernière réussite, dernière
