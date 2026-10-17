@@ -91,16 +91,75 @@ impl State {
 #[serde(deny_unknown_fields)]
 pub struct NoParams {}
 
-/// Paramètres validés pour une commande, sérialisés tels quels dans
-/// l'enveloppe.
+/// Paramètres validés pour une commande sans paramètre, sérialisés tels
+/// quels dans l'enveloppe. `htaccess-*` en ont : ils sont construits par
+/// `site recommend` et `site command … htaccess-rollback` ([`HtaccessApply`],
+/// [`HtaccessRollback`]).
 pub fn params_json(kind: CommandKind) -> Option<String> {
     match kind {
         CommandKind::Ping | CommandKind::RotateKey => {
             Some(serde_json::to_string(&NoParams::default()).unwrap_or_else(|_| "{}".into()))
         }
-        // Indisponibles jusqu'à #13 : aucun paramètre accepté.
         CommandKind::HtaccessApply | CommandKind::HtaccessRollback => None,
     }
+}
+
+/// Chemin du `.htaccess` dans les empreintes de l'agent (`critical`).
+pub const HTACCESS: &str = ".htaccess";
+
+/// `htaccess-apply` (#13). `previous_sha256` : empreinte du `.htaccess` lue
+/// dans le dernier rapport (`null` : fichier absent) ; l'agent refuse si le
+/// fichier ne l'a plus. `new_sha256` : empreinte du contenu que l'agent
+/// calcule ; `null` demande ce calcul seulement, sans rien écrire (le
+/// veilleur ne connaît que des empreintes et ne peut pas la calculer).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HtaccessApply {
+    pub block: String,
+    pub previous_sha256: Option<String>,
+    pub new_sha256: Option<String>,
+}
+
+/// `htaccess-rollback` (#13) : remet la copie privée de l'agent si elle a
+/// `prev_sha256` (`null` : le fichier n'existait pas, il est supprimé) et si
+/// le `.htaccess` a encore `expected_current_sha256`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HtaccessRollback {
+    pub expected_current_sha256: Option<String>,
+    pub prev_sha256: Option<String>,
+}
+
+/// Empreintes du `.htaccess` qu'une commande `htaccess-*` peut laisser :
+/// `htaccess-apply` le nouveau contenu ou, après un retour automatique,
+/// l'ancien ; `htaccess-rollback` la copie remise ou, refusé, l'actuel. Un
+/// calcul seul (`new_sha256` nul) n'écrit rien : aucune.
+pub fn htaccess_expected(kind: CommandKind, params: &str) -> Vec<String> {
+    match kind {
+        CommandKind::HtaccessApply => match serde_json::from_str::<HtaccessApply>(params) {
+            Ok(p) if p.new_sha256.is_some() => {
+                p.new_sha256.into_iter().chain(p.previous_sha256).collect()
+            }
+            _ => Vec::new(),
+        },
+        CommandKind::HtaccessRollback => serde_json::from_str::<HtaccessRollback>(params)
+            .map(|p| {
+                p.prev_sha256
+                    .into_iter()
+                    .chain(p.expected_current_sha256)
+                    .collect()
+            })
+            .unwrap_or_default(),
+        CommandKind::Ping | CommandKind::RotateKey => Vec::new(),
+    }
+}
+
+/// SHA-256 en hexadécimal minuscule.
+pub fn is_sha256(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
 /// Issue d'une commande, déclarée par l'agent.
@@ -135,6 +194,13 @@ pub struct ResultData {
     /// `vigie-rotate-v1\n<site>\n<id>\n<nouvelle clé>`, base64.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub proof: Option<String>,
+    /// `htaccess-*` : empreinte du `.htaccess` après la commande, quelle
+    /// que soit son issue (absente : fichier absent).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub current_sha256: Option<String>,
+    /// `htaccess-apply` en calcul seul : empreinte du contenu calculé.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub new_sha256: Option<String>,
 }
 
 /// « Imprimable » au sens du protocole : aucun caractère de contrôle.

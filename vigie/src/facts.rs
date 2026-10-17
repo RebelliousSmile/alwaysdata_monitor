@@ -30,6 +30,21 @@ pub fn check_name() -> String {
 ///   fichier restauré différent est signalé.
 /// - Chemin de la référence que l'agent ne rapporte plus : conservé.
 pub fn compare(site: &str, baseline: &Files, files: &Files) -> (Vec<Finding>, Files) {
+    compare_admitting(site, baseline, files, &BTreeMap::new())
+}
+
+/// Comme [`compare`], mais une empreinte de `admitted` (chemin → empreintes
+/// attendues) ne fait ni constat ni référence : celles d'une commande
+/// `htaccess-*` servie ou d'issue inconnue (#13). Le rapport part avant le
+/// retrait qui porte le résultat : sans elle, le rapport qui porte le
+/// nouveau `.htaccess` ouvrirait l'incident avant le résultat `ok`. La
+/// référence ne suit qu'au résultat (`command::pull`).
+pub fn compare_admitting(
+    site: &str,
+    baseline: &Files,
+    files: &Files,
+    admitted: &BTreeMap<String, Vec<String>>,
+) -> (Vec<Finding>, Files) {
     let mut findings = Vec::new();
     let mut next = baseline.clone();
     for (path, hash) in files {
@@ -37,6 +52,9 @@ pub fn compare(site: &str, baseline: &Files, files: &Files) -> (Vec<Finding>, Fi
             next.entry(path.clone()).or_insert(None);
             continue;
         };
+        if admitted.get(path).is_some_and(|ok| ok.contains(hash)) {
+            continue;
+        }
         match baseline.get(path) {
             Some(Some(expected)) if expected != hash => findings.push(Finding::new(
                 site,
@@ -125,6 +143,32 @@ mod tests {
         let (findings, next) = compare("site-a", &base, &files(&[(".user.ini", Some(A))]));
         assert!(findings.is_empty());
         assert_eq!(next, files(&[(".user.ini", Some(A))]));
+    }
+
+    #[test]
+    fn an_admitted_hash_neither_warns_nor_moves_the_baseline() {
+        let base = files(&[(".htaccess", Some(A))]);
+        let admitted = BTreeMap::from([(".htaccess".to_owned(), vec![B.to_owned()])]);
+        let (findings, next) = compare_admitting(
+            "site-a",
+            &base,
+            &files(&[(".htaccess", Some(B))]),
+            &admitted,
+        );
+        assert!(findings.is_empty());
+        assert_eq!(next, base);
+        let other = "0".repeat(64);
+        let (findings, _) = compare_admitting(
+            "site-a",
+            &base,
+            &files(&[(".htaccess", Some(&other))]),
+            &admitted,
+        );
+        assert_eq!(
+            findings.len(),
+            1,
+            "une empreinte hors des attendues l'ouvre"
+        );
     }
 
     #[test]
