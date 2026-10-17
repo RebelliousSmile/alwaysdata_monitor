@@ -1,0 +1,39 @@
+---
+layout: post
+title: "[CVE-2099-0010] Score dans la puce"
+categories: modules
+author:
+- Auteur fictif
+- Agence fictive
+meta: "CVE,PrestaShop,exemple"
+---
+
+# Description
+
+Texte fictif de l'avis, jamais stocké.
+
+## Summary
+
+* **CVE ID**: [CVE-2099-0010](https://example.org/cve/CVE-2099-0010)
+* **Published at**: 2099-01-23
+* **Platform**: PrestaShop
+* **Product**: exemplepuce
+* **Impacted release**: v1.2.3
+* **Product author**: Éditeur fictif
+* **Weakness**: [CWE-89](https://example.org/cwe/CWE-89)
+* **Severity**: high (7.0)
+
+## Description
+
+Texte fictif.
+
+## CVSS base metrics
+
+| Base metric | Value |
+|--|--|
+| **Attack vector** | network |
+| **Vector string** | CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H |
+
+## Links
+
+* [Éditeur fictif](https://example.org/editeur)

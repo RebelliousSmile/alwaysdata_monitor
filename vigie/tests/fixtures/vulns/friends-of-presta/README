@@ -1,0 +1,22 @@
+Avis fictifs, de même structure que les fichiers `_posts/` du dépôt
+friends-of-presta/security-advisories (docs/failles.md, « Friends-Of-Presta ») :
+aucun avis réel.
+
+- modules inventés (exemplemodule, autremodule, modulelibre…) ;
+- CVE en CVE-2099-…, liens en https://example.org/… ;
+- en-tête YAML, section `## Summary`, `## CVSS base metrics` et ligne
+  `**Vector string**` comme dans un vrai avis.
+
+_posts/ : avis fictifs (module, deux modules, noyau, dependancies, quatre
+composants, plages libres variées, nom de fichier long, titre piégé).
+
+hostile/ : un avis par cas ; le nom dit l'issue attendue : `drop-<raison>-…`
+(faille écartée, raison comptée) ou `keep-<raison>-…` (faille gardée, raison
+comptée).
+
+release.json : vecteurs de la grammaire fermée de « Impacted release »
+(`[{"in", "out" | null, "why"}]`, `out` en événements OSV).
+
+L'archive `.tar.gz` est construite par le test à partir de ces fichiers
+(en-tête pax global avec une empreinte de commit inventée) : aucune archive
+n'est commitée.

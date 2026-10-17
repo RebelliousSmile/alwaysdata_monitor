@@ -25,7 +25,11 @@
 //! `bad_published` (date de publication illisible alors qu'un repli fournit
 //! `modified`, faille gardée) ; `empty_copyrights`, `no_copyrights`,
 //! `attribution_overflow` (mention Wordfence vide, absente ou trop longue,
-//! remplacée par la mention fixe, faille gardée).
+//! remplacée par la mention fixe, faille gardée) ; Friends-Of-Presta :
+//! `bad_front_matter` (en-tête YAML hors de la grammaire fermée) et
+//! `unknown_category` (catégorie absente ou inconnue), failles perdues ;
+//! `bad_archive_member` (membre de l'archive ignoré : chemin absolu ou en
+//! `..`, lien, périphérique, nom trop long).
 
 use std::collections::BTreeMap;
 
@@ -101,6 +105,12 @@ pub enum Reason {
     NoCopyrights,
     /// Wordfence : mention de plus de 2 000 caractères, mention fixe.
     AttributionOverflow,
+    /// Friends-Of-Presta : en-tête YAML hors de la grammaire fermée.
+    BadFrontMatter,
+    /// Friends-Of-Presta : catégorie absente ou inconnue.
+    UnknownCategory,
+    /// Friends-Of-Presta : membre de l'archive ignoré.
+    BadArchiveMember,
 }
 
 impl Reason {
@@ -131,6 +141,9 @@ impl Reason {
             Self::EmptyCopyrights => "empty_copyrights",
             Self::NoCopyrights => "no_copyrights",
             Self::AttributionOverflow => "attribution_overflow",
+            Self::BadFrontMatter => "bad_front_matter",
+            Self::UnknownCategory => "unknown_category",
+            Self::BadArchiveMember => "bad_archive_member",
         }
     }
 
@@ -148,7 +161,9 @@ impl Reason {
             | Self::DuplicateId
             | Self::NoAffected
             | Self::BadEntryName
-            | Self::BadRecord => true,
+            | Self::BadRecord
+            | Self::BadFrontMatter
+            | Self::UnknownCategory => true,
             Self::Withdrawn
             | Self::NoAffectedOutOfScope
             | Self::BadPurl
@@ -165,12 +180,13 @@ impl Reason {
             | Self::BadPublished
             | Self::EmptyCopyrights
             | Self::NoCopyrights
-            | Self::AttributionOverflow => false,
+            | Self::AttributionOverflow
+            | Self::BadArchiveMember => false,
         }
     }
 
     /// Toutes les raisons, dans l'ordre d'affichage.
-    pub const ALL: [Reason; 25] = [
+    pub const ALL: [Reason; 28] = [
         Self::TooLarge,
         Self::BadJson,
         Self::BadId,
@@ -196,6 +212,9 @@ impl Reason {
         Self::EmptyCopyrights,
         Self::NoCopyrights,
         Self::AttributionOverflow,
+        Self::BadFrontMatter,
+        Self::UnknownCategory,
+        Self::BadArchiveMember,
     ];
 }
 
@@ -1163,7 +1182,9 @@ mod tests {
                 "duplicate_id",
                 "no_affected",
                 "bad_entry_name",
-                "bad_record"
+                "bad_record",
+                "bad_front_matter",
+                "unknown_category"
             ]
         );
         for r in Reason::ALL {
