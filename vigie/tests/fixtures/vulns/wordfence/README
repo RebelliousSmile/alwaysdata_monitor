@@ -1,0 +1,20 @@
+Données fictives, de même structure que le flux Wordfence Intelligence v3
+`production` (docs/failles.md, « Wordfence Intelligence v3 ») : aucun
+enregistrement réel.
+
+- UUID visiblement fictifs (00000000-0000-4000-8000-0000000000NN) ;
+- extensions et thèmes inventés (exemple-plugin, exemple-theme…) ;
+- CVE en CVE-2099-…, liens en https://example.org/… ;
+- `copyrights` de même forme que la source, au nom d'un titulaire inventé
+  (« Exemple Intelligence SARL »), jamais la mention réelle de Defiant ni
+  celle de MITRE.
+
+production.json : flux fictif complet (extension, thème, noyau à 40
+branches, informational, sans correctif, borne basse exclusive, joker,
+champs vides, mention vide ou absente, titre piégé).
+
+hostile/ : un flux par cas ; le nom dit l'issue attendue :
+`drop-<raison>-…` (faille écartée, raison comptée), `keep-<raison>-…`
+(faille gardée, raison comptée), `stream-…` (erreur de flux, chargement
+abandonné). Les cas trop gros pour être commités (valeur de 5 Mio,
+257 libellés, mention de 2 001 caractères) sont construits par le test.
