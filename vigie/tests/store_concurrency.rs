@@ -385,8 +385,9 @@ fn a_vulns_load_in_contention_with_serve_tick_and_a_reader() {
     use std::sync::atomic::{AtomicBool, Ordering};
 
     use vigie::clock::SystemClock;
+    use vigie::vulns::advisory::Tally;
     use vigie::vulns::purl::Purl;
-    use vigie::vulns::store::{Load, VULN_BATCH, active_count, match_purl};
+    use vigie::vulns::store::{LEASE, Load, SyncMeta, VULN_BATCH, active_count, match_purl};
 
     const ADVISORIES: usize = 20_000;
     let dir = tempfile::tempdir().expect("tempdir");
@@ -410,14 +411,14 @@ fn a_vulns_load_in_contention_with_serve_tick_and_a_reader() {
             let mut store = Store::open(&path)?;
             start.wait();
             let clock = SystemClock;
-            let mut load = Load::begin(&mut store, vulns_data::SOURCE, &clock)?;
+            let mut load = Load::begin(&mut store, vulns_data::SOURCE, &clock, LEASE)?;
             let mut slowest = Duration::ZERO;
             for chunk in advisories.chunks(VULN_BATCH) {
                 let t = Instant::now();
                 load.push(chunk)?;
                 slowest = slowest.max(t.elapsed());
             }
-            let committed = load.commit(None)?;
+            let committed = load.commit(&Tally::default(), &SyncMeta::default())?;
             done.store(true, Ordering::SeqCst);
             Ok((committed.entries as usize, slowest))
         })

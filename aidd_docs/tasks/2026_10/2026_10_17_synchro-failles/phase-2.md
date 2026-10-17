@@ -1,5 +1,5 @@
 ---
-status: pending
+status: done
 ---
 
 # Instruction: Cadre de synchronisation, source OSV, état par source et vigie vulns sync

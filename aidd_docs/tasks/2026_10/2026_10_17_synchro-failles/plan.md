@@ -1,6 +1,6 @@
 ---
 objective: "Le veilleur synchronise chaque jour, par un timer systemd distinct de tick, les exports OSV.dev Packagist, npm et crates.io dans la base de failles de F1 : téléchargement HTTPS vers des hôtes codés en dur, conditionnel (ETag, Last-Modified) et borné (taille compressée et décompressée, entrées, durée, disque), lecture d'un zip par un lecteur strict sans rien extraire sur le disque, chargement par générations sous bail de F1, empreinte SHA-256 inchangée → aucune génération écrite ; un échec ou un dump hostile laisse la base précédente en service, et une source sans synchronisation réussie depuis plus de 3 jours ouvre l'avertissement vulns-sync/<source>, déclaré au registre des capacités."
-status: pending
+status: done
 issue_number: 16
 ---
 

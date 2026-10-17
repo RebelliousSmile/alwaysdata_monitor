@@ -1,0 +1,89 @@
+[
+  {
+    "key": "node_modules/paquet",
+    "entry": {
+      "version": "1.2.0",
+      "resolved": "https://registry.npmjs.org/paquet/-/paquet-1.2.0.tgz"
+    },
+    "out": "pkg:npm/paquet@1.2.0",
+    "why": "sans name : nom tiré de la clé"
+  },
+  {
+    "key": "node_modules/@exemple/paquet",
+    "entry": {
+      "version": "2.0.0",
+      "resolved": "https://registry.npmjs.org/@exemple/paquet/-/paquet-2.0.0.tgz"
+    },
+    "out": "pkg:npm/%40exemple/paquet@2.0.0",
+    "why": "scope tiré de la clé, @ encodé"
+  },
+  {
+    "key": "node_modules/string-width-cjs",
+    "entry": {
+      "name": "string-width",
+      "version": "4.2.3",
+      "resolved": "https://registry.npmjs.org/string-width/-/string-width-4.2.3.tgz"
+    },
+    "out": "pkg:npm/string-width@4.2.3",
+    "why": "alias simple : name l'emporte sur la clé"
+  },
+  {
+    "key": "node_modules/mon-alias",
+    "entry": {
+      "name": "@exemple/vrai",
+      "version": "3.1.0",
+      "resolved": "https://registry.npmjs.org/@exemple/vrai/-/vrai-3.1.0.tgz"
+    },
+    "out": "pkg:npm/%40exemple/vrai@3.1.0",
+    "why": "alias scopé : name = @scope/vrai"
+  },
+  {
+    "key": "node_modules/a/node_modules/b-alias",
+    "entry": {
+      "name": "b-vrai",
+      "version": "0.2.0",
+      "resolved": "https://registry.npmjs.org/b-vrai/-/b-vrai-0.2.0.tgz"
+    },
+    "out": "pkg:npm/b-vrai@0.2.0",
+    "why": "alias imbriqué"
+  },
+  {
+    "key": "node_modules/a/node_modules/Casse-Gardee",
+    "entry": {
+      "version": "1.0.0",
+      "resolved": "https://registry.npmjs.org/Casse-Gardee/-/Casse-Gardee-1.0.0.tgz"
+    },
+    "out": "pkg:npm/Casse-Gardee@1.0.0",
+    "why": "imbriqué sans name : après le dernier node_modules/, casse gardée"
+  },
+  {
+    "key": "node_modules/mauvais-alias",
+    "entry": {
+      "name": "nom invalide",
+      "version": "1.0.0",
+      "resolved": "https://registry.npmjs.org/nom-invalide/-/nom-invalide-1.0.0.tgz"
+    },
+    "out": null,
+    "why": "name hors grammaire"
+  },
+  {
+    "key": "node_modules/alias-point",
+    "entry": {
+      "name": ".cache",
+      "version": "1.0.0",
+      "resolved": "https://registry.npmjs.org/cache/-/cache-1.0.0.tgz"
+    },
+    "out": null,
+    "why": "name commençant par un point"
+  },
+  {
+    "key": "node_modules/version-libre",
+    "entry": {
+      "name": "paquet",
+      "version": "1.0.0~rc",
+      "resolved": "https://registry.npmjs.org/paquet/-/paquet-1.0.0.tgz"
+    },
+    "out": "pkg:npm/paquet",
+    "why": "version hors grammaire : purl sans version"
+  }
+]

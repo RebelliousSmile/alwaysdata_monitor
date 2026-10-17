@@ -10,6 +10,14 @@
 //! - Chaque **commande** ([`CommandKind`]) déclare les runtimes qui
 //!   l'admettent ; un site sans runtime (`generic` non déclaré) n'en admet
 //!   aucune.
+//! - L'**inventaire** des composants (#19) : [`inventory_source`] ouvre
+//!   `/r/v1/inventory` et sera la condition d'existence du contrôle `vulns`
+//!   (F7) ; [`inventory_ecosystems`] fixe les écosystèmes purl admis selon le
+//!   CMS du site.
+//! - Les **contrôles du veilleur** (`vulns-sync`, #16) ne visent aucun site :
+//!   jamais surveillés pour un site de la configuration, ils le sont pour le
+//!   pseudo-site réservé [`WATCHER_SITE`], selon la configuration du
+//!   veilleur ([`watched_by_watcher`]).
 //!
 //! Les listes sont fermées et codées en dur, par des `match` sans joker : une
 //! variante nouvelle oblige à décider, et ajouter un contrôle, une famille ou
@@ -21,8 +29,9 @@
 use std::fmt;
 
 use crate::checks::CheckKind;
-use crate::config::{Runtime, Site, SiteKind};
+use crate::config::{Config, InventorySource, Runtime, Site, SiteKind};
 use crate::finding::{Finding, Severity};
+use crate::vulns::purl::PurlType;
 
 const ALL_CMS: &[SiteKind] = &[SiteKind::Generic, SiteKind::Wordpress, SiteKind::Prestashop];
 
@@ -100,6 +109,9 @@ pub enum Needs {
     LogSource,
     /// Agent enregistré sur un site dont le runtime effectif n'est pas `php`.
     AgentWithoutPhp,
+    /// Contrôle du veilleur lui-même : jamais pour un site de la
+    /// configuration, seulement pour [`WATCHER_SITE`].
+    Watcher,
 }
 
 /// Ce que le veilleur sait d'un site hors de sa configuration : lu en base
@@ -129,7 +141,15 @@ pub enum Control {
     Logs,
     /// Avertissement : clé d'agent sur un site sans runtime `php`.
     Typology,
+    /// Fraîcheur des bases de failles (#16), une clé par source.
+    VulnsSync,
 }
+
+/// Pseudo-site des contrôles du veilleur : le `_` est hors de la grammaire
+/// `[a-z0-9-]` des identifiants de site, aucune collision possible.
+pub const WATCHER_SITE: &str = "_veilleur";
+/// Nom du contrôle `vulns-sync`.
+pub const VULNS_SYNC: &str = "vulns-sync";
 
 /// Nom du contrôle `typology`.
 pub const TYPOLOGY: &str = "typology";
@@ -138,7 +158,7 @@ pub const TYPOLOGY_KEY: &str = "agent-runtime";
 
 impl Control {
     /// Tous les contrôles, dans l'ordre d'affichage.
-    pub const ALL: [Self; 13] = [
+    pub const ALL: [Self; 14] = [
         Self::Check(CheckKind::Content),
         Self::Check(CheckKind::Installer),
         Self::Check(CheckKind::Exposed),
@@ -152,6 +172,7 @@ impl Control {
         Self::Agent(AgentFamily::UploadsPhp),
         Self::Logs,
         Self::Typology,
+        Self::VulnsSync,
     ];
 
     /// Nom du contrôle, tel qu'il figure dans les incidents et les passages.
@@ -163,6 +184,7 @@ impl Control {
             Self::Agent(family) => family.check_name(),
             Self::Logs => crate::analysis::findings::CHECK,
             Self::Typology => TYPOLOGY,
+            Self::VulnsSync => VULNS_SYNC,
         }
     }
 
@@ -181,7 +203,9 @@ impl Control {
                 }
             },
             Self::Agent(family) => family.cms(),
-            Self::Heartbeat | Self::Integrity | Self::Logs | Self::Typology => ALL_CMS,
+            Self::Heartbeat | Self::Integrity | Self::Logs | Self::Typology | Self::VulnsSync => {
+                ALL_CMS
+            }
         }
     }
 
@@ -193,6 +217,7 @@ impl Control {
             Self::Integrity => Needs::PhpAgentAndBaseline,
             Self::Logs => Needs::LogSource,
             Self::Typology => Needs::AgentWithoutPhp,
+            Self::VulnsSync => Needs::Watcher,
         }
     }
 
@@ -208,6 +233,7 @@ impl Control {
             Needs::PhpAgentAndBaseline => ctx.agent && php && ctx.baseline,
             Needs::LogSource => site.logs.as_ref().is_some_and(|l| l.source.is_some()),
             Needs::AgentWithoutPhp => ctx.agent && !php,
+            Needs::Watcher => false,
         }
     }
 
@@ -215,7 +241,9 @@ impl Control {
     pub fn is_agent(self) -> bool {
         match self {
             Self::Integrity | Self::Agent(_) => true,
-            Self::Check(_) | Self::Heartbeat | Self::Logs | Self::Typology => false,
+            Self::Check(_) | Self::Heartbeat | Self::Logs | Self::Typology | Self::VulnsSync => {
+                false
+            }
         }
     }
 }
@@ -232,6 +260,18 @@ impl fmt::Display for Control {
 /// registre n'est jamais surveillé.
 pub fn watched(site: &Site, check: &str, ctx: &Ctx) -> bool {
     Control::from_name(check).is_some_and(|control| control.watched(site, ctx))
+}
+
+/// Verdict « surveillé » d'un incident du pseudo-site [`WATCHER_SITE`] :
+/// `vulns-sync` pour une source de `[vulns] sources` (`key`, clé du constat),
+/// rien d'autre (fail-closed).
+pub fn watched_by_watcher(config: &Config, check: &str, key: Option<&str>) -> bool {
+    match Control::from_name(check) {
+        Some(Control::VulnsSync) => {
+            key.is_some_and(|key| crate::vulns::sync::registry::declared(config).contains(&key))
+        }
+        _ => false,
+    }
 }
 
 /// Contrôles surveillés pour ce site, dans l'ordre de [`Control::ALL`].
@@ -267,6 +307,36 @@ pub fn typology_findings(site: &Site, ctx: &Ctx) -> Vec<Finding> {
         TYPOLOGY_KEY,
         "agent enregistré sur un site sans runtime php : déclarer runtime = \"php\"",
     )]
+}
+
+/// Source d'inventaire déclarée du site (`[sites.inventory]`) : seule porte
+/// de `/r/v1/inventory`, et future condition `Needs::InventorySource` du
+/// contrôle `vulns` (F7). `None` : inventaire refusé avant lecture du corps.
+pub fn inventory_source(site: &Site) -> Option<InventorySource> {
+    site.inventory.map(|inventory| inventory.source)
+}
+
+/// Écosystèmes purl admis dans l'inventaire d'un site, selon son CMS (lu
+/// dans la configuration, jamais dans l'inventaire) : le CMS du site, puis
+/// `composer`, `npm` et `cargo`, que les sources OSV couvrent quel que soit le
+/// site (`docs/failles.md`). Un composant d'un autre écosystème est écarté et
+/// compté, l'inventaire restant accepté.
+pub fn inventory_ecosystems(kind: SiteKind) -> &'static [PurlType] {
+    match kind {
+        SiteKind::Wordpress => &[
+            PurlType::Wordpress,
+            PurlType::Composer,
+            PurlType::Npm,
+            PurlType::Cargo,
+        ],
+        SiteKind::Prestashop => &[
+            PurlType::Prestashop,
+            PurlType::Composer,
+            PurlType::Npm,
+            PurlType::Cargo,
+        ],
+        SiteKind::Generic => &[PurlType::Composer, PurlType::Npm, PurlType::Cargo],
+    }
 }
 
 /// Commandes que le veilleur peut servir à un agent (#10).

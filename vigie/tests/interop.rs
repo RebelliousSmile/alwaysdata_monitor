@@ -1,7 +1,9 @@
 //! Interopérabilité avec l'agent PHP : `fixtures/php-signed-report.json` est
-//! un rapport signé par sodium avec une graine fixe
+//! un rapport signé par sodium avec une graine fixe, et
+//! `fixtures/php-signed-inventory.json` un inventaire du site A fictif
 //! (`agent/php/tests/make-interop-fixture.php`). ed25519-dalek doit accepter
-//! sa signature, et l'ingestion réelle doit l'accepter tel quel.
+//! leurs signatures, et l'ingestion réelle doit les accepter tels quels, sur
+//! leur seule route.
 
 use std::sync::Arc;
 
@@ -18,7 +20,8 @@ use tower::ServiceExt;
 mod veilleur;
 
 use vigie::clock::FakeClock;
-use vigie::config::SiteKind;
+use vigie::command::key::DOMAIN_INVENTORY;
+use vigie::config::{InventorySource, SiteInventory, SiteKind};
 use vigie::ingest::{HEADER_SIGNATURE, HEADER_SITE};
 use vigie::serve;
 use vigie::store::Store;
@@ -36,6 +39,11 @@ struct Fixture {
 
 fn fixture() -> Fixture {
     let raw = include_str!("fixtures/php-signed-report.json");
+    serde_json::from_str(raw).expect("fixture JSON")
+}
+
+fn inventory_fixture() -> Fixture {
+    let raw = include_str!("fixtures/php-signed-inventory.json");
     serde_json::from_str(raw).expect("fixture JSON")
 }
 
@@ -122,11 +130,115 @@ async fn the_ingestion_accepts_the_php_report_as_is() {
         ]
     );
     let agent = store.agent("site-a").expect("agent").expect("clé");
-    assert_eq!(agent.agent.as_deref(), Some("vigie-agent-php/0.4.0"));
+    assert_eq!(agent.agent.as_deref(), Some("vigie-agent-php/0.5.0"));
     let facts = store.last_facts("site-a").expect("facts").expect("relevé");
     assert!(facts.contains(r#""wp_version":"6.6.2""#), "{facts}");
     // Le premier rapport pose la référence des empreintes.
     let (baseline, set_at) = store.baseline("site-a").expect("référence").expect("posée");
     assert_eq!(set_at, SENT_AT);
     assert!(baseline.contains(r#"".htaccess":"33bf0cf9"#), "{baseline}");
+}
+
+/// Routeur d'un veilleur dont le site A est un WordPress avec
+/// `[sites.inventory] source = "agent-php"`, et la clé de la fixture.
+fn inventory_router(database: &std::path::Path) -> axum::Router {
+    let fixture = inventory_fixture();
+    Store::open(database)
+        .expect("base")
+        .add_key("site-a", &public_key(&fixture).to_bytes(), SENT_AT - 600)
+        .expect("add_key");
+    let mut config = veilleur::config(database.to_path_buf());
+    config.sites[0].kind = SiteKind::Wordpress;
+    config.sites[0].inventory = Some(SiteInventory {
+        source: InventorySource::AgentPhp,
+    });
+    serve::router_with_clock(config, Arc::new(FakeClock::new(SENT_AT)))
+}
+
+async fn post(router: axum::Router, route: &str, signature: &str, body: &str) -> StatusCode {
+    let request = Request::post(route)
+        .header(HEADER_SITE, "site-a")
+        .header(HEADER_SIGNATURE, signature)
+        .body(Body::from(body.to_owned()))
+        .expect("requête");
+    router.oneshot(request).await.expect("réponse").status()
+}
+
+#[tokio::test]
+async fn the_ingestion_accepts_the_php_inventory_as_is() {
+    let fixture = inventory_fixture();
+    let key = public_key(&fixture);
+    let mut signed = DOMAIN_INVENTORY.to_vec();
+    signed.extend_from_slice(fixture.body.as_bytes());
+    key.verify_strict(&signed, &signature(&fixture))
+        .expect("signature sodium sur vigie-inventory-v1");
+    assert!(
+        key.verify_strict(fixture.body.as_bytes(), &signature(&fixture))
+            .is_err()
+    );
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let database = dir.path().join("vigie.db");
+    let router = inventory_router(&database);
+    // Refus croisés : l'inventaire sur les autres routes, le rapport ici.
+    for route in ["/r/v1/report", "/r/v1/logs"] {
+        assert_eq!(
+            post(router.clone(), route, &fixture.signature, &fixture.body).await,
+            StatusCode::NOT_FOUND,
+            "{route}"
+        );
+    }
+    let report = self::fixture();
+    assert_eq!(
+        post(
+            router.clone(),
+            "/r/v1/inventory",
+            &report.signature,
+            &report.body
+        )
+        .await,
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        post(router, "/r/v1/inventory", &fixture.signature, &fixture.body).await,
+        StatusCode::NO_CONTENT
+    );
+
+    let store = Store::open(&database).expect("base");
+    let head = store
+        .last_inventory("site-a")
+        .expect("lecture")
+        .expect("inventaire");
+    assert!(head.complete);
+    assert_eq!(head.agent, "vigie-agent-php/0.5.0");
+    let dropped: i64 = rusqlite::Connection::open(&database)
+        .expect("sqlite")
+        .query_row("SELECT dropped FROM site_inventory", [], |row| row.get(0))
+        .expect("dropped");
+    assert_eq!(
+        dropped, 0,
+        "aucun composant de l'agent écarté à la réception"
+    );
+    let rows = store
+        .inventory_components(head.id, 0, 100)
+        .expect("composants");
+    // Les composants attendus de la fixture, tels que l'agent les a relevés.
+    let expected: serde_json::Value = serde_json::from_str(include_str!(
+        "../agent/php/tests/fixtures/inventory-expected.json"
+    ))
+    .expect("attendu");
+    let mut purls: Vec<(String, String)> = expected["wp-inventory"]["components"]
+        .as_array()
+        .expect("composants")
+        .iter()
+        .map(|c| {
+            (
+                c["purl"].as_str().expect("purl").to_owned(),
+                c["vigie:path"].as_str().expect("path").to_owned(),
+            )
+        })
+        .collect();
+    purls.sort();
+    let stored: Vec<(String, String)> = rows.into_iter().map(|r| (r.purl, r.path)).collect();
+    assert_eq!(stored, purls);
 }

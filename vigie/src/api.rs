@@ -953,7 +953,11 @@ async fn site_handler(
                 Control::Heartbeat => {
                     checks.push(CheckJson::new(name, Some(site.agent_silence), run_of(name)));
                 }
-                Control::Integrity | Control::Agent(_) | Control::Logs | Control::Typology => {
+                Control::Integrity
+                | Control::Agent(_)
+                | Control::Logs
+                | Control::Typology
+                | Control::VulnsSync => {
                     if let Some(run) = run_of(name) {
                         checks.push(CheckJson::new(name, None, Some(run)));
                     }
@@ -1452,7 +1456,8 @@ async fn settings_handler(
                         | Control::Integrity
                         | Control::Agent(_)
                         | Control::Logs
-                        | Control::Typology => None,
+                        | Control::Typology
+                        | Control::VulnsSync => None,
                     })
                     .collect(),
             })

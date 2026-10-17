@@ -133,3 +133,61 @@ fn a_kind_or_runtime_key_outside_a_site_is_refused() {
     let err = refused("runtimes = \"php\"\n", "runtimes");
     assert!(matches!(err, ConfigError::Parse { .. }), "{err}");
 }
+
+#[test]
+fn an_inventory_source_needs_the_php_runtime() {
+    let inventory = "[sites.inventory]\nsource = \"agent-php\"\n";
+    for ok in [
+        "kind = \"wordpress\"\n",
+        "kind = \"prestashop\"\n",
+        "runtime = \"php\"\n",
+    ] {
+        let config = load(&format!("{ok}{inventory}")).expect(ok);
+        assert!(config.sites[0].inventory.is_some());
+    }
+    for refused_runtime in ["", "runtime = \"static\"\n", "runtime = \"node\"\n"] {
+        let err = refused(&format!("{refused_runtime}{inventory}"), "inventory");
+        assert!(matches!(err, ConfigError::Invalid { .. }), "{err}");
+    }
+    for value in ["\"agent\"", "\"Agent-Php\"", "\"agent_php\"", "1"] {
+        let err = refused(
+            &format!("kind = \"wordpress\"\n[sites.inventory]\nsource = {value}\n"),
+            "source",
+        );
+        assert!(matches!(err, ConfigError::Parse { .. }), "{value} : {err}");
+    }
+    refused(
+        "kind = \"wordpress\"\n[sites.inventory]\nsource = \"agent-php\"\nautre = 1\n",
+        "autre",
+    );
+    refused("kind = \"wordpress\"\n[sites.inventory]\n", "source");
+}
+
+#[test]
+fn vulns_sources_are_a_closed_list_without_duplicates() {
+    // Liste fermée (#16) : identifiant inconnu, doublon ou clé inconnue
+    // refusés au chargement ; liste vide admise, comme l'absence de section.
+    let err = refused(
+        "[vulns]\nsources = [\"osv-npm\", \"osv-pypi\"]\n",
+        "osv-pypi",
+    );
+    assert!(matches!(err, ConfigError::Invalid { .. }), "{err}");
+    let err = refused(
+        "[vulns]\nsources = [\"osv-npm\", \"osv-npm\"]\n",
+        "deux fois",
+    );
+    assert!(matches!(err, ConfigError::Invalid { .. }), "{err}");
+    let err = refused(
+        "[vulns]\nsources = [\"osv-npm\"]\nurl = \"https://example.org/all.zip\"\n",
+        "url",
+    );
+    assert!(matches!(err, ConfigError::Parse { .. }), "{err}");
+    let config = load("[vulns]\nsources = []\n").expect("liste vide");
+    assert!(vigie::vulns::sync::registry::declared(&config).is_empty());
+    let config = load("[vulns]\nsources = [\"osv-npm\", \"osv-crates-io\"]\n").expect("admise");
+    assert_eq!(
+        vigie::vulns::sync::registry::declared(&config),
+        ["osv-crates-io", "osv-npm"]
+    );
+    assert!(load("").expect("sans section").vulns.is_none());
+}

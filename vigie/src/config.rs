@@ -46,8 +46,22 @@ pub struct Config {
     /// Règles de l'analyse de logs communes à tous les sites.
     #[serde(default)]
     pub logs: Logs,
+    /// Bases de failles synchronisées par `vigie vulns sync`
+    /// (`docs/failles.md`) ; sans elle, aucune synchronisation ni constat
+    /// `vulns-sync`.
+    #[serde(default)]
+    pub vulns: Option<Vulns>,
     #[serde(default)]
     pub sites: Vec<Site>,
+}
+
+/// `[vulns]` : sources de failles à synchroniser, parmi la liste fermée
+/// `vulns::sync::registry::KNOWN`. Aucune URL n'est configurable.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Vulns {
+    #[serde(default)]
+    pub sources: Vec<String>,
 }
 
 /// `[logs]` : règles par défaut à désactiver et règles ajoutées
@@ -149,6 +163,33 @@ impl SiteLogs {
             }
         }
         Ok(())
+    }
+}
+
+/// `[sites.inventory]` : source de l'inventaire des composants du site
+/// (issue #19). Sans elle, `/r/v1/inventory` refuse le site avant de lire le
+/// corps, et le contrôle `vulns` (F7) n'existe pas : « surveillé » se lit
+/// dans la configuration du veilleur, jamais dans ce qu'un agent envoie.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SiteInventory {
+    pub source: InventorySource,
+}
+
+/// Source d'inventaire : liste fermée (#20 ajoutera la sienne).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum InventorySource {
+    /// L'agent PHP relève les composants du site (`docs/agent-php.md`) ;
+    /// exige le runtime effectif `php`.
+    AgentPhp,
+}
+
+impl InventorySource {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::AgentPhp => "agent-php",
+        }
     }
 }
 
@@ -271,6 +312,8 @@ pub struct Site {
     pub agent_silence: u64,
     /// `[sites.logs]`, facultatif.
     pub logs: Option<SiteLogs>,
+    /// `[sites.inventory]`, facultatif.
+    pub inventory: Option<SiteInventory>,
 }
 
 fn default_interval() -> u64 {
@@ -529,6 +572,21 @@ impl Config {
         if self.logs.protect_ips.len() > MAX_PROTECT_IPS {
             return Err(format!("logs.protect_ips : {MAX_PROTECT_IPS} IP au plus"));
         }
+        if let Some(vulns) = &self.vulns {
+            let known = crate::vulns::sync::registry::KNOWN;
+            let mut seen = HashSet::new();
+            for id in &vulns.sources {
+                if !known.contains(&id.as_str()) {
+                    return Err(format!(
+                        "vulns.sources : source inconnue « {id} » (admises : {})",
+                        known.join(", ")
+                    ));
+                }
+                if !seen.insert(id.as_str()) {
+                    return Err(format!("vulns.sources : « {id} » déclarée deux fois"));
+                }
+            }
+        }
         let mut seen = HashSet::new();
         for site in &self.sites {
             if !is_valid_id(&site.id) {
@@ -578,6 +636,19 @@ impl Config {
                     "agent_silence du site « {} » : {MIN_AGENT_SILENCE} s au moins (reçu : {})",
                     site.id, site.agent_silence
                 ));
+            }
+            if let Some(inventory) = &site.inventory {
+                match inventory.source {
+                    InventorySource::AgentPhp if site.effective_runtime() != Some(Runtime::Php) => {
+                        return Err(format!(
+                            "inventory du site « {} » : source = \"{}\" exige le runtime php (reçu : {})",
+                            site.id,
+                            inventory.source.as_str(),
+                            site.effective_runtime().map_or("-", Runtime::as_str)
+                        ));
+                    }
+                    InventorySource::AgentPhp => {}
+                }
             }
             if let Some(logs) = &site.logs {
                 logs.validate()

@@ -74,7 +74,39 @@ const MIGRATIONS: &[&str] = &[
     // générations sous bail, failles, alias et lignes `affected` par
     // génération, index de purge et de rapprochement par purl.
     include_str!("../migrations/0015.sql"),
+    // 16 : inventaire des composants des sites (`inventory/`, issue #19) :
+    // `seq` des inventaires à côté de la clé, inventaires reçus (dernier et
+    // 30 jours d'historique) et leurs composants validés, index par purl sans
+    // version et par inventaire (curseur de lecture par lots sur le rowid).
+    include_str!("../migrations/0016.sql"),
+    // 17 : synchronisation des failles (`vulns/sync/`, issue #16) :
+    // validateurs HTTP, mesures et issue de la dernière tentative, version du
+    // lecteur, débit par source, failles retenues des derniers chargements.
+    // Le numéro 16 revient à l'inventaire (#19), fusionné en parallèle : la
+    // version réelle est la place dans cette liste ([`SCHEMA_VULNS_SYNC`]).
+    include_str!("../migrations/0017.sql"),
 ];
+
+/// Version d'une migration : sa place dans [`MIGRATIONS`], plus un.
+/// Calculée à la compilation, pour qu'un numéro de fichier pris d'avance
+/// reste juste quand une migration parallèle est fusionnée avant lui.
+const fn version_of(sql: &str) -> usize {
+    let mut i = 0;
+    while i < MIGRATIONS.len() {
+        let (a, b) = (MIGRATIONS[i].as_bytes(), sql.as_bytes());
+        if a.len() == b.len() {
+            let mut j = 0;
+            while j < a.len() && a[j] == b[j] {
+                j += 1;
+            }
+            if j == a.len() {
+                return i + 1;
+            }
+        }
+        i += 1;
+    }
+    panic!("migration absente de MIGRATIONS")
+}
 
 /// Version de schéma à partir de laquelle les incidents existent.
 pub const SCHEMA_INCIDENTS: usize = 2;
@@ -110,6 +142,12 @@ pub const SCHEMA_REGISTRY: usize = 14;
 /// Version de schéma à partir de laquelle les failles connues existent
 /// (issue #15).
 pub const SCHEMA_VULNS: usize = 15;
+/// Version de schéma à partir de laquelle l'inventaire des composants des
+/// sites existe (issue #19).
+pub const SCHEMA_INVENTORY: usize = 16;
+/// Version de schéma à partir de laquelle l'état de synchronisation des
+/// sources de failles existe (issue #16, fichier `0017.sql`).
+pub const SCHEMA_VULNS_SYNC: usize = version_of(include_str!("../migrations/0017.sql"));
 /// Une adresse source de retrait est oubliée 30 jours après le dernier.
 pub const AGENT_SOURCE_RETENTION: i64 = 30 * 86_400;
 
@@ -146,6 +184,18 @@ pub struct Incident {
     pub last_reminder_at: Option<i64>,
     /// `None` tant que l'incident est ouvert.
     pub close_reason: Option<CloseReason>,
+}
+
+impl Incident {
+    /// Clé du constat, sans le préfixe `<site>/<contrôle>/` (aucune découpe
+    /// sur `/` : une clé peut en contenir) ; `None` si le préfixe manque.
+    pub fn finding_key(&self) -> Option<&str> {
+        self.key
+            .strip_prefix(self.site.as_str())
+            .and_then(|k| k.strip_prefix('/'))
+            .and_then(|k| k.strip_prefix(self.check_name.as_str()))
+            .and_then(|k| k.strip_prefix('/'))
+    }
 }
 
 /// Pourquoi un incident a été clos : l'e-mail de clôture part plus tard
@@ -414,6 +464,79 @@ pub enum LogsOutcome {
     Quota { used: i64 },
 }
 
+/// Inventaire authentifié, à l'heure et validé (`inventory/receive.rs`),
+/// prêt à écrire.
+#[derive(Debug, Clone, Copy)]
+pub struct InventoryDoc<'a> {
+    pub site: &'a str,
+    /// Clé qui a vérifié la signature.
+    pub pubkey: &'a [u8; 32],
+    pub inventory: &'a crate::inventory::Inventory,
+}
+
+/// Issue de l'écriture d'un inventaire.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InventoryOutcome {
+    /// Écrit : `new` faux pour un renvoi inchangé (seuls `seen_at` et `seq`
+    /// avancent) ; `dropped` : composants écartés à la réception.
+    Accepted { new: bool, dropped: usize },
+    /// Clé retirée ou remplacée entre la vérification et l'écriture.
+    UnknownSite,
+    /// `seq` inférieur ou égal au dernier inventaire accepté.
+    Replay { last_seq: i64 },
+    /// Moins de `inventory::MIN_INTERVAL` secondes depuis le dernier
+    /// inventaire accepté (nouveau ou inchangé).
+    TooSoon { seen_at: i64 },
+    /// Plafond quotidien des inventaires nouveaux du site atteint.
+    Quota { new_today: i64 },
+}
+
+/// Tête d'un inventaire reçu, sans ses composants (lectures de F7, #21).
+/// Dates en secondes Unix.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InventoryHead {
+    pub site: String,
+    pub id: i64,
+    /// Seul un inventaire complet vaut absence d'un composant.
+    pub complete: bool,
+    /// Dernière réception de ce contenu (renvoi inchangé compris).
+    pub seen_at: i64,
+    /// Première réception de ce contenu.
+    pub received_at: i64,
+    pub agent: String,
+}
+
+/// Composant d'un inventaire, lu par lots sur son rowid.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InventoryComponentRow {
+    /// Curseur : passer le dernier rowid lu pour le lot suivant.
+    pub rowid: i64,
+    pub ecosystem: crate::vulns::purl::PurlType,
+    /// purl canonique sans version : la clé de rapprochement.
+    pub base: String,
+    /// purl canonique, version comprise si connue.
+    pub purl: String,
+    pub name: String,
+    /// `None` : version illisible ou hors grammaire côté agent.
+    pub version: Option<String>,
+    pub scope: crate::inventory::Scope,
+    /// `vigie:path`, relatif à la racine du site.
+    pub path: String,
+}
+
+const INVENTORY_HEAD_COLUMNS: &str = "site, id, complete, seen_at, received_at, agent";
+
+fn inventory_head_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<InventoryHead> {
+    Ok(InventoryHead {
+        site: row.get(0)?,
+        id: row.get(1)?,
+        complete: row.get(2)?,
+        seen_at: row.get(3)?,
+        received_at: row.get(4)?,
+        agent: row.get(5)?,
+    })
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KeyOutcome {
     Done,
@@ -678,6 +801,13 @@ impl Store {
             .optional()?)
     }
 
+    /// Supprime une clé de `meta` ; sans effet si elle manque.
+    pub fn delete_meta(&mut self, key: &str) -> Result<()> {
+        self.conn
+            .execute("DELETE FROM meta WHERE key = ?1", [key])?;
+        Ok(())
+    }
+
     pub fn set_meta(&mut self, key: &str, value: &str, now: i64) -> Result<()> {
         let tx = self
             .conn
@@ -772,19 +902,20 @@ impl Store {
         Ok(())
     }
 
-    /// Clôt les incidents ouverts dont le couple (site, contrôle) n'est plus
-    /// surveillé : site retiré de la configuration, typologie changée, ou
-    /// clé d'agent retirée. La raison `unwatched` choisit l'e-mail « plus
-    /// surveillé », jamais « rétabli ».
+    /// Clôt les incidents ouverts qui ne sont plus surveillés : site retiré
+    /// de la configuration, typologie changée, clé d'agent retirée, source
+    /// de failles retirée (le prédicat reçoit l'incident entier, clé
+    /// comprise). La raison `unwatched` choisit l'e-mail « plus surveillé »,
+    /// jamais « rétabli ».
     pub fn close_unwatched(
         &mut self,
-        is_watched: impl Fn(&str, &str) -> bool,
+        is_watched: impl Fn(&Incident) -> bool,
         now: i64,
     ) -> Result<usize> {
         let stale: Vec<i64> = self
             .open_incidents()?
             .into_iter()
-            .filter(|i| !is_watched(&i.site, &i.check_name))
+            .filter(|i| !is_watched(i))
             .map(|i| i.id)
             .collect();
         let tx = self
@@ -998,7 +1129,8 @@ impl Store {
             Some(current) if current == pubkey.as_slice() => KeyOutcome::Unchanged,
             Some(_) => {
                 tx.execute(
-                    "UPDATE site_keys SET pubkey = ?2, rotated_at = ?3, last_logs_seq = 0
+                    "UPDATE site_keys SET pubkey = ?2, rotated_at = ?3, last_logs_seq = 0,
+                       last_inventory_seq = 0
                      WHERE site = ?1",
                     params![site, pubkey.as_slice(), now],
                 )?;
@@ -1011,8 +1143,8 @@ impl Store {
     }
 
     /// Retire la clé et l'état des rapports, et purge les logs reçus du site
-    /// (entrées, lots, limites hautes) et son analyse (agrégats, curseur,
-    /// instantanés, signatures notées). `false` si le site n'avait pas de clé.
+    /// (entrées, lots, limites hautes), son analyse (agrégats, curseur,
+    /// instantanés, signatures notées) et ses inventaires. `false` si le site n'avait pas de clé.
     /// Les incidents de l'agent sont clos par le `tick` suivant.
     pub fn remove_key(&mut self, site: &str) -> Result<bool> {
         let tx = self
@@ -1036,6 +1168,8 @@ impl Store {
             "log_signatures",
             // Adresses source des retraits (#13).
             "agent_sources",
+            // Inventaires (#19) ; leurs composants suivent par la cascade.
+            "site_inventory",
         ] {
             tx.execute(&format!("DELETE FROM {table} WHERE site = ?1"), [site])?;
         }
@@ -1620,6 +1754,268 @@ impl Store {
     }
 }
 
+/// Inventaire des composants (issue #19) : écriture par `serve`, purge par
+/// `tick`, lectures pour F7 (#21), toutes valables sur [`Store::open_read`].
+impl Store {
+    /// Écrit un inventaire, tout ou rien, sous verrou d'écriture : clé
+    /// inchangée, `seq` strictement croissant, débit de
+    /// `inventory::MIN_INTERVAL` sur le `seen_at` du dernier inventaire ;
+    /// même digest et même `complete` que le dernier → `seen_at` et `seq`
+    /// seuls ; sinon plafond de `inventory::MAX_NEW_PER_DAY` nouveaux par jour
+    /// UTC, puis inventaire et composants dans la même transaction. Rien ne
+    /// touche aux rapports : un inventaire n'est pas une preuve de vie.
+    pub fn accept_inventory(
+        &mut self,
+        doc: &InventoryDoc<'_>,
+        now: i64,
+    ) -> Result<InventoryOutcome> {
+        use crate::inventory::{MAX_NEW_PER_DAY, MIN_INTERVAL};
+        let inventory = doc.inventory;
+        let dropped = inventory.dropped_total();
+        let tx = self
+            .conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let current: Option<(Vec<u8>, i64)> = tx
+            .query_row(
+                "SELECT pubkey, last_inventory_seq FROM site_keys WHERE site = ?1",
+                [doc.site],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
+        let last_seq = match current {
+            Some((key, last_seq)) if key == doc.pubkey.as_slice() => last_seq,
+            _ => return Ok(InventoryOutcome::UnknownSite),
+        };
+        if inventory.seq <= last_seq {
+            return Ok(InventoryOutcome::Replay { last_seq });
+        }
+        let last: Option<(i64, Vec<u8>, bool, i64)> = tx
+            .query_row(
+                "SELECT id, digest, complete, seen_at FROM site_inventory WHERE site = ?1
+                 ORDER BY id DESC LIMIT 1",
+                [doc.site],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .optional()?;
+        if let Some((_, _, _, seen_at)) = &last
+            && now.saturating_sub(*seen_at) < MIN_INTERVAL
+        {
+            return Ok(InventoryOutcome::TooSoon { seen_at: *seen_at });
+        }
+        let set_seq = |tx: &rusqlite::Transaction<'_>| {
+            tx.execute(
+                "UPDATE site_keys SET last_inventory_seq = ?2 WHERE site = ?1",
+                params![doc.site, inventory.seq],
+            )
+        };
+        if let Some((id, digest, complete, _)) = &last
+            && digest.as_slice() == inventory.digest.as_slice()
+            && *complete == inventory.complete
+        {
+            tx.execute(
+                "UPDATE site_inventory SET seen_at = ?2 WHERE id = ?1",
+                params![id, now],
+            )?;
+            set_seq(&tx)?;
+            tx.commit()?;
+            return Ok(InventoryOutcome::Accepted {
+                new: false,
+                dropped,
+            });
+        }
+        let day = now.div_euclid(86_400) * 86_400;
+        let new_today: i64 = tx.query_row(
+            "SELECT count(*) FROM site_inventory WHERE site = ?1 AND received_at >= ?2",
+            params![doc.site, day],
+            |row| row.get(0),
+        )?;
+        if new_today >= MAX_NEW_PER_DAY {
+            return Ok(InventoryOutcome::Quota { new_today });
+        }
+        set_seq(&tx)?;
+        tx.execute(
+            "INSERT INTO site_inventory (site, digest, spec_version, serial, generated_at, agent,
+               complete, skipped, dropped, components, received_at, seen_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?11)",
+            params![
+                doc.site,
+                inventory.digest.as_slice(),
+                inventory.spec_version,
+                inventory.serial,
+                inventory.generated_at,
+                inventory.agent,
+                inventory.complete,
+                inventory.skipped,
+                i64::try_from(dropped).unwrap_or(i64::MAX),
+                i64::try_from(inventory.components.len()).unwrap_or(i64::MAX),
+                now
+            ],
+        )?;
+        let id = tx.last_insert_rowid();
+        {
+            // Ordre canonique (purl, path), déjà celui de `inventory.components`.
+            let mut insert = tx.prepare(
+                "INSERT INTO site_inventory_components (inventory, ecosystem, base, purl, name,
+                   version, scope, type, path, parent, config_version)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            )?;
+            for c in &inventory.components {
+                insert.execute(params![
+                    id,
+                    c.ecosystem().as_str(),
+                    c.base(),
+                    c.purl.canonical(),
+                    c.name,
+                    c.version().unwrap_or(""),
+                    c.scope.as_str(),
+                    c.ty.as_str(),
+                    c.path,
+                    c.parent,
+                    c.config_version,
+                ])?;
+            }
+        }
+        tx.commit()?;
+        Ok(InventoryOutcome::Accepted { new: true, dropped })
+    }
+
+    /// Base au schéma de l'inventaire ? Un lecteur (`open_read`) tolère une
+    /// base plus ancienne pendant un déploiement : rien n'y est lu.
+    fn has_inventory(&self) -> Result<bool> {
+        Ok(self.schema_version()? >= SCHEMA_INVENTORY)
+    }
+
+    /// Dernier inventaire d'un site.
+    pub fn last_inventory(&self, site: &str) -> Result<Option<InventoryHead>> {
+        if !self.has_inventory()? {
+            return Ok(None);
+        }
+        let sql = format!(
+            "SELECT {INVENTORY_HEAD_COLUMNS} FROM site_inventory WHERE site = ?1
+             ORDER BY id DESC LIMIT 1"
+        );
+        Ok(self
+            .conn
+            .query_row(&sql, [site], inventory_head_from_row)
+            .optional()?)
+    }
+
+    /// Inventaires gardés d'un site, le plus récent d'abord.
+    pub fn inventory_history(&self, site: &str) -> Result<Vec<InventoryHead>> {
+        if !self.has_inventory()? {
+            return Ok(Vec::new());
+        }
+        let sql = format!(
+            "SELECT {INVENTORY_HEAD_COLUMNS} FROM site_inventory WHERE site = ?1 ORDER BY id DESC"
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows = stmt.query_map([site], inventory_head_from_row)?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// Dernier inventaire de chaque site qui en a un, triés par site, en une
+    /// requête sur `site_inventory` seule : aucun composant n'est lu.
+    pub fn inventory_heads(&self) -> Result<Vec<InventoryHead>> {
+        if !self.has_inventory()? {
+            return Ok(Vec::new());
+        }
+        let sql = format!(
+            "SELECT {INVENTORY_HEAD_COLUMNS} FROM site_inventory
+             WHERE id IN (SELECT max(id) FROM site_inventory GROUP BY site)
+             ORDER BY site"
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows = stmt.query_map([], inventory_head_from_row)?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// Composants d'un inventaire de rowid supérieur à `after_rowid` (0 pour
+    /// le premier lot), `limit` au plus, dans l'ordre canonique `(purl, path)`.
+    /// Un inventaire inconnu ou purgé rend une liste vide.
+    pub fn inventory_components(
+        &self,
+        inventory_id: i64,
+        after_rowid: i64,
+        limit: usize,
+    ) -> Result<Vec<InventoryComponentRow>> {
+        if !self.has_inventory()? {
+            return Ok(Vec::new());
+        }
+        let mut stmt = self.conn.prepare_cached(
+            "SELECT rowid, ecosystem, base, purl, name, version, scope, path
+             FROM site_inventory_components
+             WHERE inventory = ?1 AND rowid > ?2 ORDER BY rowid LIMIT ?3",
+        )?;
+        let limit = i64::try_from(limit).unwrap_or(i64::MAX);
+        let rows = stmt.query_map(params![inventory_id, after_rowid, limit], |row| {
+            let ecosystem: String = row.get(1)?;
+            let version: String = row.get(5)?;
+            let scope: String = row.get(6)?;
+            Ok((
+                row.get::<_, i64>(0)?,
+                ecosystem,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, String>(4)?,
+                version,
+                scope,
+                row.get::<_, String>(7)?,
+            ))
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            let (rowid, ecosystem, base, purl, name, version, scope, path) = row?;
+            // Les contraintes CHECK de la table garantissent ces deux listes.
+            let ecosystem = crate::vulns::purl::PurlType::from_name(&ecosystem)
+                .with_context(|| format!("écosystème inconnu en base : {ecosystem}"))?;
+            let scope = crate::inventory::Scope::from_name(&scope)
+                .with_context(|| format!("scope inconnu en base : {scope}"))?;
+            out.push(InventoryComponentRow {
+                rowid,
+                ecosystem,
+                base,
+                purl,
+                name,
+                version: (!version.is_empty()).then_some(version),
+                scope,
+                path,
+            });
+        }
+        Ok(out)
+    }
+
+    /// Conservation (`decisions.md`) : inventaires précédents dont `seen_at`
+    /// a plus de 30 jours ; et tous ceux d'un site absent de `declared`
+    /// (sites qui déclarent `[sites.inventory]`) dont le dernier `seen_at` a
+    /// plus de 30 jours. Rend le nombre d'inventaires effacés ; leurs
+    /// composants suivent par la cascade.
+    pub fn purge_inventory(&mut self, now: i64, declared: &[&str]) -> Result<usize> {
+        use crate::inventory::RETENTION;
+        let limit = now.saturating_sub(RETENTION);
+        let tx = self
+            .conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let mut purged = tx.execute(
+            "DELETE FROM site_inventory WHERE seen_at < ?1
+             AND id NOT IN (SELECT max(id) FROM site_inventory GROUP BY site)",
+            [limit],
+        )?;
+        let stale: Vec<String> = {
+            let mut stmt = tx.prepare(
+                "SELECT site FROM site_inventory
+                 WHERE id IN (SELECT max(id) FROM site_inventory GROUP BY site) AND seen_at < ?1",
+            )?;
+            stmt.query_map([limit], |row| row.get(0))?
+                .collect::<rusqlite::Result<_>>()?
+        };
+        for site in stale.iter().filter(|s| !declared.contains(&s.as_str())) {
+            purged += tx.execute("DELETE FROM site_inventory WHERE site = ?1", [site])?;
+        }
+        tx.commit()?;
+        Ok(purged)
+    }
+}
+
 fn same_hash(stored: &[u8], expected: &Hash) -> bool {
     <&Hash>::try_from(stored).is_ok_and(|stored| device::ct_eq(stored, expected))
 }
@@ -1836,10 +2232,7 @@ mod tests {
         );
 
         // L'incident d'une famille retirée est clos « plus surveillé ».
-        assert_eq!(
-            store.close_unwatched(|_, _| false, 1_000).expect("close"),
-            1
-        );
+        assert_eq!(store.close_unwatched(|_| false, 1_000).expect("close"), 1);
         let closed = store.incident(open[0].id).expect("lu").expect("présent");
         assert_eq!(closed.closed_at, Some(1_000));
         assert_eq!(closed.close_reason, Some(CloseReason::Unwatched));
@@ -2203,13 +2596,13 @@ mod tests {
             .expect("1");
         assert_eq!(
             store
-                .close_unwatched(|site, check| site == "site-a" && check == "exposed", 10)
+                .close_unwatched(|i| i.site == "site-a" && i.check_name == "exposed", 10)
                 .expect("kept"),
             0
         );
         assert_eq!(
             store
-                .close_unwatched(|site, check| site == "site-b" && check == "exposed", 10)
+                .close_unwatched(|i| i.site == "site-b" && i.check_name == "exposed", 10)
                 .expect("closed"),
             1
         );
@@ -2583,6 +2976,10 @@ mod tests {
             ("index", "log_signatures_site"),
             ("index", "log_verdicts_generated"),
             ("index", "log_verdicts_score"),
+            ("index", "site_inventory_components_base"),
+            ("index", "site_inventory_components_inventory"),
+            ("index", "site_inventory_received"),
+            ("index", "site_inventory_site"),
             ("index", "ticks_at"),
             ("index", "vuln_advisories_id"),
             ("index", "vuln_affected_advisory"),
@@ -2612,6 +3009,8 @@ mod tests {
             ("table", "meta"),
             ("table", "pairings"),
             ("table", "reports"),
+            ("table", "site_inventory"),
+            ("table", "site_inventory_components"),
             ("table", "site_keys"),
             ("table", "ticks"),
             ("table", "vuln_advisories"),
@@ -2650,11 +3049,22 @@ mod tests {
             columns("incidents").last().map(String::as_str),
             Some("close_reason")
         );
-        // Migration 9 : `seq` des lots de logs, à côté de la clé.
+        // Migrations 9 et 16 : `seq` des lots de logs et des inventaires, à
+        // côté de la clé.
         assert_eq!(
-            columns("site_keys").last().map(String::as_str),
-            Some("last_logs_seq")
+            columns("site_keys")[columns("site_keys").len() - 2..],
+            ["last_logs_seq", "last_inventory_seq"]
         );
+        // Migration 16 : composants d'inventaire dans une table à rowid.
+        let without_rowid: String = store
+            .conn
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE name = 'site_inventory_components'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("sql");
+        assert!(!without_rowid.contains("WITHOUT ROWID"));
         assert_eq!(columns("log_entries")[0], "id");
         // Migration 15 : failles connues.
         assert_eq!(
@@ -2669,6 +3079,23 @@ mod tests {
         assert_eq!(
             columns("vuln_affected")[3..7],
             ["purl_type", "purl_namespace", "purl_name", "scheme"]
+        );
+        // Migration 0017 : synchronisation des failles.
+        assert_eq!(
+            columns("vuln_sources")[16..],
+            [
+                "etag",
+                "http_last_modified",
+                "dump_bytes",
+                "unpacked_bytes",
+                "last_duration_ms",
+                "last_outcome",
+                "loader_version",
+                "last_request_at",
+                "retry_after_until",
+                "recent_entries",
+                "revision"
+            ]
         );
     }
 
@@ -2687,8 +3114,7 @@ mod tests {
                 .expect("données v14");
         }
         let store = Store::open(&path).expect("open");
-        assert_eq!(store.schema_version().expect("version"), SCHEMA_VULNS);
-        assert_eq!(SCHEMA_VULNS, MIGRATIONS.len());
+        assert_eq!(store.schema_version().expect("version"), MIGRATIONS.len());
         assert_eq!(store.last_tick().expect("tick"), Some(42));
         let sources: i64 = store
             .conn
@@ -2698,7 +3124,118 @@ mod tests {
         drop(store);
         // Rejouées sans effet.
         let store = Store::open(&path).expect("réouverture");
-        assert_eq!(store.schema_version().expect("version"), SCHEMA_VULNS);
+        assert_eq!(store.schema_version().expect("version"), MIGRATIONS.len());
+    }
+
+    #[test]
+    fn migrates_a_filled_vulns_database_to_inventory() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("vigie.db");
+        {
+            let conn = Connection::open(&path).expect("open");
+            for migration in &MIGRATIONS[..SCHEMA_VULNS] {
+                conn.execute_batch(migration).expect("migration");
+            }
+            conn.pragma_update(None, "user_version", SCHEMA_VULNS as i64)
+                .expect("user_version");
+            conn.execute_batch(
+                "INSERT INTO ticks (at) VALUES (42);
+                 INSERT INTO site_keys (site, pubkey, added_at, last_logs_seq)
+                   VALUES ('site-a', zeroblob(32), 10, 7);
+                 INSERT INTO reports (site, last_seq, last_valid_at, agent, facts)
+                   VALUES ('site-a', 5, 20, 'vigie-agent-php/0.4.0', '{}');
+                 INSERT INTO log_batches (site, file, gen, range_start, range_end, bytes, gap,
+                   skipped_files, received_at, accepted, rejected)
+                   VALUES ('site-a', 'http-2026-10-16.log', 1, 0, 10, 10, 0, 0, 30, 1, '{}');",
+            )
+            .expect("données v15");
+        }
+        let store = Store::open(&path).expect("open");
+        assert_eq!(store.schema_version().expect("version"), MIGRATIONS.len());
+        assert!(SCHEMA_INVENTORY < MIGRATIONS.len() + 1);
+        assert_eq!(store.last_tick().expect("tick"), Some(42));
+        let agent = store.agent("site-a").expect("agent").expect("clé");
+        assert_eq!((agent.last_seq, agent.last_valid_at), (5, Some(20)));
+        let (logs_seq, inventory_seq): (i64, i64) = store
+            .conn
+            .query_row(
+                "SELECT last_logs_seq, last_inventory_seq FROM site_keys WHERE site = 'site-a'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("site_keys");
+        assert_eq!((logs_seq, inventory_seq), (7, 0));
+        let batches: i64 = store
+            .conn
+            .query_row("SELECT count(*) FROM log_batches", [], |row| row.get(0))
+            .expect("log_batches");
+        assert_eq!(batches, 1);
+        assert_eq!(store.last_inventory("site-a").expect("lecture"), None);
+        let violations: i64 = store
+            .conn
+            .query_row("SELECT count(*) FROM pragma_foreign_key_check", [], |row| {
+                row.get(0)
+            })
+            .expect("foreign_key_check");
+        assert_eq!(violations, 0);
+    }
+
+    #[test]
+    fn finding_key_never_splits_on_slashes() {
+        let (_dir, mut store) = temp_store();
+        let finding = Finding::new("_veilleur", "vulns-sync", Severity::Warning, "a/b/c", "x");
+        store
+            .reconcile("_veilleur", "vulns-sync", &[finding], 10)
+            .expect("ouvert");
+        let mut incident = store.open_incidents().expect("lus").remove(0);
+        assert_eq!(incident.key, "_veilleur/vulns-sync/a/b/c");
+        assert_eq!(incident.finding_key(), Some("a/b/c"));
+        incident.key = "autre/vulns-sync/a".into();
+        assert_eq!(incident.finding_key(), None);
+        incident.key = "_veilleur/vulns-syncx/a".into();
+        assert_eq!(incident.finding_key(), None);
+    }
+
+    #[test]
+    fn migrates_a_vulns_database_to_vulns_sync() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("vigie.db");
+        let before = SCHEMA_VULNS_SYNC - 1;
+        {
+            let conn = Connection::open(&path).expect("open");
+            for migration in &MIGRATIONS[..before] {
+                conn.execute_batch(migration).expect("migration");
+            }
+            conn.pragma_update(None, "user_version", before as i64)
+                .expect("user_version");
+            conn.execute(
+                "INSERT INTO vuln_sources (id, active_generation, next_generation, entries)
+                 VALUES ('osv-npm', 3, 4, 12)",
+                [],
+            )
+            .expect("source v15");
+        }
+        let store = Store::open(&path).expect("open");
+        assert_eq!(store.schema_version().expect("version"), SCHEMA_VULNS_SYNC);
+        assert_eq!(SCHEMA_VULNS_SYNC, MIGRATIONS.len());
+        let row: (i64, i64, String, Option<String>, Option<String>) = store
+            .conn
+            .query_row(
+                "SELECT active_generation, entries, recent_entries, etag, last_outcome
+                 FROM vuln_sources WHERE id = 'osv-npm'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+            )
+            .expect("source migrée");
+        assert_eq!(row, (3, 12, "[]".into(), None, None));
+        let refused = store.conn.execute(
+            "UPDATE vuln_sources SET last_outcome = 'inconnue' WHERE id = 'osv-npm'",
+            [],
+        );
+        assert!(refused.is_err(), "issue hors liste refusée");
+        drop(store);
+        let store = Store::open(&path).expect("réouverture");
+        assert_eq!(store.schema_version().expect("version"), SCHEMA_VULNS_SYNC);
     }
 
     #[test]

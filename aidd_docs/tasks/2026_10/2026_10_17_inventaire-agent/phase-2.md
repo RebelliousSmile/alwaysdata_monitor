@@ -1,5 +1,5 @@
 ---
-status: pending
+status: done
 ---
 
 # Instruction: Relevé des composants par l'agent PHP (sans réseau)

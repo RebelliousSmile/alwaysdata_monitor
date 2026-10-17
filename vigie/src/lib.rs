@@ -16,6 +16,7 @@ pub mod facts;
 pub mod finding;
 pub mod http;
 pub mod ingest;
+pub mod inventory;
 pub mod logs;
 pub mod recommend;
 pub mod report;

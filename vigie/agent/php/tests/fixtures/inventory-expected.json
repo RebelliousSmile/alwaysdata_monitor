@@ -1,0 +1,247 @@
+{
+  "wp-inventory": {
+    "kind": "wordpress",
+    "inventory": {
+      "composer": [
+        "app/composer.lock"
+      ]
+    },
+    "complete": true,
+    "skipped": 0,
+    "components": [
+      {
+        "purl": "pkg:wordpress/core/core@6.6.2",
+        "version": "6.6.2",
+        "scope": "required",
+        "vigie:scope": "required",
+        "vigie:path": "wp-includes/version.php"
+      },
+      {
+        "purl": "pkg:wordpress/plugin/exemple-bedrock@2.0.0",
+        "version": "2.0.0",
+        "scope": "required",
+        "vigie:scope": "required",
+        "vigie:path": "wp-content/plugins/exemple-bedrock"
+      },
+      {
+        "purl": "pkg:wordpress/plugin/exemple-cache@2.1.0",
+        "version": "2.1.0",
+        "scope": "required",
+        "vigie:scope": "required",
+        "vigie:path": "wp-content/plugins/exemple-cache"
+      },
+      {
+        "purl": "pkg:wordpress/plugin/exemple-formulaire@5.9.3",
+        "version": "5.9.3",
+        "scope": "required",
+        "vigie:scope": "required",
+        "vigie:path": "wp-content/plugins/exemple-formulaire"
+      },
+      {
+        "purl": "pkg:wordpress/plugin/exemple-unique@1.0",
+        "version": "1.0",
+        "scope": "required",
+        "vigie:scope": "required",
+        "vigie:path": "wp-content/plugins/exemple-unique.php"
+      },
+      {
+        "purl": "pkg:wordpress/plugin/exemple-mu@0.3",
+        "version": "0.3",
+        "scope": "required",
+        "vigie:scope": "mu",
+        "vigie:path": "wp-content/mu-plugins/exemple-mu.php"
+      },
+      {
+        "purl": "pkg:wordpress/theme/exemple-theme@2.1",
+        "version": "2.1",
+        "scope": "required",
+        "vigie:scope": "required",
+        "vigie:path": "wp-content/themes/exemple-theme"
+      },
+      {
+        "purl": "pkg:wordpress/theme/exemple-theme-enfant@1.0",
+        "version": "1.0",
+        "scope": "required",
+        "vigie:scope": "required",
+        "vigie:path": "wp-content/themes/exemple-theme-enfant",
+        "vigie:parent": "exemple-theme"
+      },
+      {
+        "purl": "pkg:composer/exemple/outil@1.2.0",
+        "version": "1.2.0",
+        "scope": "required",
+        "vigie:scope": "required",
+        "vigie:path": "composer.lock"
+      },
+      {
+        "purl": "pkg:wordpress/theme/exemple-theme-seul@3.0",
+        "version": "3.0",
+        "scope": "required",
+        "vigie:scope": "required",
+        "vigie:path": "composer.lock"
+      },
+      {
+        "purl": "pkg:composer/exemple/outil-test@v3.0.0",
+        "version": "v3.0.0",
+        "scope": "excluded",
+        "vigie:scope": "dev",
+        "vigie:path": "composer.lock"
+      },
+      {
+        "purl": "pkg:composer/exemple/outil@1.3.0",
+        "version": "1.3.0",
+        "scope": "required",
+        "vigie:scope": "required",
+        "vigie:path": "app/composer.lock"
+      },
+      {
+        "purl": "pkg:npm/%40exemple/paquet@2.0.0",
+        "version": "2.0.0",
+        "scope": "required",
+        "vigie:scope": "required",
+        "vigie:path": "package-lock.json"
+      },
+      {
+        "purl": "pkg:npm/Paquet-Majuscules@1.0.0",
+        "version": "1.0.0",
+        "scope": "required",
+        "vigie:scope": "required",
+        "vigie:path": "package-lock.json"
+      },
+      {
+        "purl": "pkg:npm/paquet-reel@4.1.0",
+        "version": "4.1.0",
+        "scope": "required",
+        "vigie:scope": "required",
+        "vigie:path": "package-lock.json"
+      },
+      {
+        "purl": "pkg:npm/outil-dev@0.4.0",
+        "version": "0.4.0",
+        "scope": "excluded",
+        "vigie:scope": "dev",
+        "vigie:path": "package-lock.json"
+      },
+      {
+        "purl": "pkg:npm/facultatif@1.1.0",
+        "version": "1.1.0",
+        "scope": "required",
+        "vigie:scope": "required",
+        "vigie:path": "package-lock.json"
+      },
+      {
+        "purl": "pkg:npm/imbrique@0.1.0",
+        "version": "0.1.0",
+        "scope": "required",
+        "vigie:scope": "required",
+        "vigie:path": "package-lock.json"
+      }
+    ]
+  },
+  "ps16-inventory": {
+    "kind": "prestashop",
+    "complete": true,
+    "skipped": 0,
+    "components": [
+      {
+        "purl": "pkg:prestashop/core/prestashop@1.6.1.24",
+        "version": "1.6.1.24",
+        "scope": "required",
+        "vigie:scope": "required",
+        "vigie:path": "config/settings.inc.php"
+      },
+      {
+        "purl": "pkg:prestashop/module/exemple_accord@3.0.0",
+        "version": "3.0.0",
+        "scope": "required",
+        "vigie:scope": "required",
+        "vigie:path": "modules/exemple_accord"
+      },
+      {
+        "purl": "pkg:prestashop/module/exemple_xml@1.4.0",
+        "version": "1.4.0",
+        "scope": "required",
+        "vigie:scope": "required",
+        "vigie:path": "modules/exemple_xml"
+      },
+      {
+        "purl": "pkg:prestashop/module/exemplemodule@2.0.1",
+        "version": "2.0.1",
+        "scope": "required",
+        "vigie:scope": "required",
+        "vigie:path": "modules/exemplemodule"
+      }
+    ]
+  },
+  "ps8-inventory": {
+    "kind": "prestashop",
+    "complete": true,
+    "skipped": 0,
+    "components": [
+      {
+        "purl": "pkg:prestashop/core/prestashop@8.1.7",
+        "version": "8.1.7",
+        "scope": "required",
+        "vigie:scope": "required",
+        "vigie:path": "src/Core/Version.php"
+      },
+      {
+        "purl": "pkg:prestashop/module/exemple_natif@1.3.0",
+        "version": "1.3.0",
+        "scope": "required",
+        "vigie:scope": "required",
+        "vigie:path": "modules/exemple_natif"
+      },
+      {
+        "purl": "pkg:prestashop/module/exemplemodule@2.1.0",
+        "version": "2.1.0",
+        "scope": "required",
+        "vigie:scope": "required",
+        "vigie:path": "modules/exemplemodule",
+        "vigie:config-version": "2.0.0"
+      },
+      {
+        "purl": "pkg:composer/prestashop/decimal@1.5.0",
+        "version": "1.5.0",
+        "scope": "required",
+        "vigie:scope": "required",
+        "vigie:path": "composer.lock"
+      }
+    ]
+  },
+  "ps-hostile": {
+    "kind": "prestashop",
+    "complete": true,
+    "skipped": 0,
+    "components": [
+      {
+        "purl": "pkg:prestashop/module/doctype_mod",
+        "version": "",
+        "scope": "required",
+        "vigie:scope": "required",
+        "vigie:path": "modules/doctype_mod"
+      },
+      {
+        "purl": "pkg:prestashop/module/mal_forme",
+        "version": "",
+        "scope": "required",
+        "vigie:scope": "required",
+        "vigie:path": "modules/mal_forme"
+      },
+      {
+        "purl": "pkg:prestashop/module/nul_mod",
+        "version": "",
+        "scope": "required",
+        "vigie:scope": "required",
+        "vigie:path": "modules/nul_mod"
+      },
+      {
+        "purl": "pkg:prestashop/module/utf_mod",
+        "version": "",
+        "scope": "required",
+        "vigie:scope": "required",
+        "vigie:path": "modules/utf_mod"
+      }
+    ]
+  }
+}
