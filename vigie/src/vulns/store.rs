@@ -206,6 +206,8 @@ pub struct SyncMeta {
     /// `--accept-shrink` : la référence de la garde repart de ce chargement
     /// (`recent_entries` = `[retenues]`).
     pub accept_shrink: bool,
+    /// Révision du dump (commit de l'archive Friends-Of-Presta, F3).
+    pub revision: Option<String>,
 }
 
 /// Rend le bail d'un dump inchangé et date le succès, en **une seule
@@ -345,12 +347,14 @@ pub struct SyncState {
     pub dump_bytes: Option<i64>,
     pub unpacked_bytes: Option<i64>,
     pub last_duration_ms: Option<i64>,
+    /// Révision du dump actif (Friends-Of-Presta).
+    pub revision: Option<String>,
 }
 
 const STATE_COLUMNS: &str = "active_generation, dump_sha256, entries, etag, http_last_modified,
     loader_version, recent_entries, last_success_at, last_attempt_at, last_request_at,
     retry_after_until, loading_since, last_outcome, last_error, dump_bytes, unpacked_bytes,
-    last_duration_ms";
+    last_duration_ms, revision";
 
 fn state_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<SyncState> {
     let recent: String = r.get(6)?;
@@ -374,6 +378,7 @@ fn state_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<SyncState> {
         dump_bytes: r.get(14)?,
         unpacked_bytes: r.get(15)?,
         last_duration_ms: r.get(16)?,
+        revision: r.get(17)?,
     })
 }
 
@@ -395,7 +400,7 @@ pub fn sync_states(store: &Store) -> anyhow::Result<Vec<(String, SyncState)>> {
         "SELECT {STATE_COLUMNS}, id FROM vuln_sources ORDER BY id"
     ))?;
     Ok(stmt
-        .query_map([], |r| Ok((r.get(17)?, state_row(r)?)))?
+        .query_map([], |r| Ok((r.get(18)?, state_row(r)?)))?
         .collect::<rusqlite::Result<_>>()?)
 }
 
@@ -583,7 +588,7 @@ impl<'a> Load<'a> {
                  dropped = ?6, dropped_detail = ?7, out_of_scope = ?8, last_error = NULL,
                  etag = ?11, http_last_modified = ?12, dump_bytes = ?13, unpacked_bytes = ?14,
                  last_duration_ms = ?15, loader_version = ?16, recent_entries = ?17,
-                 last_outcome = 'loaded', last_attempt_at = ?3
+                 revision = ?18, last_outcome = 'loaded', last_attempt_at = ?3
              WHERE id = ?1 AND active_generation = ?9 AND loading_generation = ?2
                  AND loading_since = ?10",
             params![
@@ -604,6 +609,10 @@ impl<'a> Load<'a> {
                 i64::try_from(meta.duration_ms).unwrap_or(i64::MAX),
                 meta.loader_version,
                 recent,
+                meta.revision
+                    .as_deref()
+                    .filter(|r| (1..=128).contains(&r.len())
+                        && r.bytes().all(|b| b.is_ascii_alphanumeric())),
             ],
         )?;
         if changed != 1 {

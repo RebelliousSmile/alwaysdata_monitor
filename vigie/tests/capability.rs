@@ -945,6 +945,7 @@ fn vulns_sync_is_a_watcher_control_never_watched_for_a_site() {
     ));
     config.vulns = Some(vigie::config::Vulns {
         sources: vec!["osv-npm".into()],
+        wordfence: None,
     });
     assert!(capability::watched_by_watcher(
         &config,

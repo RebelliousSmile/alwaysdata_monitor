@@ -13,7 +13,7 @@
 //! Aucun texte de l'avis n'est stocké hors du titre assaini.
 
 use std::io::{BufRead, Read};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use sha2::{Digest, Sha256};
 
@@ -26,7 +26,8 @@ use crate::vulns::advisory::{
 };
 use crate::vulns::cvss;
 use crate::vulns::purl::{Purl, PurlType};
-use crate::vulns::sync::{Sink, SyncError};
+use crate::vulns::sync::download::{Download, Fetched, Request};
+use crate::vulns::sync::{Dumped, FetchOutcome, Limits, Sink, SourceMeta, SyncError, VulnSource};
 use crate::vulns::version::Scheme;
 
 /// Seuls des faits (CVE, module, plage, vecteur, CWE, date) et le lien
@@ -564,6 +565,94 @@ fn parse_buffered<R: BufRead>(
         unpacked: tar.unpacked(),
         revision,
     })
+}
+
+/// Identifiant de la source (`[vulns] sources`).
+pub const SOURCE_ID: &str = "friends-of-presta";
+/// Archive de la branche `main` (redirigée vers `codeload.github.com`).
+pub const URL: &str =
+    "https://github.com/friends-of-presta/security-advisories/archive/refs/heads/main.tar.gz";
+/// Origines admises, redirection comprise.
+pub const ORIGINS: &[(&str, u16)] = &[("github.com", 443), ("codeload.github.com", 443)];
+/// Version du lecteur : à incrémenter dans le commit de tout changement du
+/// lecteur tar, de l'en-tête, de la grammaire ou de la conversion qui change
+/// les failles produites à partir des mêmes octets.
+pub const LOADER_VERSION: u32 = 1;
+
+const MIB: u64 = 1024 * 1024;
+
+/// Source Friends-Of-Presta.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct FriendsOfPresta;
+
+impl VulnSource for FriendsOfPresta {
+    fn id(&self) -> &'static str {
+        SOURCE_ID
+    }
+
+    fn meta(&self) -> SourceMeta {
+        SourceMeta {
+            url: URL,
+            origins: ORIGINS,
+            license: LICENSE,
+            attribution: "Friends-Of-Presta, CC BY-SA 4.0, lien de chaque avis",
+            limits: Limits {
+                compressed: 64 * MIB,
+                unpacked: 512 * MIB,
+                entries: 50_000,
+                entry: MAX_ADVISORY_BYTES,
+                central_directory: 0,
+                duration: Duration::from_secs(10 * 60),
+                max_dropped_ratio: 0.01,
+            },
+            min_interval: Duration::ZERO,
+            loader_version: LOADER_VERSION,
+            redistribution: REDISTRIBUTION,
+        }
+    }
+
+    fn fetch(
+        &self,
+        dl: &mut Download,
+        sink: &mut dyn Sink,
+        tally: &mut Tally,
+    ) -> Result<FetchOutcome, SyncError> {
+        let url = dl.url().cloned().ok_or(SyncError::OriginRefused)?;
+        let dump = match dl.get_to_file(&Request::get(url))? {
+            Fetched::NotModified => {
+                return Ok(FetchOutcome::Unchanged {
+                    not_modified: true,
+                    validators: None,
+                });
+            }
+            Fetched::SameDigest { validators, .. } => {
+                return Ok(FetchOutcome::Unchanged {
+                    not_modified: false,
+                    validators: Some(validators),
+                });
+            }
+            Fetched::Dump(dump) => dump,
+        };
+        let file = std::fs::File::open(&dump.path)
+            .map_err(|e| SyncError::io("lecture de l'archive", &e))?;
+        let limits = ArchiveLimits {
+            tar: TarLimits {
+                members: dl.limits().entries,
+                unpacked: dl.limits().unpacked,
+            },
+            advisory: dl.limits().entry,
+            deadline: Some(dl.deadline()),
+        };
+        let read = parse_archive(file, &limits, sink, tally)?;
+        Ok(FetchOutcome::Loaded(Dumped {
+            sha256: dump.sha256,
+            validators: dump.validators,
+            bytes: dump.bytes,
+            unpacked_bytes: read.unpacked,
+            entries: read.entries,
+            revision: read.revision,
+        }))
+    }
 }
 
 #[cfg(test)]

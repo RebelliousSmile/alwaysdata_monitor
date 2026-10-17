@@ -25,6 +25,7 @@ use crate::http::Trust;
 use crate::store::Store;
 use crate::vulns::UsageError;
 use crate::vulns::advisory::{Advisory, MAX_ENTRY_BYTES, Tally};
+use crate::vulns::sources::Redistribution;
 use crate::vulns::store::{Outcome, SyncState};
 use crate::vulns::version::SourceEcosystem;
 
@@ -97,9 +98,9 @@ pub enum SyncError {
     /// à 24 h.
     #[error("statut HTTP {code}{}", retry_after.map(|s| format!(" (réessayer dans {s} s)")).unwrap_or_default())]
     Status { code: u16, retry_after: Option<u64> },
-    #[error("statut HTTP 401 : authentification refusée")]
+    #[error("statut HTTP 401 : jeton refusé ou authentification refusée")]
     Unauthorized,
-    #[error("statut HTTP 403 : accès interdit")]
+    #[error("statut HTTP 403 : jeton refusé ou accès interdit")]
     Forbidden,
     #[error("réseau : {0}")]
     Network(String),
@@ -118,6 +119,10 @@ pub enum SyncError {
     /// cause et, pour le JSON, la ligne et la colonne.
     #[error("format refusé : {0}")]
     Format(String),
+    /// Source refusée juste avant la requête (F3 : verrou de relecture
+    /// Wordfence revérifié par `fetch`, jeton illisible).
+    #[error("source pas prête : {0}")]
+    NotReady(String),
     #[error("espace disque insuffisant : {needed} o nécessaires, {available} o libres")]
     Disk { needed: u64, available: u64 },
     #[error("fichier : {0}")]
@@ -146,8 +151,8 @@ impl From<crate::vulns::store::LoadError> for SyncError {
     }
 }
 
-/// Description d'une source, codée en dur. Structure ouverte : F3 y ajoute
-/// le niveau de redistribution, F4 les encodages admis sans décodage.
+/// Description d'une source, codée en dur. Structure ouverte : F3 y a
+/// ajouté le niveau de redistribution, F4 les encodages admis sans décodage.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SourceMeta {
     /// URL du dump.
@@ -167,6 +172,9 @@ pub struct SourceMeta {
     /// la génération active, le dump est rechargé sans requête
     /// conditionnelle.
     pub loader_version: u32,
+    /// Ce que ses failles permettent de transmettre à un tiers
+    /// ([`registry::redistribution`] le donne par identifiant).
+    pub redistribution: Redistribution,
 }
 
 /// Ce que la source sait au moment de décider si elle peut être demandée.
@@ -197,6 +205,8 @@ pub struct Dumped {
     pub unpacked_bytes: u64,
     /// Entrées lues du dump (dénominateur du taux d'écart).
     pub entries: u64,
+    /// Révision du dump (commit de l'archive Friends-Of-Presta).
+    pub revision: Option<String>,
 }
 
 /// Issue d'une source qui n'a pas échoué.
@@ -302,7 +312,7 @@ pub fn run(
         if only.is_some_and(|o| o != id) {
             continue;
         }
-        let Some(source) = registry::build(id) else {
+        let Some(source) = registry::build_with(config, id) else {
             continue;
         };
         let one = engine::sync_source(
