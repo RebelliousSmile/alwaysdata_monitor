@@ -1,5 +1,5 @@
 ---
-status: pending
+status: done
 ---
 
 # Instruction: Rapprochement pur : fusion, verdicts, gravité, dérogations, constats
