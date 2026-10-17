@@ -1,5 +1,5 @@
 ---
-status: pending
+status: done
 ---
 
 # Instruction: Garde-fous transverses : débit, journal, en-têtes, DTO
