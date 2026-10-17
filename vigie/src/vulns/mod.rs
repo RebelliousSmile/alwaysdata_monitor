@@ -1,7 +1,8 @@
 //! Failles connues (issues #14 à #22) : modèle interne, comparateurs de
 //! versions, rapprochement d'un composant (purl et version) avec les
 //! failles d'une source, tables d'exploitation KEV et EPSS et règle de
-//! gravité ([`severity`], F4).
+//! gravité ([`severity`], F4), rapprochement des inventaires des sites
+//! ([`matching`], F7).
 //!
 //! Sources, standards et conventions : `docs/failles.md`. Le modèle ne
 //! télécharge rien : la synchronisation des bases ([`sync`], F2) l'alimente.
@@ -11,6 +12,7 @@ pub mod corrections;
 pub mod cvss;
 pub mod enrich_store;
 pub mod exploit;
+pub mod matching;
 pub mod purl;
 pub mod range;
 pub mod severity;
