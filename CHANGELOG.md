@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Known-vulnerability groundwork (#14): verified sources (OSV.dev, GitHub Advisory, Wordfence v3, Friends-Of-Presta, CISA KEV, FIRST EPSS) and excluded ones, purl / CycloneDX 1.7 / OSV standards and conventions, severity, exemptions and confidentiality rules (`vigie/docs/failles.md`)
+- `osv-scanner` job in `garde-fous` (#22): Vigie's own Cargo, pnpm and Composer lockfiles scanned on every push and weekly, pinned binary checked by SHA-256, dated per-folder exceptions enforced by a script; `rqrr` 0.11 removes RUSTSEC-2026-0253
 - Vigie console (Tauri 2, Windows and Android): device pairing, authenticated read API and incident acknowledgement (3a6922d)
 - Cross-cutting foundation: single SQLite writer, uniform API errors with `X-Request-Id`, injectable clock, gitleaks, static musl build and TLS dependency guard in CI (#9, 624569f)
 - `LogSource` contract: normalized `Entry`, combined log splitter, timezone handling and shared fixtures (#7, b45372c)
