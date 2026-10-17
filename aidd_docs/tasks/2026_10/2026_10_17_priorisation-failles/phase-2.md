@@ -4,7 +4,7 @@ status: pending
 
 # Instruction: Stockage KEV et EPSS par générations, lecture pour F7
 
-Prérequis : F1 phase 3 livrée (`vuln_sources` à générations et bail, `Load`, purge par lots, `vuln_aliases` indexée par `alias`) et F2 (plan commité en 1b5a76e) : migration 0017 (validateurs, `last_outcome`, `loader_version`, `recent_entries`, `last_request_at`, `retry_after_until`), `Load::begin(.., lease)`, `finish_unchanged(source, g, expected, validators: ValidatorsUpdate::{Keep, Set(..)}, outcome, now)` (primitive générique, une seule instruction en compare-and-swap, partagée par `Load` et `EnrichLoad` ; `mark_fresh` n'existe pas), `Load::release`, `Load::commit(tally, SyncMeta)`, `claim_request`, `record_outcome`.
+Prérequis : F1 phase 3 livrée (`vuln_sources` à générations et bail, `Load`, purge par lots, `vuln_aliases` indexée par `alias`) et F2 (plan commité en 1b5a76e) : migration 0017 (validateurs, `last_outcome`, `loader_version`, `recent_entries`, `last_request_at`, `retry_after_until`), `Load::begin(.., lease)`, `finish_unchanged(source, g, expected, validators: Validators::{Keep, Set(..)}, outcome, now)` (primitive générique, une seule instruction en compare-and-swap, partagée par `Load` et `EnrichLoad` ; `mark_fresh` n'existe pas), `Load::release`, `Load::commit(tally, SyncMeta)`, `claim_request`, `record_outcome`.
 
 ## Architecture projection
 
@@ -75,7 +75,7 @@ journey
    - `EnrichLoad::begin(store, source: EnrichSource, now, lease)` (bail de F2 : plafond de durée de la source + 30 min, pris par le moteur avant toute requête et avant `claim_request`) ;
    - `push_kev(&[KevRow])` / `push_epss(&[EpssRow])` : tampon vidé par transactions IMMEDIATE de `ENRICH_BATCH` lignes (5 000 au départ, réglé par la mesure du test de contention), bail revérifié dans chaque transaction, `INSERT OR IGNORE` avec comptage des doublons ;
    - `commit(info: DatasetInfo, tally, SyncMeta)` (signature de F2) : `vuln_dataset` de `g`, puis bascule en compare-and-swap, validateurs, `validator_url`, `dump_sha256`, `loader_version`, `recent_entries` dans la même transaction courte ; zéro ligne touchée → `Supplanted` ; puis purge par lots et `PRAGMA wal_checkpoint(PASSIVE)` ;
-   - `finish_unchanged` : la primitive générique de F2 `finish_unchanged(source, g, expected, validators: ValidatorsUpdate::{Keep, Set(..)}, outcome, now) -> bool` (une seule instruction en compare-and-swap, partagée par `Load` et `EnrichLoad`, colonnes extensibles) ; F4 y ajoute deux colonnes : `validator_url` (écrite avec `Set(..)`, laissée avec `Keep`) et `stale_count` (`+ 1` sur le chemin périmé) ; zéro ligne → `false`, rien écrit (issue `busy`) ;
+   - `finish_unchanged` : la primitive générique de F2 `finish_unchanged(source, g, expected, validators: Validators::{Keep, Set(..)}, outcome, now) -> bool` (une seule instruction en compare-and-swap, partagée par `Load` et `EnrichLoad`, colonnes extensibles) ; F4 y ajoute deux colonnes : `validator_url` (écrite avec `Set(..)`, laissée avec `Keep`) et `stale_count` (`+ 1` sur le chemin périmé) ; zéro ligne → `false`, rien écrit (issue `busy`) ;
    - `release(self)` : celle de F2 appliquée à la source (abandon) ; aucune ligne active touchée ;
    - `active(source) -> Option<ActiveDataset { released, rows }>` (pour l'`EnrichSink` de la phase 3) ;
    - `StoreTables::open(&Store)` : `TablesState` et KEV entier de la génération active dans une même transaction de lecture ; `epss(&Cve)` par une instruction préparée jointe sur `active_generation` (`EpssFact.generation` rempli), cache `HashMap` pour la durée d'un passage ;
