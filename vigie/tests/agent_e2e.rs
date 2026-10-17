@@ -407,12 +407,15 @@ fn serve_site(php: &[String], root: &Path, state: &Path) -> (Site, u16) {
     .unwrap();
     let child = Command::new(&php[0])
         .args(&php[1..])
+        // Par une option de PHP et non par l'environnement : `docker run`
+        // (PHP 8.1 du CI) ne transmet pas l'environnement au conteneur.
+        .arg("-d")
+        .arg(format!("vigie.site_dir={}", state.display()))
         .arg("-S")
         .arg(format!("127.0.0.1:{port}"))
         .arg("-t")
         .arg(root)
         .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("agent/php/tests/site-router.php"))
-        .env("VIGIE_SITE_DIR", state)
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .spawn()
