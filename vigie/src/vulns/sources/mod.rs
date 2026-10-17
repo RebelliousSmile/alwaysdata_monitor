@@ -7,7 +7,10 @@
 //! modèle de F1, chaque écart compté par raison. Ni réseau ni base : le
 //! cadre de F2 télécharge, les convertisseurs lisent.
 
+pub mod friends_of_presta;
 pub mod osv;
+pub mod release;
+pub mod tar;
 pub mod wordfence;
 
 /// Ce qu'une faille d'une source permet de transmettre à un tiers
