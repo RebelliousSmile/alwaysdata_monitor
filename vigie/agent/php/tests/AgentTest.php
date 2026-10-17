@@ -15,6 +15,7 @@ namespace Vigie\Agent\Tests;
 use Vigie\Agent\UsageError;
 
 use function Vigie\Agent\collect;
+use function Vigie\Agent\collect_inventory;
 use function Vigie\Agent\load_config;
 use function Vigie\Agent\load_secret;
 use function Vigie\Agent\printable;
@@ -390,6 +391,94 @@ function no_sandbox_left(string $root): void
     same([], glob("{$root}/vigie-essai-*") ?: [], 'dossiers du bac à sable supprimés');
 }
 
+// --- Inventaire ------------------------------------------------------------
+
+/** Fixture d'inventaire (site A WordPress, site B PrestaShop), en lecture seule. */
+function inventory_fixture(string $name): string
+{
+    return __DIR__ . '/fixtures/' . $name;
+}
+
+/** Copie d'une fixture d'inventaire, modifiable par le test. */
+function tmp_inventory_site(string $name): string
+{
+    $dir = tmp_dir() . \DIRECTORY_SEPARATOR . 'www';
+    copy_tree(inventory_fixture($name), $dir);
+
+    return $dir;
+}
+
+/** Configuration d'inventaire chargée comme par l'agent. */
+function inventory_config_for(string $root, string $kind, array $inventory = []): \Vigie\Agent\Config
+{
+    return load_config(write_config($root, [
+        'kind' => $kind, 'critical' => [], 'must_contain' => [],
+        'inventory' => ['enabled' => true] + $inventory,
+    ]));
+}
+
+/** Relevé du site ; `$seconds` : budget de temps (négatif : déjà dépassé). */
+function inventory_of(string $root, string $kind, array $inventory = [], int $seconds = 20): array
+{
+    return collect_inventory(inventory_config_for($root, $kind, $inventory), hrtime(true) + $seconds * 1_000_000_000);
+}
+
+/** Composants relevés, au format de inventory-expected.json. */
+function expected_form(array $components): array
+{
+    return array_map(static function (array $c): array {
+        $out = ['purl' => $c['purl'], 'version' => $c['version'], 'scope' => $c['scope'], 'vigie:scope' => $c['vscope'], 'vigie:path' => $c['path']];
+        if (isset($c['parent'])) {
+            $out['vigie:parent'] = $c['parent'];
+        }
+        if (isset($c['config_version'])) {
+            $out['vigie:config-version'] = $c['config_version'];
+        }
+
+        return $out;
+    }, $components);
+}
+
+/** purl relevés, indexés par purl sans version. */
+function purls_by_base(array $inventory): array
+{
+    $out = [];
+    foreach ($inventory['components'] as $c) {
+        $at = strpos($c['purl'], '@');
+        $out[$at === false ? $c['purl'] : substr($c['purl'], 0, $at)] = $c['purl'];
+    }
+
+    return $out;
+}
+
+/** composer.lock fictif de paquets Packagist. */
+function composer_lock(array $names, string $version = '1.0.0'): string
+{
+    $packages = array_map(static fn (string $n): array => ['name' => $n, 'version' => $version, 'type' => 'library', 'notification-url' => 'https://packagist.org/downloads/'], $names);
+
+    return json_encode(['packages' => $packages, 'packages-dev' => []], \JSON_UNESCAPED_SLASHES);
+}
+
+/** Clés de tous les objets d'un document, chemin compris (indices de liste remplacés par []). */
+function key_paths(mixed $value, string $prefix = ''): array
+{
+    if (!\is_array($value)) {
+        return [];
+    }
+    $paths = [];
+    foreach ($value as $key => $child) {
+        $path = array_is_list($value) ? "{$prefix}[]" : "{$prefix}.{$key}";
+        if (!array_is_list($value)) {
+            $paths[$path] = true;
+        }
+        $paths += array_fill_keys(key_paths($child, $path), true);
+    }
+    $paths = array_keys($paths);
+    sort($paths);
+
+    return $paths;
+}
+
 /** Contenu et mtime de tous les fichiers d'un dossier. */
 function snapshot(string $dir): array
 {
@@ -560,6 +649,11 @@ return [
         $before = mtimes(fixture());
         collect(load_config(write_config(fixture())));
         same($before, mtimes(fixture()), 'fichiers et mtime');
+        foreach (['wp-inventory' => 'wordpress', 'ps16-inventory' => 'prestashop', 'ps8-inventory' => 'prestashop', 'ps-hostile' => 'prestashop'] as $name => $kind) {
+            $before = snapshot(inventory_fixture($name));
+            inventory_of(inventory_fixture($name), $kind, ['composer' => ['app/composer.lock']]);
+            same($before, snapshot(inventory_fixture($name)), "fichiers et mtime de {$name}");
+        }
     },
 
     'configuration : clés inconnues et chemins hors racine refusés' => function (): void {
@@ -581,6 +675,298 @@ return [
         load_config(write_config(fixture(), ['endpoint' => 'http://127.0.0.1:8080/r/v1/report']));
         $cli = agent('--dry-run', '--config', write_config(fixture(), ['extra' => 1]));
         same(2, $cli['code'], 'code de retour en CLI');
+    },
+
+    'inventaire : chaque fixture donne exactement inventory-expected.json' => function (): void {
+        $expected = json_decode((string) file_get_contents(inventory_fixture('inventory-expected.json')), true, 32, \JSON_THROW_ON_ERROR);
+        foreach ($expected as $name => $e) {
+            $inventory = inventory_of(inventory_fixture($name), $e['kind'], $e['inventory'] ?? []);
+            same($e['components'], expected_form($inventory['components']), "composants de {$name}");
+            same([$e['complete'], $e['skipped']], [$inventory['complete'], $inventory['skipped']], "complete et skipped de {$name}");
+        }
+    },
+
+    'inventaire : purl.json de F1 rejoué à l\'identique' => function (): void {
+        $vectors = json_decode((string) file_get_contents(__DIR__ . '/../../../tests/fixtures/vulns/purl.json'), true, 8, \JSON_THROW_ON_ERROR);
+        check(\count($vectors) > 50, 'vecteurs lus');
+        foreach ($vectors as $v) {
+            same($v['out'], \Vigie\Agent\purl_canonical($v['in']), $v['why']);
+        }
+        // Le constructeur et l'analyse donnent la même forme.
+        same('pkg:npm/%40Scope/Nom@1.0.0%2Bb', \Vigie\Agent\purl('npm', '@Scope', 'Nom', '1.0.0+b'), 'npm à scope');
+        same('pkg:composer/exemple/outil', \Vigie\Agent\purl('composer', 'Exemple', 'Outil', ''), 'Composer en minuscules, sans version');
+        same(null, \Vigie\Agent\purl('prestashop', 'module', 'exemple.module', '1.0'), 'module à point');
+    },
+
+    'inventaire : npm-alias.json, vecteur commun avec l\'outil d\'inventaire, rejoué' => function (): void {
+        $vectors = json_decode((string) file_get_contents(__DIR__ . '/../../../tests/fixtures/inventory/npm-alias.json'), true, 16, \JSON_THROW_ON_ERROR);
+        foreach ($vectors as $v) {
+            same(['entry', 'key', 'out', 'why'], \Vigie\Agent\sorted_keys($v), 'champs du vecteur');
+            [$verdict, $purl] = \Vigie\Agent\npm_entry($v['key'], $v['entry']);
+            same($v['out'], $verdict === 'component' ? $purl : null, $v['why']);
+        }
+    },
+
+    'inventaire : document limité à la liste blanche, CycloneDX 1.7, UUID v4, digest stable' => function (): void {
+        $config = inventory_config_for(inventory_fixture('ps8-inventory'), 'prestashop');
+        $inventory = collect_inventory($config, hrtime(true) + 20_000_000_000);
+        $body = \Vigie\Agent\build_inventory_body($config, $inventory, 7, 1_792_152_000, \Vigie\Agent\uuid_v4(random_bytes(16)));
+        $doc = json_decode($body, true, 32, \JSON_THROW_ON_ERROR);
+        same([
+            '.agent', '.bom', '.bom.bomFormat', '.bom.components', '.bom.components[].name', '.bom.components[].properties',
+            '.bom.components[].properties[].name', '.bom.components[].properties[].value', '.bom.components[].purl',
+            '.bom.components[].scope', '.bom.components[].type', '.bom.components[].version', '.bom.metadata',
+            '.bom.metadata.component', '.bom.metadata.component.name', '.bom.metadata.component.type', '.bom.metadata.timestamp',
+            '.bom.serialNumber', '.bom.specVersion', '.complete', '.sent_at', '.seq', '.site', '.skipped', '.type', '.v',
+        ], key_paths($doc), 'clés de la liste blanche, et elles seules');
+        same('1.7', $doc['bom']['specVersion'], 'specVersion');
+        check(preg_match('/^urn:uuid:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/', $doc['bom']['serialNumber']) === 1, 'UUID v4');
+        same('2026-10-16T12:00:00Z', $doc['bom']['metadata']['timestamp'], 'timestamp');
+        same(['type' => 'application', 'name' => 'site-a'], $doc['bom']['metadata']['component'], 'composant racine');
+        $names = [];
+        foreach ($doc['bom']['components'] as $c) {
+            foreach ($c['properties'] as $p) {
+                $names[$p['name']] = true;
+            }
+        }
+        same(['vigie:config-version', 'vigie:path', 'vigie:scope'], array_keys($names) === [] ? [] : (static function (array $n): array {
+            sort($n);
+
+            return $n;
+        })(array_keys($names)), 'propriétés vigie:*');
+        same(\Vigie\Agent\inventory_digest($inventory['components']), \Vigie\Agent\inventory_digest(collect_inventory($config, hrtime(true) + 20_000_000_000)['components']), 'deux relevés, même digest');
+        same(\Vigie\Agent\inventory_digest($inventory['components']), \Vigie\Agent\inventory_digest(array_reverse($inventory['components'])), 'digest indépendant de l\'ordre');
+    },
+
+    'inventaire : en-têtes bornés, versions piégées, longues ou à ~ vides, rien de tronqué' => function (): void {
+        $root = tmp_inventory_site('wp-inventory');
+        $plugins = "{$root}/wp-content/plugins";
+        // En-tête précédé de <?php sur sa ligne, fins de ligne \r\n.
+        file_put_contents("{$plugins}/exemple-cache/chargeur.php", "<?php /* Plugin Name: Exemple cache\r\n Version: 2.1.0\r\n*/\r\n");
+        $make = static function (string $slug, string $content) use ($plugins): void {
+            mkdir("{$plugins}/{$slug}");
+            file_put_contents("{$plugins}/{$slug}/{$slug}.php", $content);
+        };
+        $make('version-loin', "<?php\n/* Plugin Name: Loin\n" . str_repeat("//\n", 3000) . " * Version: 1.0\n*/\n");
+        $make('version-piegee', "<?php\n/*\nPlugin Name: Piège\nVersion: 1.0'; system('id'); \$x='\n*/\n");
+        $make('version-tilde', "<?php\n/*\nPlugin Name: Tilde\nVersion: 1.0~beta\n*/\n");
+        $make('version-longue', "<?php\n/*\nPlugin Name: Longue\nVersion: " . str_repeat('1', 129) . "\n*/\n");
+        $make('version-128', "<?php\n/*\nPlugin Name: Juste\nVersion: " . str_repeat('1', 128) . "\n*/\n");
+        $make('ligne-coupee', "<?php\n/*\nPlugin Name: Coupée\n" . str_repeat(' ', 150) . 'Version: 1.0.0' . str_repeat('x', 120) . "\n*/\n");
+        // Fichier d'en-tête de 50 Mio : 8 Kio lus.
+        mkdir("{$plugins}/geant");
+        $big = fopen("{$plugins}/geant/geant.php", 'w');
+        fwrite($big, "<?php\n/*\nPlugin Name: Géant\n");
+        ftruncate($big, 50 * 1024 * 1024);
+        fseek($big, 49 * 1024 * 1024);
+        fwrite($big, "Version: 9.9.9\n*/\n");
+        fclose($big);
+        $start = hrtime(true);
+        $inventory = inventory_of($root, 'wordpress');
+        check(hrtime(true) - $start < 5_000_000_000, 'relevé borné dans le temps');
+        $by = purls_by_base($inventory);
+        same('pkg:wordpress/plugin/exemple-cache@2.1.0', $by['pkg:wordpress/plugin/exemple-cache'], 'en-tête <?php et \r\n');
+        foreach (['version-loin', 'version-piegee', 'version-tilde', 'version-longue', 'geant', 'ligne-coupee'] as $slug) {
+            same("pkg:wordpress/plugin/{$slug}", $by["pkg:wordpress/plugin/{$slug}"] ?? null, "{$slug} : version vide");
+        }
+        same('pkg:wordpress/plugin/version-128@' . str_repeat('1', 128), $by['pkg:wordpress/plugin/version-128'], 'version de 128 caractères gardée');
+        check(!isset($by['pkg:wordpress/plugin/sans-entete']), 'dossier sans Plugin Name ignoré');
+        same(true, $inventory['complete'], 'versions vides : relevé complet');
+    },
+
+    'inventaire : config.xml hostiles lus comme du texte, jamais développés' => function (): void {
+        $root = tmp_inventory_site('ps-hostile');
+        foreach (['doctype_mod', 'nul_mod', 'utf_mod', 'mal_forme'] as $module) {
+            file_put_contents("{$root}/modules/{$module}/{$module}.php", "<?php\nclass M extends Module { public function __construct() { \$this->version = '1.0.0'; } }\n");
+        }
+        $inventory = inventory_of($root, 'prestashop');
+        foreach ($inventory['components'] as $c) {
+            same('1.0.0', $c['version'], "{$c['name']} : version du littéral");
+            check(!isset($c['config_version']), "{$c['name']} : config.xml refusé, aucun écart signalé");
+        }
+        check(!str_contains(json_encode($inventory), '9.9.'), 'aucune entité développée');
+    },
+
+    'inventaire : liens symboliques refusés et comptés, même vers l\'intérieur' => function (): void {
+        skip_unless(\DIRECTORY_SEPARATOR === '/', 'liens symboliques sous Unix');
+        $root = tmp_inventory_site('wp-inventory');
+        symlink("{$root}/wp-content/plugins/exemple-formulaire", "{$root}/wp-content/plugins/lien-interieur");
+        $inventory = inventory_of($root, 'wordpress');
+        check(!isset(purls_by_base($inventory)['pkg:wordpress/plugin/lien-interieur']), 'extension en lien non lue');
+        same([false, 1], [$inventory['complete'], $inventory['skipped']], 'extension en lien');
+
+        $root = tmp_inventory_site('wp-inventory');
+        $outside = tmp_dir();
+        file_put_contents("{$outside}/composer.lock", composer_lock(['exemple/dehors']));
+        unlink("{$root}/composer.lock");
+        symlink("{$outside}/composer.lock", "{$root}/composer.lock");
+        rename("{$root}/wp-content/themes/exemple-theme-enfant", "{$outside}/enfant");
+        symlink("{$outside}/enfant", "{$root}/wp-content/themes/exemple-theme-enfant");
+        $inventory = inventory_of($root, 'wordpress');
+        $by = purls_by_base($inventory);
+        check(!isset($by['pkg:composer/exemple/dehors']) && !isset($by['pkg:wordpress/theme/exemple-theme-enfant']), 'cibles hors racine non lues');
+        same([false, 2], [$inventory['complete'], $inventory['skipped']], 'lockfile et thème en lien');
+
+        $root = tmp_inventory_site('ps8-inventory');
+        rename("{$root}/modules", "{$root}/vrais-modules");
+        symlink("{$root}/vrais-modules", "{$root}/modules");
+        $inventory = inventory_of($root, 'prestashop');
+        same([false, 1], [$inventory['complete'], $inventory['skipped']], 'dossier modules en lien');
+    },
+
+    'inventaire : noms hors grammaire écartés et comptés, jamais tronqués, sans regex lente' => function (): void {
+        $root = tmp_inventory_site('ps8-inventory');
+        mkdir("{$root}/modules/exemple.module");
+        file_put_contents("{$root}/modules/exemple.module/exemple.module.php", "<?php\n");
+        $long = str_repeat('m', 65);
+        mkdir("{$root}/modules/{$long}");
+        file_put_contents("{$root}/modules/{$long}/{$long}.php", "<?php\n");
+        $pathological = 'a' . str_repeat('-a', 50) . '!';
+        file_put_contents("{$root}/composer.lock", composer_lock([
+            'exemple/' . str_repeat('b', 207),   // 215 octets
+            'exemple/' . str_repeat('b', 206),   // 214 octets : gardé
+            "exemple/{$pathological}",
+            'pas-de-vendor',
+        ]));
+        $start = hrtime(true);
+        $inventory = inventory_of($root, 'prestashop');
+        check(hrtime(true) - $start < 2_000_000_000, 'relevé rapide');
+        $by = purls_by_base($inventory);
+        same([false, 5], [$inventory['complete'], $inventory['skipped']], 'module à point, module de 65, nom de 215, motif, sans vendor');
+        same('pkg:composer/exemple/' . str_repeat('b', 206) . '@1.0.0', $by['pkg:composer/exemple/' . str_repeat('b', 206)] ?? null, 'nom de 214 octets gardé');
+        foreach (array_keys($by) as $base) {
+            check(!str_contains($base, str_repeat('b', 207)), 'nom de 215 octets jamais tronqué');
+        }
+        $start = hrtime(true);
+        same(false, \Vigie\Agent\composer_part($pathological, false), 'motif pathologique');
+        same(false, \Vigie\Agent\composer_part(str_repeat('a-', 100) . '!', false), 'motif pathologique long');
+        check(hrtime(true) - $start < 50_000_000, 'rejet en moins de 50 ms');
+        same(\PREG_NO_ERROR, preg_last_error(), 'aucune erreur PCRE ignorée');
+    },
+
+    'inventaire : lockfiles trop gros, illisibles, v1 ou hors registre : rien, relevé partiel' => function (): void {
+        $root = tmp_inventory_site('ps8-inventory');
+        file_put_contents("{$root}/composer.lock", '{"packages": [' . str_repeat(' ', 4 * 1024 * 1024) . ']}');
+        $inventory = inventory_of($root, 'prestashop');
+        same([false, 1], [$inventory['complete'], $inventory['skipped']], 'composer.lock de 4 Mio + 1');
+        file_put_contents("{$root}/composer.lock", '{"packages": [');
+        same([false, 1], array_values(array_intersect_key(inventory_of($root, 'prestashop'), ['complete' => 0, 'skipped' => 0])), 'JSON invalide');
+        file_put_contents("{$root}/composer.lock", str_repeat('[', 40) . str_repeat(']', 40));
+        same(1, inventory_of($root, 'prestashop')['skipped'], 'profondeur au-delà de 32');
+        file_put_contents("{$root}/composer.lock", composer_lock([]));
+        file_put_contents("{$root}/package-lock.json", json_encode(['lockfileVersion' => 1, 'dependencies' => ['a' => ['version' => '1.0.0']]]));
+        $inventory = inventory_of($root, 'prestashop');
+        same([false, 1], [$inventory['complete'], $inventory['skipped']], 'package-lock.json v1');
+        // Hors registre : paquets path et vcs sans notification-url, npm git,
+        // file: et archive hors registre ; membres du projet ni émis ni comptés.
+        file_put_contents("{$root}/composer.lock", json_encode(['packages' => [
+            ['name' => 'exemple/chemin', 'version' => 'dev-main', 'dist' => ['type' => 'path', 'url' => '../chemin']],
+            ['name' => 'exemple/prive', 'version' => '1.0.0', 'source' => ['type' => 'git', 'url' => 'https://git.example.org/exemple/prive.git'], 'dist' => ['type' => 'zip', 'url' => 'https://git.example.org/archive.zip']],
+            ['name' => 'exemple/public', 'version' => '1.0.0', 'notification-url' => 'https://packagist.org/downloads/'],
+        ]]));
+        file_put_contents("{$root}/package-lock.json", json_encode(['lockfileVersion' => 3, 'packages' => [
+            '' => ['name' => 'app'],
+            'node_modules/depuis-git' => ['version' => '1.0.0', 'resolved' => 'git+ssh://git@git.example.org/exemple/a.git#abc'],
+            'node_modules/local' => ['version' => '1.0.0', 'resolved' => 'file:../local'],
+            'node_modules/archive' => ['version' => '1.0.0', 'resolved' => 'https://example.org/archive.tgz'],
+            'node_modules/lien' => ['resolved' => 'packages/lien', 'link' => true],
+            'packages/lien' => ['name' => 'lien', 'version' => '0.0.1'],
+            'node_modules/registre' => ['version' => '2.0.0', 'resolved' => 'https://registry.npmjs.org/registre/-/registre-2.0.0.tgz'],
+        ]]));
+        $inventory = inventory_of($root, 'prestashop');
+        $by = purls_by_base($inventory);
+        same([false, 5], [$inventory['complete'], $inventory['skipped']], 'deux Composer et trois npm hors registre');
+        check(isset($by['pkg:composer/exemple/public'], $by['pkg:npm/registre']), 'paquets de registre gardés');
+        check(!isset($by['pkg:npm/lien']), 'membre du projet ignoré');
+    },
+
+    'inventaire : WPackagist au format de Composer (svn, zip, sans notification-url) : paquet de registre' => function (): void {
+        $root = tmp_inventory_site('wp-inventory');
+        $lock = json_decode((string) file_get_contents("{$root}/composer.lock"), true);
+        $entry = $lock['packages'][1];
+        same('wpackagist-plugin/exemple-bedrock', $entry['name'], 'entrée WPackagist de la fixture');
+        same([false, 'svn', 'zip'], [\array_key_exists('notification-url', $entry), $entry['source']['type'], $entry['dist']['type']], 'forme écrite par Composer');
+        rename("{$root}/wp-content/plugins/exemple-bedrock", "{$root}/ailleurs");
+        $inventory = inventory_of($root, 'wordpress');
+        same('pkg:wordpress/plugin/exemple-bedrock@1.9.0', purls_by_base($inventory)['pkg:wordpress/plugin/exemple-bedrock'] ?? null, 'version du lockfile sans le disque');
+        same([true, 0], [$inventory['complete'], $inventory['skipped']], 'rien de compté');
+        // Sur un site generic : reste un paquet Composer.
+        $by = purls_by_base(inventory_of($root, 'generic'));
+        same('pkg:composer/wpackagist-plugin/exemple-bedrock@1.9.0', $by['pkg:composer/wpackagist-plugin/exemple-bedrock'] ?? null, 'generic : pkg:composer');
+    },
+
+    'inventaire : kind generic : Composer et npm seulement, prestashop-module en pkg:composer' => function (): void {
+        $inventory = inventory_of(inventory_fixture('ps8-inventory'), 'generic');
+        $purls = array_column($inventory['components'], 'purl');
+        same([
+            'pkg:composer/prestashop/decimal@1.5.0',
+            'pkg:composer/prestashop/exemple-natif@1.0.0',
+            'pkg:composer/prestashop/absent@4.0.0',
+        ], $purls, 'aucun relevé de CMS');
+        $inventory = inventory_of(inventory_fixture('wp-inventory'), 'generic');
+        foreach ($inventory['components'] as $c) {
+            check(str_starts_with($c['purl'], 'pkg:composer/') || str_starts_with($c['purl'], 'pkg:npm/'), $c['purl']);
+        }
+    },
+
+    'inventaire : 501 entrées, 2 001 composants, corps au-delà de 512 Kio, délai dépassé' => function (): void {
+        $root = tmp_inventory_site('wp-inventory');
+        for ($i = 0; $i < 501; ++$i) {
+            touch(sprintf('%s/wp-content/mu-plugins/f%03d.txt', $root, $i));
+        }
+        $inventory = inventory_of($root, 'wordpress');
+        same(false, $inventory['complete'], '501 entrées : arrêt à 500');
+
+        $root = tmp_inventory_site('ps16-inventory');
+        $names = [];
+        for ($i = 0; $i < 2001; ++$i) {
+            $names[] = sprintf('exemple/paquet-%04d-%s', $i, str_repeat('x', 180));
+        }
+        file_put_contents("{$root}/composer.lock", composer_lock($names));
+        $config = inventory_config_for($root, 'prestashop');
+        $inventory = collect_inventory($config, hrtime(true) + 20_000_000_000);
+        same(2000, \count($inventory['components']), '2 000 gardés');
+        same([false, 5], [$inventory['complete'], $inventory['skipped']], 'noyau et modules d\'abord, puis 1 996 paquets : 5 comptés');
+        $body = \Vigie\Agent\build_inventory_body($config, $inventory, 1, 1_792_152_000, \Vigie\Agent\uuid_v4(str_repeat("\0", 16)));
+        check(\strlen($body) <= 524_288, 'corps de ' . \strlen($body) . ' octets');
+        $doc = json_decode($body, true, 32, \JSON_THROW_ON_ERROR);
+        $kept = \count($doc['bom']['components']);
+        check($kept < 2000 && $kept > 500, "composants retirés depuis la fin ({$kept} gardés)");
+        same(false, $doc['complete'], 'corps tronqué : partiel');
+        same(5 + 2000 - $kept, $doc['skipped'], 'retirés comptés');
+        same(array_slice(array_column($inventory['components'], 'purl'), 0, $kept), array_column($doc['bom']['components'], 'purl'), 'ordre du relevé gardé');
+
+        $inventory = inventory_of(inventory_fixture('wp-inventory'), 'wordpress', [], -1);
+        same(false, $inventory['complete'], 'délai dépassé');
+    },
+
+    'inventaire : configuration refusée, section absente ou désactivée sans relevé' => function (): void {
+        $refused = static fn (mixed $inventory, string $expected) => refused_config(['inventory' => $inventory], $expected);
+        $refused(['enabled' => true, 'autre' => 1], 'inventory');
+        $refused([], 'inventory');
+        $refused(['enabled' => 'oui'], 'inventory.enabled');
+        $refused(['composer' => []], 'inventory.enabled');
+        $refused(['enabled' => true, 'composer' => ['../composer.lock']], 'inventory.composer');
+        $refused(['enabled' => true, 'npm' => ['a b/package-lock.json']], 'inventory.npm');
+        $refused(['enabled' => true, 'npm' => array_map(static fn (int $i): string => "p{$i}/package-lock.json", range(1, 11))], 'inventory.npm');
+        $refused(['enabled' => true, 'composer' => ['a/composer.lock', 'a/composer.lock']], 'inventory.composer');
+        refused_config(['inventory' => ['enabled' => true], 'endpoint' => 'https://vigie.invalid/autre'], 'inventory');
+        $cli = agent('--dry-run', '--config', write_config(fixture(), ['inventory' => ['enabled' => 1]]));
+        same(2, $cli['code'], 'code de retour en CLI');
+        check(str_contains($cli['stderr'], 'inventory'), $cli['stderr']);
+        same(null, load_config(write_config(fixture()))->inventory, 'section absente : désactivé');
+        same(null, load_config(write_config(fixture(), ['inventory' => ['enabled' => false]]))->inventory, 'désactivé');
+        $config = load_config(write_config(fixture(), ['inventory' => ['enabled' => true]]));
+        same('https://vigie.invalid/r/v1/inventory', $config->inventoryEndpoint, 'point d\'entrée dérivé');
+        same('prestashop', load_config(write_config(fixture(), ['kind' => 'prestashop']))->kind, 'kind prestashop');
+        same(null, load_config(write_config(fixture(), ['kind' => 'prestashop']))->uploads, 'pas de uploads par défaut');
+    },
+
+    'inventaire : ni include, ni eval, ni analyseur XML dans l\'agent' => function (): void {
+        $source = (string) file_get_contents(\dirname(__DIR__) . '/vigie-agent.php');
+        foreach (['/\b(?:include|require)(?:_once)?\s*\(?\s*\$/', '/\beval\s*\(/', '/simplexml|DOMDocument|XMLReader|LIBXML_|token_get_all|highlight_file|shell_exec|passthru|proc_open|\bexec\s*\(|\bsystem\s*\(/i'] as $pattern) {
+            same(0, preg_match($pattern, $source, $m), "motif {$pattern} : " . ($m[0] ?? ''));
+        }
     },
 
     'libellés : contrôles et UTF-8 invalide remplacés, longueur bornée' => function (): void {

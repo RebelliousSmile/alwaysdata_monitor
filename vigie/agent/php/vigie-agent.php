@@ -76,6 +76,9 @@ final class Config
         public readonly ?string $siteUrl = null,
         /** Fuseau IANA du serveur web, celui de %{TIME} (htaccess-*). */
         public readonly ?string $tz = null,
+        /** @var ?array{composer: list<string>, npm: list<string>} lockfiles en plus de ceux de la racine ; null : inventaire désactivé */
+        public readonly ?array $inventory = null,
+        public readonly ?string $inventoryEndpoint = null,
     ) {
     }
 }
@@ -191,7 +194,7 @@ function load_config(string $path): Config
     if (!\is_array($data) || array_is_list($data) && $data !== []) {
         throw new UsageError('Configuration : un objet JSON est attendu.');
     }
-    $known = ['site', 'endpoint', 'root', 'kind', 'critical', 'must_contain', 'uploads', 'commands', 'logs', 'url', 'tz'];
+    $known = ['site', 'endpoint', 'root', 'kind', 'critical', 'must_contain', 'uploads', 'commands', 'logs', 'url', 'tz', 'inventory'];
     foreach (array_keys($data) as $key) {
         if (!\in_array($key, $known, true)) {
             throw new UsageError("Configuration : clé inconnue « {$key} ».");
@@ -210,8 +213,8 @@ function load_config(string $path): Config
         throw new UsageError('Configuration : root attendu, chemin absolu.');
     }
     $kind = $data['kind'] ?? 'generic';
-    if (!\in_array($kind, ['wordpress', 'generic'], true)) {
-        throw new UsageError('Configuration : kind vaut wordpress ou generic.');
+    if (!\in_array($kind, ['wordpress', 'prestashop', 'generic'], true)) {
+        throw new UsageError('Configuration : kind vaut wordpress, prestashop ou generic.');
     }
     $critical = $data['critical'] ?? [];
     if (!\is_array($critical) || !array_is_list($critical) || \count($critical) > MAX_CRITICAL) {
@@ -255,9 +258,18 @@ function load_config(string $path): Config
         throw new UsageError('Configuration : tz attendu, fuseau IANA du serveur web (Europe/Paris).');
     }
 
+    $inventory = inventory_config($data['inventory'] ?? null);
+    $inventoryEndpoint = null;
+    if ($inventory !== null) {
+        if (preg_match('#/r/v1/report$#', $endpoint) !== 1) {
+            throw new UsageError('Configuration : avec inventory, endpoint doit finir par /r/v1/report.');
+        }
+        $inventoryEndpoint = substr($endpoint, 0, -\strlen('report')) . 'inventory';
+    }
+
     return new Config(
         $site, $endpoint, rtrim($root, '/\\'), $kind, $critical, $mustContain, $uploads, $commandsEndpoint, $commandsKey,
-        $logsDir, $logsHosts, $logsEndpoint, $siteUrl, $tz,
+        $logsDir, $logsHosts, $logsEndpoint, $siteUrl, $tz, $inventory, $inventoryEndpoint,
     );
 }
 
@@ -2083,6 +2095,970 @@ function resume_htaccess(Config $config, string $dir, array &$state): void
     }
     $state['htaccess_pending'] = null;
     save_state($dir, $state);
+}
+
+// --- Inventaire (vigie/docs/agent-php.md, vigie/docs/failles.md) ----------
+//
+// Facultatif. Avec `"inventory": {"enabled": true}`, l'agent relève les
+// composants du site, en lecture seule et sans jamais exécuter ni inclure de
+// PHP du site : cœur, extensions, mu-plugins et thèmes (WordPress), noyau et
+// modules (PrestaShop), composer.lock et package-lock.json (tout site). Il
+// les décrit en CycloneDX 1.7, avec les purl de la grammaire commune de
+// failles.md (mêmes vecteurs que le veilleur : tests/fixtures/vulns/purl.json).
+// Rien n'est jamais tronqué : une valeur plus longue que sa borne est rejetée
+// par strlen avant toute expression régulière (version → vide, nom →
+// composant écarté et compté). Seul un inventaire `complete` vaut absence
+// d'un composant : toute source refusée, illisible ou bornée le rend partiel.
+
+const INVENTORY_MAX_COMPONENTS = 2000;
+/** Corps d'un inventaire, au plus : même borne que le veilleur. */
+const INVENTORY_MAX_BODY = 524288;
+const INVENTORY_HEADER_BYTES = 8192;
+const INVENTORY_MAIN_BYTES = 65536;
+const INVENTORY_MAX_PHP_FILES = 20;
+const INVENTORY_MAX_ENTRIES = 500;
+const INVENTORY_LOCK_BYTES = 4 * 1024 * 1024;
+const INVENTORY_JSON_DEPTH = 32;
+const INVENTORY_MAX_PATHS = 10;
+const INVENTORY_SECONDS = 20;
+/** Ligne d'en-tête examinée, au plus ; une valeur lue sur une ligne coupée est illisible. */
+const INVENTORY_HEADER_LINE = 256;
+const MAX_VERSION_CHARS = 128;
+const MAX_PACKAGE_NAME = 214;
+const MAX_WORDPRESS_SLUG = 200;
+const MAX_PRESTASHOP_MODULE = 64;
+const MAX_PURL_CHARS = 1024;
+const MAX_VIGIE_PATH = 200;
+/** Écosystèmes de la grammaire commune (`cargo` n'est jamais émis par l'agent). */
+const PURL_TYPES = ['composer', 'npm', 'cargo', 'wordpress', 'prestashop'];
+
+/** Relevé en cours : composants gardés, sources écartées, chemins vus. */
+final class InventoryScan
+{
+    /** @var list<array<string, string>> */
+    public array $components = [];
+    public int $skipped = 0;
+    public bool $complete = true;
+    /** @var array<string, true> clés (base) des composants WordPress et PrestaShop */
+    public array $bases = [];
+    /** @var array<string, true> clés (purl, chemin) des composants Composer et npm */
+    public array $pairs = [];
+    /** @var array<string, true> dossiers listés et fichiers lus, relatifs à la racine */
+    public array $stat = [];
+
+    public function __construct(public string $rootReal, public int $deadline)
+    {
+    }
+
+    /** Source ou composant écarté : compté, relevé partiel. */
+    public function skip(int $count = 1): void
+    {
+        $this->skipped += $count;
+        $this->complete = false;
+    }
+
+    public function late(): bool
+    {
+        if (hrtime(true) > $this->deadline) {
+            $this->complete = false;
+
+            return true;
+        }
+
+        return false;
+    }
+}
+
+/**
+ * Section `inventory` de config.json ; null : désactivée.
+ *
+ * @return ?array{composer: list<string>, npm: list<string>}
+ */
+function inventory_config(mixed $inventory): ?array
+{
+    if ($inventory === null) {
+        return null;
+    }
+    if (!\is_array($inventory) || array_is_list($inventory) || array_diff(array_keys($inventory), ['enabled', 'composer', 'npm']) !== []) {
+        throw new UsageError('Configuration : inventory est {"enabled": …, "composer": […], "npm": […]}, sans autre clé.');
+    }
+    if (!\array_key_exists('enabled', $inventory) || !\is_bool($inventory['enabled'])) {
+        throw new UsageError('Configuration : inventory.enabled attendu, true ou false.');
+    }
+    $paths = [];
+    foreach (['composer', 'npm'] as $kind) {
+        $list = $inventory[$kind] ?? [];
+        if (!\is_array($list) || !array_is_list($list) || \count($list) > INVENTORY_MAX_PATHS) {
+            throw new UsageError("Configuration : inventory.{$kind} est une liste de " . INVENTORY_MAX_PATHS . ' chemins au plus.');
+        }
+        foreach ($list as $path) {
+            relative_path($path, "inventory.{$kind}");
+            if (!valid_vigie_path($path)) {
+                throw new UsageError("Configuration : inventory.{$kind} contient un chemin hors de [A-Za-z0-9._@+-].");
+            }
+        }
+        if (\count(array_unique($list)) !== \count($list)) {
+            throw new UsageError("Configuration : chemin en double dans inventory.{$kind}.");
+        }
+        $paths[$kind] = $list;
+    }
+
+    return $inventory['enabled'] ? $paths : null;
+}
+
+/** Chemin relatif admis dans `vigie:path` : segments de [A-Za-z0-9._@+-], 200 octets au plus. */
+function valid_vigie_path(string $path): bool
+{
+    if ($path === '' || \strlen($path) > MAX_VIGIE_PATH) {
+        return false;
+    }
+    foreach (explode('/', $path) as $segment) {
+        if ($segment === '.' || $segment === '..' || preg_match('/^[A-Za-z0-9._@+-]++$/', $segment) !== 1) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+// --- purl (grammaire commune de failles.md, vigie/src/vulns/purl.rs) ------
+
+/** Version de la grammaire commune, telle quelle, sinon '' (jamais tronquée). */
+function clean_version(mixed $raw): string
+{
+    if (!\is_string($raw)) {
+        return '';
+    }
+    $raw = trim($raw);
+    if ($raw === '' || \strlen($raw) > MAX_VERSION_CHARS) {
+        return '';
+    }
+
+    return preg_match('/^[0-9A-Za-z.+_-]{1,128}+$/', $raw) === 1 ? $raw : '';
+}
+
+/** `rawurlencode` : tout octet hors de [A-Za-z0-9._~-] en %XX. */
+function purl_segment(string $segment): string
+{
+    return rawurlencode($segment);
+}
+
+/** Partie d'un nom Composer (`ValidatingArrayLoader`), déjà en minuscules. */
+function composer_part(string $part, bool $vendor): bool
+{
+    $pattern = $vendor ? '/^[a-z0-9]++(?:[_.-][a-z0-9]++)*+$/' : '/^[a-z0-9]++(?:(?:[_.]|-{1,2})[a-z0-9]++)*+$/';
+
+    return \strlen($part) <= MAX_PACKAGE_NAME && preg_match($pattern, $part) === 1;
+}
+
+/** Partie d'un nom npm (`validate-npm-package-name`). */
+function npm_part(string $part): bool
+{
+    return \strlen($part) <= MAX_PACKAGE_NAME && preg_match("/^(?![._])[A-Za-z0-9._~!*'()-]++$/", $part) === 1;
+}
+
+/**
+ * purl canonique d'un composant, ou null hors grammaire. `version` vide ou
+ * null : purl sans version.
+ */
+function purl(string $type, ?string $namespace, string $name, ?string $version): ?string
+{
+    $namespace ??= '';
+    switch ($type) {
+        case 'composer':
+            $namespace = strtolower($namespace);
+            $name = strtolower($name);
+            if (!composer_part($namespace, true) || !composer_part($name, false) || \strlen($namespace) + 1 + \strlen($name) > MAX_PACKAGE_NAME) {
+                return null;
+            }
+            break;
+        case 'npm':
+            if ($namespace !== '' && (!str_starts_with($namespace, '@') || !npm_part(substr($namespace, 1)))) {
+                return null;
+            }
+            if (!npm_part($name) || ($namespace === '' ? 0 : \strlen($namespace) + 1) + \strlen($name) > MAX_PACKAGE_NAME) {
+                return null;
+            }
+            break;
+        case 'cargo':
+            if ($namespace !== '' || \strlen($name) > 64 || preg_match('/^[A-Za-z][A-Za-z0-9_-]*+$/', $name) !== 1) {
+                return null;
+            }
+            break;
+        case 'wordpress':
+            $ok = match ($namespace) {
+                'plugin', 'theme' => \strlen($name) <= MAX_WORDPRESS_SLUG && preg_match('/^[A-Za-z0-9._-]++$/', $name) === 1,
+                'core' => $name === 'core',
+                default => false,
+            };
+            if (!$ok) {
+                return null;
+            }
+            break;
+        case 'prestashop':
+            $ok = match ($namespace) {
+                'module' => \strlen($name) <= MAX_PRESTASHOP_MODULE && preg_match('/^[A-Za-z0-9_-]++$/', $name) === 1,
+                'core' => $name === 'prestashop',
+                default => false,
+            };
+            if (!$ok) {
+                return null;
+            }
+            break;
+        default:
+            return null;
+    }
+    if ($version !== null && $version !== '' && clean_version($version) !== $version) {
+        return null;
+    }
+    $out = 'pkg:' . $type . '/';
+    if ($namespace !== '') {
+        $out .= purl_segment($namespace) . '/';
+    }
+    $out .= purl_segment($name);
+    if ($version !== null && $version !== '') {
+        $out .= '@' . purl_segment($version);
+    }
+
+    return $out;
+}
+
+/** Décodage pourcent strict, UTF-8 valide ; null sinon. */
+function purl_decode(string $segment): ?string
+{
+    if (preg_match('/%(?![0-9A-Fa-f]{2})/', $segment) === 1) {
+        return null;
+    }
+    $decoded = rawurldecode($segment);
+
+    return preg_match('//u', $decoded) === 1 ? $decoded : null;
+}
+
+/**
+ * Analyse un purl reçu et rend sa forme canonique, ou null : même règles que
+ * `Purl::parse` du veilleur, éprouvées par purl.json.
+ */
+function purl_canonical(string $raw): ?string
+{
+    if (\strlen($raw) > MAX_PURL_CHARS || preg_match('/^[\x21-\x7E]*+$/', $raw) !== 1) {
+        return null;
+    }
+    $rest = $raw;
+    $hash = strrpos($rest, '#');
+    if ($hash !== false) {
+        foreach (explode('/', trim(substr($rest, $hash + 1), '/')) as $segment) {
+            $segment = purl_decode($segment);
+            if ($segment === null || $segment === '' || $segment === '.' || $segment === '..' || str_contains($segment, '/')) {
+                return null;
+            }
+        }
+        $rest = substr($rest, 0, $hash);
+    }
+    $question = strrpos($rest, '?');
+    if ($question !== false) {
+        $keys = [];
+        foreach (explode('&', substr($rest, $question + 1)) as $pair) {
+            if (!str_contains($pair, '=')) {
+                return null;
+            }
+            [$key, $value] = explode('=', $pair, 2);
+            $key = strtolower($key);
+            $value = purl_decode($value);
+            if (preg_match('/^[a-z.\-_][a-z0-9.\-_]*+$/', $key) !== 1 || $value === null || $value === '' || isset($keys[$key])) {
+                return null;
+            }
+            $keys[$key] = true;
+        }
+        $rest = substr($rest, 0, $question);
+    }
+    if (!str_starts_with($rest, 'pkg:')) {
+        return null;
+    }
+    $rest = ltrim(substr($rest, 4), '/');
+    $version = null;
+    $at = strrpos($rest, '@');
+    if ($at !== false && !str_contains(substr($rest, $at + 1), '/')) {
+        $version = purl_decode(substr($rest, $at + 1));
+        if ($version === null || $version === '') {
+            return null;
+        }
+        $rest = substr($rest, 0, $at);
+    }
+    $segments = explode('/', rtrim($rest, '/'));
+    $type = strtolower((string) array_shift($segments));
+    if (!\in_array($type, PURL_TYPES, true)) {
+        return null;
+    }
+    $parts = [];
+    foreach ($segments as $segment) {
+        $decoded = purl_decode($segment);
+        if ($decoded === null || $decoded === '') {
+            return null;
+        }
+        $parts[] = $decoded;
+    }
+    [$namespace, $name] = match (\count($parts)) {
+        1 => [null, $parts[0]],
+        2 => [$parts[0], $parts[1]],
+        default => [null, null],
+    };
+    if ($name === null) {
+        return null;
+    }
+    if ($version !== null && clean_version($version) !== $version) {
+        return null;
+    }
+
+    return purl($type, $namespace, $name, $version);
+}
+
+// --- Relevé --------------------------------------------------------------
+
+/**
+ * Composant relevé. `vscope` : scope Vigie (required, dev, mu) ; le scope
+ * CycloneDX en découle (excluded pour dev).
+ */
+function inventory_add(InventoryScan $scan, string $type, string $name, string $version, string $purl, string $vscope, string $path, array $properties = []): void
+{
+    if (\count($scan->components) >= INVENTORY_MAX_COMPONENTS) {
+        $scan->skip();
+
+        return;
+    }
+    $ecosystem = substr($purl, 4, (int) strpos($purl, '/') - 4);
+    $at = strpos($purl, '@');
+    $base = $at === false ? $purl : substr($purl, 0, $at);
+    if ($ecosystem === 'wordpress' || $ecosystem === 'prestashop') {
+        // Un composant par purl sans version : le premier relevé (le disque)
+        // l'emporte sur le lockfile.
+        if (isset($scan->bases[$base])) {
+            return;
+        }
+        $scan->bases[$base] = true;
+    } else {
+        $pair = $purl . "\n" . $path;
+        if (isset($scan->pairs[$pair])) {
+            return;
+        }
+        $scan->pairs[$pair] = true;
+    }
+    $scan->components[] = [
+        'type' => $type, 'name' => $name, 'version' => $version, 'purl' => $purl,
+        'scope' => $vscope === 'dev' ? 'excluded' : 'required', 'vscope' => $vscope, 'path' => $path,
+    ] + $properties;
+}
+
+/**
+ * Début d'un fichier lu sans suivre de lien hors de la racine ; null s'il
+ * manque ou n'est pas un fichier. Hors racine ou illisible : compté.
+ */
+function read_head(InventoryScan $scan, string $relative, int $bytes): ?string
+{
+    $found = locate($scan->rootReal, $relative);
+    if ($found['state'] === 'missing' || $found['state'] === 'not-file') {
+        return null;
+    }
+    $scan->stat[$relative] = true;
+    $content = $found['state'] === 'ok' ? @file_get_contents($found['real'], false, null, 0, $bytes) : false;
+    if ($content === false) {
+        $scan->skip();
+
+        return null;
+    }
+
+    return $content;
+}
+
+/**
+ * Entrées d'un dossier, triées, 500 au plus ; null s'il n'existe pas. Un
+ * dossier lien symbolique ou hors racine est refusé et compté.
+ *
+ * @return ?list<string>
+ */
+function list_dir(InventoryScan $scan, string $relative): ?array
+{
+    $real = locate_dir($scan->rootReal, $relative);
+    if ($real === null) {
+        return null;
+    }
+    $scan->stat[$relative] = true;
+    $handle = $real === false ? false : @opendir($real);
+    if ($handle === false) {
+        $scan->skip();
+
+        return null;
+    }
+    $names = [];
+    while (($name = readdir($handle)) !== false) {
+        if ($name === '.' || $name === '..') {
+            continue;
+        }
+        if (\count($names) >= INVENTORY_MAX_ENTRIES) {
+            $scan->complete = false;
+            break;
+        }
+        $names[] = $name;
+    }
+    closedir($handle);
+    sort($names, \SORT_STRING);
+
+    return $names;
+}
+
+/** Une entrée d'un dossier listé est-elle un lien symbolique ? (jamais suivi, compté) */
+function linked_entry(InventoryScan $scan, string $relative): bool
+{
+    $path = $scan->rootReal . \DIRECTORY_SEPARATOR . str_replace('/', \DIRECTORY_SEPARATOR, $relative);
+    if (is_link($path)) {
+        $scan->skip();
+
+        return true;
+    }
+
+    return false;
+}
+
+/**
+ * Champs d'un en-tête, comme `get_file_data` de WordPress : `\r` normalisés,
+ * préfixe `<?php` accepté, première ligne qui porte le champ. Une ligne de
+ * plus de 256 caractères est coupée pour la recherche, et une valeur lue sur
+ * une ligne coupée est illisible (null) : jamais une valeur tronquée.
+ *
+ * Un `preg_match` en échec rend le champ illisible et compte un rejet.
+ *
+ * @param list<string> $names
+ * @return array<string, ?string> champ trouvé → valeur, null si illisible
+ */
+function header_fields(InventoryScan $scan, string $head, array $names): array
+{
+    $found = [];
+    foreach (explode("\n", str_replace("\r", "\n", $head)) as $line) {
+        $cut = \strlen($line) > INVENTORY_HEADER_LINE;
+        if ($cut) {
+            $line = substr($line, 0, INVENTORY_HEADER_LINE);
+        }
+        foreach ($names as $name) {
+            if (\array_key_exists($name, $found)) {
+                continue;
+            }
+            $match = preg_match('/^(?:[ \t]*+<\?php)?+[ \t\/*#@]*+' . preg_quote($name, '/') . ':(.*+)$/i', $line, $m);
+            if ($match === false) {
+                $scan->skip();
+                $found[$name] = null;
+            }
+            if ($match !== 1) {
+                continue;
+            }
+            $value = $m[1];
+            foreach (['*/', '?>'] as $end) {
+                $stop = strpos($value, $end);
+                if ($stop !== false) {
+                    $value = substr($value, 0, $stop);
+                }
+            }
+            $found[$name] = $cut ? null : trim($value);
+        }
+    }
+
+    return $found;
+}
+
+/**
+ * Inventaire du site, sans réseau. `$deadline` : `hrtime` à ne pas dépasser.
+ *
+ * @return array{components: list<array<string, string>>, complete: bool, skipped: int, stat: list<string>}
+ */
+function collect_inventory(Config $config, int $deadline): array
+{
+    $rootReal = realpath($config->root);
+    if ($rootReal === false || !is_dir($rootReal)) {
+        return ['components' => [], 'complete' => false, 'skipped' => 1, 'stat' => []];
+    }
+    $scan = new InventoryScan($rootReal, $deadline);
+    $paths = $config->inventory ?? ['composer' => [], 'npm' => []];
+    $steps = match ($config->kind) {
+        'wordpress' => ['wordpress_core', 'wordpress_plugins', 'wordpress_mu_plugins', 'wordpress_themes'],
+        'prestashop' => ['prestashop_core', 'prestashop_modules'],
+        default => [],
+    };
+    foreach ($steps as $step) {
+        if ($scan->late()) {
+            break;
+        }
+        (__NAMESPACE__ . '\\inventory_' . $step)($scan);
+    }
+    foreach (['composer.lock', ...$paths['composer']] as $i => $lock) {
+        if ($scan->late()) {
+            break;
+        }
+        inventory_composer($scan, $config->kind, $lock, $i > 0);
+    }
+    foreach (['package-lock.json', ...$paths['npm']] as $i => $lock) {
+        if ($scan->late()) {
+            break;
+        }
+        inventory_npm($scan, $lock, $i > 0);
+    }
+    $stat = array_keys($scan->stat);
+    sort($stat, \SORT_STRING);
+
+    return ['components' => $scan->components, 'complete' => $scan->complete, 'skipped' => $scan->skipped, 'stat' => $stat];
+}
+
+function inventory_wordpress_core(InventoryScan $scan): void
+{
+    $relative = 'wp-includes/version.php';
+    if (locate($scan->rootReal, $relative)['state'] === 'missing') {
+        return;
+    }
+    $scan->stat[$relative] = true;
+    $version = clean_version(wordpress_version($scan->rootReal));
+    inventory_add($scan, 'application', 'wordpress', $version, (string) purl('wordpress', 'core', 'core', $version), 'required', $relative);
+}
+
+/** Version d'un en-tête, '' si absente, illisible ou hors grammaire. */
+function header_version(array $fields): string
+{
+    return clean_version($fields['Version'] ?? null);
+}
+
+/** Slug WordPress du relevé, sinon composant écarté et compté. */
+function wordpress_slug(InventoryScan $scan, string $category, string $slug, string $version, string $vscope, string $path, array $properties = []): void
+{
+    $purl = \strlen($slug) <= MAX_WORDPRESS_SLUG ? purl('wordpress', $category, $slug, $version) : null;
+    if ($purl === null) {
+        $scan->skip();
+
+        return;
+    }
+    inventory_add($scan, 'library', $slug, $version, $purl, $vscope, $path, $properties);
+}
+
+function inventory_wordpress_plugins(InventoryScan $scan): void
+{
+    $dir = 'wp-content/plugins';
+    foreach (list_dir($scan, $dir) ?? [] as $name) {
+        if ($scan->late()) {
+            return;
+        }
+        $relative = "{$dir}/{$name}";
+        if (linked_entry($scan, $relative)) {
+            continue;
+        }
+        $path = $scan->rootReal . \DIRECTORY_SEPARATOR . str_replace('/', \DIRECTORY_SEPARATOR, $relative);
+        if (is_dir($path)) {
+            $files = list_dir($scan, $relative) ?? [];
+            $php = array_values(array_filter($files, static fn (string $f): bool => str_ends_with(strtolower($f), '.php') && $f !== "{$name}.php" && is_file("{$path}/{$f}")));
+            if (\in_array("{$name}.php", $files, true)) {
+                array_unshift($php, "{$name}.php");
+            }
+            foreach (\array_slice($php, 0, INVENTORY_MAX_PHP_FILES) as $file) {
+                if (is_link("{$path}/{$file}")) {
+                    continue;
+                }
+                $head = read_head($scan, "{$relative}/{$file}", INVENTORY_HEADER_BYTES);
+                $fields = $head === null ? [] : header_fields($scan, $head, ['Plugin Name', 'Version']);
+                if (\array_key_exists('Plugin Name', $fields)) {
+                    wordpress_slug($scan, 'plugin', $name, header_version($fields), 'required', $relative);
+                    break;
+                }
+            }
+        } elseif (str_ends_with(strtolower($name), '.php') && is_file($path)) {
+            $head = read_head($scan, $relative, INVENTORY_HEADER_BYTES);
+            $fields = $head === null ? [] : header_fields($scan, $head, ['Plugin Name', 'Version']);
+            if (\array_key_exists('Plugin Name', $fields)) {
+                wordpress_slug($scan, 'plugin', substr($name, 0, -4), header_version($fields), 'required', $relative);
+            }
+        }
+    }
+}
+
+function inventory_wordpress_mu_plugins(InventoryScan $scan): void
+{
+    $dir = 'wp-content/mu-plugins';
+    foreach (list_dir($scan, $dir) ?? [] as $name) {
+        if ($scan->late()) {
+            return;
+        }
+        $relative = "{$dir}/{$name}";
+        if (!str_ends_with(strtolower($name), '.php') || linked_entry($scan, $relative)) {
+            continue;
+        }
+        if (!is_file($scan->rootReal . \DIRECTORY_SEPARATOR . str_replace('/', \DIRECTORY_SEPARATOR, $relative))) {
+            continue;
+        }
+        $head = read_head($scan, $relative, INVENTORY_HEADER_BYTES);
+        $fields = $head === null ? [] : header_fields($scan, $head, ['Plugin Name', 'Version']);
+        if (\array_key_exists('Plugin Name', $fields)) {
+            wordpress_slug($scan, 'plugin', substr($name, 0, -4), header_version($fields), 'mu', $relative);
+        }
+    }
+}
+
+function inventory_wordpress_themes(InventoryScan $scan): void
+{
+    $dir = 'wp-content/themes';
+    foreach (list_dir($scan, $dir) ?? [] as $name) {
+        if ($scan->late()) {
+            return;
+        }
+        $relative = "{$dir}/{$name}";
+        if (linked_entry($scan, $relative)) {
+            continue;
+        }
+        if (!is_dir($scan->rootReal . \DIRECTORY_SEPARATOR . str_replace('/', \DIRECTORY_SEPARATOR, $relative))) {
+            continue;
+        }
+        if (locate_dir($scan->rootReal, $relative) === false) {
+            $scan->skip();
+            continue;
+        }
+        $head = read_head($scan, "{$relative}/style.css", INVENTORY_HEADER_BYTES);
+        $fields = $head === null ? [] : header_fields($scan, $head, ['Theme Name', 'Version', 'Template']);
+        if (!\array_key_exists('Theme Name', $fields)) {
+            continue;
+        }
+        $properties = [];
+        $template = $fields['Template'] ?? null;
+        if (\is_string($template) && $template !== '' && purl('wordpress', 'theme', $template, null) !== null) {
+            $properties['parent'] = $template;
+        }
+        wordpress_slug($scan, 'theme', $name, header_version($fields), 'required', $relative, $properties);
+    }
+}
+
+/**
+ * Noyau PrestaShop : `src/Core/Version.php` (8.1 et suivantes, dont 9),
+ * puis `app/AppKernel.php` (1.7 et 8.0), puis `config/settings.inc.php`
+ * (1.6), littéraux seulement.
+ */
+function inventory_prestashop_core(InventoryScan $scan): void
+{
+    $sources = [
+        'src/Core/Version.php' => '/^[ \t]{0,16}(?:public[ \t]{1,16})?const[ \t]{1,16}VERSION[ \t]{0,16}=[ \t]{0,16}\'([0-9A-Za-z.+_-]{1,128})\'[ \t]{0,16};/m',
+        'app/AppKernel.php' => '/^[ \t]{0,16}(?:public[ \t]{1,16})?const[ \t]{1,16}VERSION[ \t]{0,16}=[ \t]{0,16}\'([0-9A-Za-z.+_-]{1,128})\'[ \t]{0,16};/m',
+        'config/settings.inc.php' => '/define\([ \t]{0,16}[\'"]_PS_VERSION_[\'"][ \t]{0,16},[ \t]{0,16}[\'"]([0-9A-Za-z.+_-]{1,128})[\'"][ \t]{0,16}\)/',
+    ];
+    foreach ($sources as $relative => $pattern) {
+        $head = read_head($scan, $relative, INVENTORY_MAIN_BYTES);
+        if ($head === null) {
+            continue;
+        }
+        $match = preg_match($pattern, $head, $m);
+        if ($match === false) {
+            $scan->skip();
+            continue;
+        }
+        if ($match === 1) {
+            $version = clean_version($m[1]);
+            inventory_add($scan, 'application', 'prestashop', $version, (string) purl('prestashop', 'core', 'prestashop', $version), 'required', $relative);
+
+            return;
+        }
+    }
+}
+
+/** Version de `config.xml`, lu comme du texte ; '' si absente ou fichier refusé. */
+function config_xml_version(string $xml): string
+{
+    if (preg_match('//u', $xml) !== 1 || str_contains($xml, "\0") || preg_match('/<!(?!\[CDATA\[)/', $xml) !== 0) {
+        return '';
+    }
+    $match = preg_match('/<version>\s{0,16}(?:<!\[CDATA\[)?\s{0,16}([0-9A-Za-z.+_-]{1,128})\s{0,16}(?:\]\]>)?\s{0,16}<\/version>/', $xml, $m);
+
+    return $match === 1 ? clean_version($m[1]) : '';
+}
+
+function inventory_prestashop_modules(InventoryScan $scan): void
+{
+    $dir = 'modules';
+    foreach (list_dir($scan, $dir) ?? [] as $name) {
+        if ($scan->late()) {
+            return;
+        }
+        $relative = "{$dir}/{$name}";
+        $path = $scan->rootReal . \DIRECTORY_SEPARATOR . $dir . \DIRECTORY_SEPARATOR . $name;
+        if (!is_dir($path) && !is_link($path)) {
+            continue;
+        }
+        if (linked_entry($scan, $relative)) {
+            continue;
+        }
+        // Un module a son fichier principal `<x>/<x>.php`.
+        if (!is_file("{$path}/{$name}.php")) {
+            continue;
+        }
+        if (\strlen($name) > MAX_PRESTASHOP_MODULE || purl('prestashop', 'module', $name, null) === null) {
+            $scan->skip();
+            continue;
+        }
+        $main = read_head($scan, "{$relative}/{$name}.php", INVENTORY_MAIN_BYTES);
+        $literal = '';
+        if ($main !== null) {
+            $match = preg_match('/\$this->version\s{0,16}=\s{0,16}[\'"]([0-9A-Za-z.+_-]{1,128})[\'"]/', $main, $m);
+            if ($match === false) {
+                $scan->skip();
+            } elseif ($match === 1) {
+                $literal = clean_version($m[1]);
+            }
+        }
+        $xml = read_head($scan, "{$relative}/config.xml", INVENTORY_HEADER_BYTES);
+        $cached = $xml === null ? '' : config_xml_version($xml);
+        $version = $literal !== '' ? $literal : $cached;
+        $properties = $literal !== '' && $cached !== '' && $cached !== $literal ? ['config_version' => $cached] : [];
+        inventory_add($scan, 'library', $name, $version, (string) purl('prestashop', 'module', $name, $version), 'required', $relative, $properties);
+    }
+}
+
+/**
+ * Lockfile JSON lu sans suivre de lien hors de la racine, 4 Mio au plus,
+ * profondeur 32. null s'il manque (compté s'il était attendu) ou s'il est
+ * refusé (compté).
+ */
+function read_lockfile(InventoryScan $scan, string $relative, bool $expected): ?array
+{
+    $found = locate($scan->rootReal, $relative);
+    if ($found['state'] === 'missing') {
+        if ($expected) {
+            $scan->skip();
+        }
+
+        return null;
+    }
+    $scan->stat[$relative] = true;
+    $size = $found['state'] === 'ok' ? @filesize($found['real']) : false;
+    $raw = $size !== false && $size <= INVENTORY_LOCK_BYTES ? @file_get_contents($found['real'], false, null, 0, INVENTORY_LOCK_BYTES + 1) : false;
+    if ($raw === false || \strlen($raw) > INVENTORY_LOCK_BYTES) {
+        $scan->skip();
+
+        return null;
+    }
+    try {
+        $data = json_decode($raw, true, INVENTORY_JSON_DEPTH, \JSON_THROW_ON_ERROR);
+    } catch (\JsonException) {
+        $data = null;
+    }
+    if (!\is_array($data)) {
+        $scan->skip();
+
+        return null;
+    }
+
+    return $data;
+}
+
+/**
+ * Paquets d'un composer.lock. Un paquet vient d'un registre si et seulement
+ * si `notification-url` est présent (Packagist, dépôts Composer) ou si son
+ * nom est `wpackagist-plugin/…` ou `wpackagist-theme/…` (WPackagist n'en
+ * écrit pas) ; sinon (path, vcs, package en ligne) il est écarté et compté.
+ */
+function inventory_composer(InventoryScan $scan, string $kind, string $relative, bool $expected): void
+{
+    $lock = read_lockfile($scan, $relative, $expected);
+    if ($lock === null) {
+        return;
+    }
+    foreach (['packages' => 'required', 'packages-dev' => 'dev'] as $section => $vscope) {
+        $packages = $lock[$section] ?? [];
+        if (!\is_array($packages) || !array_is_list($packages)) {
+            $scan->skip();
+            continue;
+        }
+        foreach ($packages as $package) {
+            if (\count($scan->components) % 50 === 0 && $scan->late()) {
+                return;
+            }
+            $name = \is_array($package) ? ($package['name'] ?? null) : null;
+            if (!\is_string($name) || \strlen($name) > MAX_PACKAGE_NAME || !str_contains($name, '/')) {
+                $scan->skip();
+                continue;
+            }
+            $name = strtolower($name);
+            [$vendor, $short] = explode('/', $name, 2);
+            $wpackagist = $vendor === 'wpackagist-plugin' || $vendor === 'wpackagist-theme';
+            if (!\array_key_exists('notification-url', $package) && !$wpackagist) {
+                $scan->skip();
+                continue;
+            }
+            $version = clean_version($package['version'] ?? null);
+            if ($kind === 'prestashop' && ($package['type'] ?? null) === 'prestashop-module') {
+                // Le module vient du relevé de modules/<x>/, jamais du lockfile.
+                continue;
+            }
+            if ($kind === 'wordpress' && $wpackagist) {
+                $category = $vendor === 'wpackagist-plugin' ? 'plugin' : 'theme';
+                wordpress_slug($scan, $category, $short, $version, $vscope === 'dev' ? 'dev' : 'required', $relative);
+                continue;
+            }
+            $purl = purl('composer', $vendor, $short, $version);
+            if ($purl === null) {
+                $scan->skip();
+                continue;
+            }
+            inventory_add($scan, 'library', $name, $version, $purl, $vscope, $relative);
+        }
+    }
+}
+
+/**
+ * Lecture d'une entrée de `packages` d'un package-lock.json v2 ou v3 :
+ * `member` (projet, workspace, lien : ni émis ni compté), `ignored`
+ * (extraneous), `offregistry` (git, file:, archive hors registre : compté),
+ * `invalid` (nom hors grammaire : compté) ou `component` avec son purl. Nom :
+ * champ `name` de l'entrée s'il existe (alias npm : le vrai paquet), sinon ce
+ * qui suit le dernier `node_modules/` de la clé. Mêmes règles que l'outil
+ * d'inventaire (#20), vecteurs communs tests/fixtures/inventory/npm-alias.json.
+ *
+ * @return array{0: string, 1: ?string, 2: string, 3: string} verdict, purl, nom, version
+ */
+function npm_entry(string $key, mixed $entry): array
+{
+    if ($key === '' || !\is_array($entry) || !str_starts_with($key, 'node_modules/') && !str_contains($key, '/node_modules/') || ($entry['link'] ?? false) === true) {
+        return ['member', null, '', ''];
+    }
+    if (($entry['extraneous'] ?? false) === true) {
+        return ['ignored', null, '', ''];
+    }
+    $resolved = $entry['resolved'] ?? null;
+    if ($resolved !== null && (!\is_string($resolved) || preg_match('#^(?:git\+|git:|github:|file:)#', $resolved) === 1
+        || preg_match('#/-/[^/]{1,256}\.tgz$#', $resolved) !== 1)) {
+        return ['offregistry', null, '', ''];
+    }
+    $name = $entry['name'] ?? null;
+    if (!\is_string($name)) {
+        $name = substr($key, strrpos($key, 'node_modules/') + \strlen('node_modules/'));
+    }
+    if (\strlen($name) > MAX_PACKAGE_NAME) {
+        return ['invalid', null, '', ''];
+    }
+    $namespace = null;
+    $short = $name;
+    if (str_starts_with($name, '@')) {
+        $slash = strpos($name, '/');
+        if ($slash === false) {
+            return ['invalid', null, '', ''];
+        }
+        $namespace = substr($name, 0, $slash);
+        $short = substr($name, $slash + 1);
+    }
+    $version = clean_version($entry['version'] ?? null);
+    $purl = purl('npm', $namespace, $short, $version);
+
+    return $purl === null ? ['invalid', null, '', ''] : ['component', $purl, $name, $version];
+}
+
+function inventory_npm(InventoryScan $scan, string $relative, bool $expected): void
+{
+    $lock = read_lockfile($scan, $relative, $expected);
+    if ($lock === null) {
+        return;
+    }
+    $packages = $lock['packages'] ?? null;
+    if (!\in_array($lock['lockfileVersion'] ?? null, [2, 3], true) || !\is_array($packages) || array_is_list($packages) && $packages !== []) {
+        // package-lock.json v1 (sans `packages`) : hors périmètre V1.
+        $scan->skip();
+
+        return;
+    }
+    $i = 0;
+    foreach ($packages as $key => $entry) {
+        if (++$i % 50 === 0 && $scan->late()) {
+            return;
+        }
+        [$verdict, $purl, $name, $version] = npm_entry((string) $key, $entry);
+        if ($verdict === 'offregistry' || $verdict === 'invalid') {
+            $scan->skip();
+        } elseif ($verdict === 'component') {
+            $dev = ($entry['dev'] ?? false) === true;
+            inventory_add($scan, 'library', $name, $version, (string) $purl, $dev ? 'dev' : 'required', $relative);
+        }
+    }
+}
+
+// --- Document CycloneDX --------------------------------------------------
+
+/** UUID v4 en minuscules, depuis 16 octets aléatoires. */
+function uuid_v4(string $bytes): string
+{
+    $bytes[6] = \chr(\ord($bytes[6]) & 0x0F | 0x40);
+    $bytes[8] = \chr(\ord($bytes[8]) & 0x3F | 0x80);
+    $hex = bin2hex($bytes);
+
+    return substr($hex, 0, 8) . '-' . substr($hex, 8, 4) . '-' . substr($hex, 12, 4) . '-' . substr($hex, 16, 4) . '-' . substr($hex, 20);
+}
+
+/** Composant CycloneDX : seulement les champs de la liste blanche du veilleur. */
+function bom_component(array $c): array
+{
+    $properties = [['name' => 'vigie:path', 'value' => $c['path']], ['name' => 'vigie:scope', 'value' => $c['vscope']]];
+    if (isset($c['parent'])) {
+        $properties[] = ['name' => 'vigie:parent', 'value' => $c['parent']];
+    }
+    if (isset($c['config_version'])) {
+        $properties[] = ['name' => 'vigie:config-version', 'value' => $c['config_version']];
+    }
+
+    return ['type' => $c['type'], 'name' => $c['name'], 'version' => $c['version'], 'purl' => $c['purl'], 'scope' => $c['scope'], 'properties' => $properties];
+}
+
+/**
+ * Corps exact de l'inventaire, tel qu'il sera signé et envoyé : enveloppe
+ * Vigie et BOM CycloneDX 1.7. Au-delà de 512 Kio, des composants sont retirés
+ * depuis la fin (ordre du relevé) et l'inventaire devient partiel.
+ */
+function build_inventory_body(Config $config, array $inventory, int $seq, int $now, string $serial): string
+{
+    $flags = \JSON_UNESCAPED_SLASHES | \JSON_UNESCAPED_UNICODE | \JSON_THROW_ON_ERROR;
+    $encoded = [];
+    foreach ($inventory['components'] as $c) {
+        $encoded[] = json_encode(bom_component($c), $flags);
+    }
+    $complete = $inventory['complete'];
+    $skipped = $inventory['skipped'];
+    $envelope = static function (bool $complete, int $skipped) use ($config, $seq, $now, $serial, $flags): string {
+        return json_encode([
+            'v' => 1,
+            'type' => 'inventory',
+            'site' => $config->site,
+            'seq' => $seq,
+            'sent_at' => $now,
+            'agent' => AGENT,
+            'complete' => $complete,
+            'skipped' => min($skipped, 100000),
+            'bom' => [
+                'bomFormat' => 'CycloneDX',
+                'specVersion' => '1.7',
+                'serialNumber' => 'urn:uuid:' . $serial,
+                'metadata' => [
+                    'timestamp' => gmdate('Y-m-d\TH:i:s\Z', $now),
+                    'component' => ['type' => 'application', 'name' => $config->site],
+                ],
+                'components' => [],
+            ],
+        ], $flags);
+    };
+    // Taille de chaque composant mesurée une fois ; enveloppe mesurée au pire
+    // (complete false, skipped à 6 chiffres).
+    $base = \strlen($envelope(false, 100000));
+    $size = $base + array_sum(array_map('strlen', $encoded)) + max(0, \count($encoded) - 1);
+    while ($encoded !== [] && $size > INVENTORY_MAX_BODY) {
+        $size -= \strlen((string) array_pop($encoded)) + (\count($encoded) > 0 ? 1 : 0);
+        $complete = false;
+        ++$skipped;
+    }
+    $head = $envelope($complete, $skipped);
+
+    return substr($head, 0, -strlen(']}}')) . implode(',', $encoded) . ']}}';
+}
+
+/** Empreinte de la liste : SHA-256 des composants triés par (purl, path), en JSON compact. */
+function inventory_digest(array $components): string
+{
+    $list = array_map('Vigie\Agent\bom_component', $components);
+    usort($list, static fn (array $a, array $b): int => [$a['purl'], $a['properties'][0]['value']] <=> [$b['purl'], $b['properties'][0]['value']]);
+
+    return hash('sha256', json_encode($list, \JSON_UNESCAPED_SLASHES | \JSON_UNESCAPED_UNICODE | \JSON_THROW_ON_ERROR));
 }
 
 // --- Logs (vigie/docs/logs.md) -----------------------------------------
