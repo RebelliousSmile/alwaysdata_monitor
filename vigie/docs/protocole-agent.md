@@ -162,18 +162,29 @@ clôt.
 ## Inventaire des composants (issue #19)
 
 `POST /r/v1/inventory` reçoit l'inventaire des composants d'un site, en
-CycloneDX, relevé par l'agent PHP 0.5.0 (`agent-php.md`, « Inventaire »).
+CycloneDX, relevé par l'agent PHP 0.5.0 (`agent-php.md`, « Inventaire »,
+source `agent`) ou lu dans les lockfiles du projet par `vigie-inventory` au
+déploiement (`inventaire.md`, issue #20, source `ci`).
 Code : `vigie/src/inventory/` ; tests : `vigie/tests/inventory_receive.rs`,
 `interop.rs`, `inventory_vectors.rs`, `agent_e2e.rs`.
 
 - Mêmes en-têtes que le rapport. `X-Vigie-Signature` signe
   `vigie-inventory-v1\n` suivi des octets bruts du corps, avec la clé de
-  rapport (`sodium_crypto_sign_detached(DOMAIN_INVENTORY . $body, $secret)`).
+  rapport pour l'agent (`sodium_crypto_sign_detached(DOMAIN_INVENTORY . $body,
+  $secret)`), avec la clé d'inventaire du site pour `vigie-inventory`.
+- **La clé qui vérifie fixe la source** : le veilleur essaie la clé d'agent
+  (si `agent-php` est déclaré), puis la clé d'inventaire (si `ci` est
+  déclaré) ; aucun en-tête ni champ non signé ne choisit la clé. Une signature
+  valide pour les deux est impossible : une clé publique n'est enregistrée
+  qu'une fois.
 - Corps de 512 Kio au plus, reçu en 10 s, sans gzip.
 - Ouvert seulement pour un site qui déclare `[sites.inventory]` dans
-  `config.toml` (`source = "agent-php"`, runtime effectif `php` exigé au
-  chargement). C'est la configuration du veilleur qui dit « surveillé », jamais
-  ce qu'un agent envoie.
+  `config.toml` : `sources = ["agent-php", "ci"]` (1 ou 2 valeurs distinctes),
+  ou la forme `source = "agent-php"` de F5, lue comme une liste d'un élément ;
+  les deux clés ensemble sont refusées au chargement. `agent-php` exige le
+  runtime effectif `php` ; `ci` est admis quel que soit le runtime, même
+  absent. C'est la configuration du veilleur qui dit « surveillé », jamais ce
+  qu'un agent envoie.
 
 ### Enveloppe et liste blanche
 
@@ -192,9 +203,10 @@ Code : `vigie/src/inventory/` ; tests : `vigie/tests/inventory_receive.rs`,
 | --- | --- |
 | `v`, `type` | `1`, `inventory` |
 | `site` | égal à `X-Vigie-Site` |
-| `seq` | ≥ 1, strictement croissant, propre aux inventaires (`site_keys.last_inventory_seq`) |
+| `source` | facultatif : `agent` ou `ci`, absent = `agent` (agents 0.5.0) ; doit égaler la source fixée par la clé, sinon refus (« schéma : source ») |
+| `seq` | ≥ 1, strictement croissant, propre aux inventaires et à la source (`site_keys.last_inventory_seq` pour `agent`, `site_inventory_keys.last_seq` pour `ci`) |
 | `sent_at` | ±300 s de l'heure du veilleur |
-| `agent` | 1 à 64 caractères imprimables |
+| `agent` | 1 à 64 caractères imprimables (`vigie-agent-php/0.5.0`, `vigie-inventory/0.1.0`) |
 | `complete`, `skipped` | booléen ; 0 à 100 000 composants et sources écartés par l'agent. `complete = false` dès que `skipped > 0` ou qu'une borne a tronqué le relevé. **Seul un inventaire complet vaut absence d'un composant** (règle de F7) |
 | `bom.bomFormat`, `specVersion` | `CycloneDX` ; `1.6` ou `1.7` (l'agent émet `1.7`) |
 | `bom.serialNumber` | `urn:uuid:` et UUID en minuscules |
@@ -227,15 +239,23 @@ applique la même grammaire : il n'émet rien que le veilleur écarterait.
 Dans l'ordre, arrêt au premier échec, 404 sans corps :
 
 1. **Avant de lire le corps** : `X-Vigie-Site` bien formé, site connu,
-   `[sites.inventory]` déclarée, clé d'agent enregistrée, signature présente.
-   Un corps annoncé de 10 Mio d'un site fermé n'est jamais lu.
+   `[sites.inventory]` déclarée, au moins une source déclarée dont la clé est
+   enregistrée (clé d'agent pour `agent-php`, clé d'inventaire pour `ci`),
+   signature présente. Un corps annoncé de 10 Mio d'un site fermé n'est
+   jamais lu.
 2. Taille et délai du corps.
-3. Hors du writer de `serve` : signature (domaine `vigie-inventory-v1\n`),
-   liste blanche, purl, liste canonique et digest, horloge.
-4. Dans le writer, transaction IMMEDIATE : clé inchangée, `seq` strictement
-   croissant, **un inventaire accepté par site et par 240 s** (nouveau ou
-   inchangé, sur le `seen_at` du dernier), **24 inventaires nouveaux par site
-   et par jour UTC** (au-delà, raison `plafond quotidien des inventaires`),
+3. Hors du writer de `serve` : signature (domaine `vigie-inventory-v1\n`)
+   avec la clé d'agent puis la clé d'inventaire, la première qui vérifie
+   fixant la source ; liste blanche, `source` de l'enveloppe égale, purl,
+   liste canonique et digest, horloge (±300 s : une machine de CI dont
+   l'horloge dérive de plus de 5 min voit ses envois refusés).
+4. Dans le writer, transaction IMMEDIATE, **par (site, source)** : clé de la
+   source inchangée, `seq` strictement croissant ; débit de 240 s sur le
+   `seen_at` du dernier inventaire de la source, pour **tout envoi** de la
+   source `agent` et pour le seul **renvoi inchangé** de la source `ci` (un
+   inventaire `ci` nouveau n'a pas de délai : deux déploiements rapprochés
+   décrivent deux états réels) ; **24 inventaires nouveaux par (site, source)
+   et par jour UTC** (au-delà, raison `plafond quotidien des inventaires`) ;
    écriture.
 
 Le journal ne porte que des raisons fixes (« schéma : champ hors liste
@@ -255,16 +275,23 @@ signature, et un inventaire envoyé à `/r/v1/report` ou `/r/v1/logs` aussi.
   `site_inventory_components` (`ecosystem`, `base` = purl sans version,
   `purl`, `name`, `version`, scope Vigie, `type`, `path`, `parent`,
   `config_version`), migration 16.
-- Conservation : le dernier inventaire de chaque site ; les précédents
-  purgés par `tick` 30 jours après leur `seen_at`. Un site retiré de la
-  configuration ou de `[sites.inventory]` perd aussi son dernier inventaire
-  30 jours après son dernier `seen_at`.
+- Conservation : le dernier inventaire de chaque (site, source), colonne
+  `site_inventory.source` (migration du fichier `0020.sql`) ; les précédents
+  purgés par `tick` 30 jours après leur `seen_at`. Une source retirée de
+  `[sites.inventory]` (ou un site retiré de la configuration) perd aussi son
+  dernier inventaire 30 jours après son dernier `seen_at`.
 - **Pas une preuve de vie** : un inventaire ne touche ni au dernier rapport,
   ni au silence, ni aux incidents, et n'ouvre aucun constat. « Inventaire
-  périmé » (7 jours) et le rapprochement sont des règles du contrôle `vulns`
-  (F7).
-- `site rotate-key` (et la rotation par commande) remet `seq` à zéro et garde
-  l'inventaire ; `site remove` purge tous les inventaires du site.
+  périmé » et le rapprochement sont des règles du contrôle `vulns` (F7) ; la
+  péremption se juge par source : **7 jours pour `agent`, 35 jours pour
+  `ci`** (`inventory::stale_after`).
+- **Un inventaire de CI décrit ce qui va être déployé, pas ce qui tourne** :
+  l'agent PHP reste la vérité du serveur ; F7 dit d'où vient chaque
+  composant.
+- `site rotate-key` (et la rotation par commande) remet le `seq` de la source
+  `agent` à zéro, `site inventory-key <site> rotate` celui de la source `ci` ;
+  l'inventaire reste. `site remove` purge les deux clés et tous les
+  inventaires du site.
 
 ### Limites V1
 
@@ -309,9 +336,15 @@ ne vérifie jamais ce qu'une autre a signé.
 | Retraits de commandes | l'agent, préfixe `vigie-pull-v1\n` | le veilleur, même clé que les rapports | idem rapports ; le préfixe sépare les deux usages |
 | Lots de logs (`/r/v1/logs`) | l'agent, préfixe `vigie-logs-v1\n` | le veilleur, même clé que les rapports | idem rapports ; le préfixe sépare les usages |
 | Inventaires (`/r/v1/inventory`) | l'agent, préfixe `vigie-inventory-v1\n` | le veilleur, même clé que les rapports | idem rapports ; le préfixe sépare les usages |
+| Inventaires de CI (`/r/v1/inventory`, #20) | `vigie-inventory`, clé d'inventaire, préfixe `vigie-inventory-v1\n` | le veilleur, clé de `vigie site inventory-key` (`site_inventory_keys`), jamais consultée par `/r/v1/report`, `/r/v1/logs` ni `/r/v1/commands` | secret d'environnement de déploiement de la CI (`docs/inventaire.md`) |
 | Commandes | le veilleur (`[commands] key_file`) | l'agent, avec la clé publique épinglée | sur le VPS, lue par `serve` seul (`protocole-commandes.md`) |
 | Audit des commandes | le veilleur (`[commands] audit_key_file`) | `vigie site audit --verify` | sur le VPS, lue par `serve`, `tick` et la CLI |
 
+- **Une clé publique n'est enregistrée qu'une fois**, toutes tables et tous
+  sites confondus : `site add`, `site rotate-key`, `site inventory-key add`,
+  `site inventory-key rotate` et la commande `rotate-key` refusent une clé
+  déjà enregistrée comme clé d'agent ou d'inventaire (code 2, « clé déjà
+  enregistrée »), dans leur transaction (`store::pubkey_in_use`).
 - L'agent **épingle** la clé publique des commandes : il la reçoit une fois,
   à `--init`, et refuse ensuite toute commande signée par une autre. Elle ne
   se change que par une nouvelle installation de l'agent, jamais par une

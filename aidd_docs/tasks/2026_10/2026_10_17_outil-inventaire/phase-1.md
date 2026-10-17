@@ -1,5 +1,5 @@
 ---
-status: pending
+status: done
 ---
 
 # Instruction: Veilleur : source `ci`, clé d'inventaire et réception par source
@@ -13,7 +13,7 @@ Dans cette phase, « site A static » désigne un site `kind = "generic"`, `runt
 ```txt
 .
 └── vigie/
-    ├── migrations/00NN.sql        ✅ prochain numéro libre à la fusion (prévus : F2 0017, F3 0018, F4 0019, F7 0020) : site_inventory_keys ; site_inventory.source ; index (site, source, id)
+    ├── migrations/0020.sql        ✅ fichier 0020 (F2 0017, F3 0018, F4 0019 ; numéro final = prochain libre à la fusion, version = position dans MIGRATIONS) : site_inventory_keys ; site_inventory.source ; index (site, source, id)
     ├── config.example.toml        ✏️ [sites.inventory] sources = ["ci"] commenté, à côté de l'exemple agent-php
     ├── src/
     │   ├── config.rs              ✏️ InventorySource { AgentPhp, Ci } ; [sites.inventory] source (forme F5) ou sources (1 ou 2 distinctes), pas les deux ; agent-php seul exige runtime php

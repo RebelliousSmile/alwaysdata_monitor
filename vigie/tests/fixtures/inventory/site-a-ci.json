@@ -1,0 +1,110 @@
+{
+  "v": 1,
+  "type": "inventory",
+  "site": "site-a",
+  "source": "ci",
+  "seq": 1,
+  "sent_at": 1792152000,
+  "agent": "vigie-inventory/0.1.0",
+  "complete": true,
+  "skipped": 0,
+  "bom": {
+    "bomFormat": "CycloneDX",
+    "specVersion": "1.7",
+    "serialNumber": "urn:uuid:5b0c1a2e-7d4f-4c3a-9e1b-2f6d8a4c0e17",
+    "metadata": {
+      "timestamp": "2026-10-16T12:00:00Z",
+      "component": {
+        "type": "application",
+        "name": "site-a"
+      }
+    },
+    "components": [
+      {
+        "type": "library",
+        "name": "exemple-rendu",
+        "version": "3.4.1",
+        "purl": "pkg:npm/exemple-rendu@3.4.1",
+        "scope": "required",
+        "properties": [
+          {
+            "name": "vigie:path",
+            "value": "package-lock.json"
+          },
+          {
+            "name": "vigie:scope",
+            "value": "required"
+          }
+        ]
+      },
+      {
+        "type": "library",
+        "name": "@exemple/outils",
+        "version": "1.0.0",
+        "purl": "pkg:npm/%40exemple/outils@1.0.0",
+        "scope": "required",
+        "properties": [
+          {
+            "name": "vigie:path",
+            "value": "package-lock.json"
+          },
+          {
+            "name": "vigie:scope",
+            "value": "required"
+          }
+        ]
+      },
+      {
+        "type": "library",
+        "name": "exemple-test",
+        "version": "9.1.0",
+        "purl": "pkg:npm/exemple-test@9.1.0",
+        "scope": "excluded",
+        "properties": [
+          {
+            "name": "vigie:path",
+            "value": "package-lock.json"
+          },
+          {
+            "name": "vigie:scope",
+            "value": "dev"
+          }
+        ]
+      },
+      {
+        "type": "library",
+        "name": "exemple/journal",
+        "version": "2.10.0",
+        "purl": "pkg:composer/exemple/journal@2.10.0",
+        "scope": "required",
+        "properties": [
+          {
+            "name": "vigie:path",
+            "value": "composer.lock"
+          },
+          {
+            "name": "vigie:scope",
+            "value": "required"
+          }
+        ]
+      },
+      {
+        "type": "library",
+        "name": "exemple-crate",
+        "version": "0.9.3",
+        "purl": "pkg:cargo/exemple-crate@0.9.3",
+        "scope": "required",
+        "properties": [
+          {
+            "name": "vigie:path",
+            "value": "Cargo.lock"
+          },
+          {
+            "name": "vigie:scope",
+            "value": "required"
+          }
+        ]
+      }
+    ]
+  }
+}

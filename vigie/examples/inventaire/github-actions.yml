@@ -1,0 +1,106 @@
+# Exemple GitHub Actions pour vigie-inventory (issue #20,
+# vigie/docs/inventaire.md), à copier dans .github/workflows/ du projet avec
+# vigie-inventory-push.sh à la racine du dépôt.
+#
+# - deploy : le job de déploiement (environnement production, jamais sur une
+#   PR venue d'un fork) envoie l'inventaire de ce qu'il déploie.
+# - inventaire-hebdo : chaque semaine, renvoie l'inventaire du SHA du dernier
+#   déploiement réussi de production (péremption de la source ci : 35 jours),
+#   jamais celui de la branche. Environnement dédié et obligatoire
+#   vigie-inventory (même secret VIGIE_INVENTORY_KEY, sans relecteur) : un job
+#   planifié dans production créerait lui-même le « dernier déploiement
+#   réussi » qu'il interroge.
+#
+# Valeurs factices à remplacer : VIGIE_INVENTORY_VERSION et
+# VIGIE_INVENTORY_SHA256 (ligne x86_64-unknown-linux-musl de SHA256SUMS de la
+# release), site-a, https://vigie.example.org.
+name: deploiement
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    # Un jour de semaine, minute non ronde.
+    - cron: "17 5 * * 2"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  VIGIE_INVENTORY_VERSION: "0.1.0" # factice : version publiée choisie
+  VIGIE_INVENTORY_SHA256: "<empreinte de SHA256SUMS>" # factice : à remplacer
+
+jobs:
+  deploy:
+    if: >-
+      github.event_name != 'schedule' &&
+      (github.event_name != 'pull_request' ||
+       github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-24.04
+    environment: production
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: build et déploiement du projet
+        run: echo "build et déploiement du projet (à compléter)"
+      # Étape à part : une empreinte fausse arrête le job avant tout envoi.
+      - name: installer vigie-inventory (empreinte vérifiée)
+        run: |
+          set -eu
+          curl -sSfL -o vigie-inventory "https://github.com/RebelliousSmile/alwaysdata_monitor/releases/download/inventory-v${VIGIE_INVENTORY_VERSION}/vigie-inventory-${VIGIE_INVENTORY_VERSION}-x86_64-unknown-linux-musl"
+          echo "${VIGIE_INVENTORY_SHA256}  vigie-inventory" | sha256sum -c -
+          chmod +x vigie-inventory
+          mkdir -p "$HOME/.local/bin"
+          mv vigie-inventory "$HOME/.local/bin/"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: envoyer l'inventaire
+        env:
+          VIGIE_INVENTORY_KEY: ${{ secrets.VIGIE_INVENTORY_KEY }}
+        run: sh vigie-inventory-push.sh --site site-a --endpoint https://vigie.example.org
+
+  inventaire-hebdo:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-24.04
+    environment: vigie-inventory
+    permissions:
+      contents: read
+      deployments: read
+    steps:
+      # Déploiements de production du plus récent au plus ancien ; le premier
+      # dont le dernier statut est success donne le SHA. Aucun : code 2.
+      - name: ref déployée en production
+        id: deployed
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          sha=""
+          for id in $(gh api "repos/$GITHUB_REPOSITORY/deployments?environment=production&per_page=30" --jq '.[].id'); do
+            state=$(gh api "repos/$GITHUB_REPOSITORY/deployments/$id/statuses?per_page=1" --jq '.[0].state // ""')
+            if [ "$state" = "success" ]; then
+              sha=$(gh api "repos/$GITHUB_REPOSITORY/deployments/$id" --jq '.sha')
+              break
+            fi
+          done
+          if [ -z "$sha" ]; then
+            echo "::error::aucun déploiement réussi de production : rien n'est envoyé"
+            exit 2
+          fi
+          echo "SHA du dernier déploiement réussi de production : $sha"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ steps.deployed.outputs.sha }}
+      - name: installer vigie-inventory (empreinte vérifiée)
+        run: |
+          set -eu
+          curl -sSfL -o vigie-inventory "https://github.com/RebelliousSmile/alwaysdata_monitor/releases/download/inventory-v${VIGIE_INVENTORY_VERSION}/vigie-inventory-${VIGIE_INVENTORY_VERSION}-x86_64-unknown-linux-musl"
+          echo "${VIGIE_INVENTORY_SHA256}  vigie-inventory" | sha256sum -c -
+          chmod +x vigie-inventory
+          mkdir -p "$HOME/.local/bin"
+          mv vigie-inventory "$HOME/.local/bin/"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: renvoyer l'inventaire du déploiement
+        env:
+          VIGIE_INVENTORY_KEY: ${{ secrets.VIGIE_INVENTORY_KEY }}
+        run: sh vigie-inventory-push.sh --site site-a --endpoint https://vigie.example.org

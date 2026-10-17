@@ -352,7 +352,10 @@ fn sensitive_headers_stay_with_the_first_origin() {
     let mut dl = download(dir.path(), a, &[a, b], Validators::default());
     let request = Request {
         url: Url::parse(&a.url("/vers-b")).unwrap(),
-        sensitive_headers: vec![("Authorization".into(), "Bearer jeton-de-test".into())],
+        sensitive_headers: vec![(
+            "Authorization".into(),
+            ureq::http::HeaderValue::from_static("Bearer jeton-de-test"),
+        )],
     };
     assert!(matches!(
         dl.get_to_file(&request).unwrap(),

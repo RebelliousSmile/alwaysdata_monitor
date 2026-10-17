@@ -1,6 +1,6 @@
 ---
 objective: "Le veilleur garde localement deux tables d'enrichissement, CISA KEV (miroir officiel cisagov/kev-data, cisa.gov en secours) et FIRST EPSS (CSV gzip quotidien), déclarées d'office avec les sources de failles et synchronisées après elles dans le cadre de F2 par un trait voisin de VulnSource, chargées en flux, remplacées atomiquement par générations sous bail et par lots bornés face à l'écrivain de serve, jamais rétrécies ni ramenées à un catalogue plus ancien en silence ; la règle de gravité de F0 vit dans un seul module vulns/severity.rs, fonction pure des données d'une faille (alias CVE, malicious, score en dixièmes et origine, informational, correctif disponible) ou d'un groupe de failles fusionnées, et des tables KEV/EPSS, prouvée par table de vérité et par propriétés, et utilisée telle quelle par F7 (#21)."
-status: pending
+status: done
 issue_number: 18
 ---
 

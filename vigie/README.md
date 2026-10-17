@@ -22,7 +22,7 @@ Sur le veilleur, toujours appeler le binaire par son chemin complet.
 | `~/vigie/bin/vigie tick` | Lancé chaque minute par `vigie-tick.timer` : lance les contrôles dus, ouvre ou clôt les incidents, envoie les e-mails |
 | `~/vigie/bin/vigie check <site> --once` | Lance tous les contrôles d'un site et affiche les constats, sans écrire dans la base ni envoyer d'e-mail ; code 1 si un constat est à traiter |
 | `~/vigie/bin/vigie status` | Dernier passage, sites et dernier contrôle, une ligne par source de failles déclarée (dernière réussite, dernière issue, bail en cours), incidents ouverts avec leur âge, état de l'agent de chaque site, informations (en-têtes manquants), notifications en attente ; code 1 si `tick` est en retard |
-| `~/vigie/bin/vigie site list` | Sites de la configuration, état de leur agent (sans agent, clé sans rapport, âge du dernier rapport accepté) et, en dernière colonne, leur runtime effectif (`-` sans runtime) |
+| `~/vigie/bin/vigie site list` | Sites de la configuration, état de leur agent (sans agent, clé sans rapport, âge du dernier rapport accepté), sources d'inventaire prêtes (`inventaire : agent`, `ci`, `agent+ci` ou `—`) et, en dernière colonne, leur runtime effectif (`-` sans runtime) |
 | `~/vigie/bin/vigie commands init-keys` | Crée la clé de commandes et la clé d'audit de `[commands]` (jamais écrasées) et affiche la clé publique à épingler par les agents (`docs/protocole-commandes.md`) |
 | `~/vigie/bin/vigie site commands <site> enable\|disable` | Kill-switch du canal de commandes d'un site, coupé par défaut |
 | `~/vigie/bin/vigie site command <site> <commande> [--apply] [--force]` | Aperçu d'une commande, puis mise en file avec `--apply` |
@@ -30,15 +30,18 @@ Sur le veilleur, toujours appeler le binaire par son chemin complet.
 | `~/vigie/bin/vigie site add <site> --pubkey <base64>` | Enregistre la clé publique Ed25519 (32 octets) de l'agent d'un site de la configuration ; refusé si le site a déjà une clé ou n'a pas le runtime effectif `php` |
 | `~/vigie/bin/vigie site rotate-key <site> --pubkey <base64>` | Remplace la clé : un rapport signé par l'ancienne est refusé dès maintenant |
 | `~/vigie/bin/vigie site accept <site>` | Prend les empreintes du dernier rapport comme référence et clôt les incidents d'intégrité : à lancer après une modification voulue d'un fichier critique |
-| `~/vigie/bin/vigie site remove <site> [--yes]` | Retire la clé, l'état des rapports et la référence des empreintes ; sans `--yes`, demande de retaper l'identifiant |
+| `~/vigie/bin/vigie site inventory-key <site> add\|rotate --pubkey <base64>` | Clé d'inventaire de `vigie-inventory` (#20) : exige `ci` dans `[sites.inventory]` ; une clé déjà enregistrée (agent ou inventaire, tout site) est refusée en code 2 ; `remove [--yes]` la retire, l'inventaire reçu reste |
+| `~/vigie/bin/vigie site remove <site> [--yes]` | Retire les clés (agent et inventaire), l'état des rapports, la référence des empreintes, les logs et les inventaires ; sans `--yes`, demande de retaper l'identifiant |
 | `~/vigie/bin/vigie ack <id>` | Acquitte un incident : plus de rappel, la clôture automatique reste active |
 | `~/vigie/bin/vigie device pair --name <nom>` | Crée un code d'appairage de la console, valable 10 min et une seule fois : l'affiche en QR code (terminal à fond sombre) et en lien `vigie://pair` ; exige la section `[api]` |
 | `~/vigie/bin/vigie device list` | Appareils (actif, vu il y a…, révoqué) et codes en attente, sans aucun secret |
 | `~/vigie/bin/vigie device revoke <id>` | Révoque un appareil : son jeton est refusé dès la requête suivante |
-| `~/vigie/bin/vigie vulns sync [--source <id>] [--accept-shrink]` | Lancé chaque jour par `vigie-vulns-sync.timer` : synchronise les bases de `[vulns] sources` (exports OSV `osv-crates-io`, `osv-packagist`, `osv-npm`), requête conditionnelle, dump borné lu sans rien extraire, base précédente gardée en cas d'échec ; « aucune source de failles déclarée » et code 0 sans `[vulns]` ; code 1 si une source a échoué ; `--accept-shrink` (avec `--source`) accepte une fois un dump qui rétrécit de plus de 20 % (`docs/failles.md`, « Synchronisation ») |
-| `~/vigie/bin/vigie vulns sources` | Sources de failles connues : licence, âge du dernier chargement, entrées, failles écartées et compteurs par raison, hors périmètre, licence inconnue ; état de synchronisation (dernière réussite, dernière tentative et son issue, tailles, durée, ETag, version du lecteur, bail en cours, `Retry-After`) (`docs/failles.md`) |
-| `~/vigie/bin/vigie vulns show <id\|alias>` | Détail d'une faille (GHSA-…, RUSTSEC-…, ou alias CVE-…) : alias, résumé, score et origine, CWE, composants, références, licence et attribution |
-| `~/vigie/bin/vigie vulns match <purl>` | Failles d'un composant (`pkg:composer/vendor/nom@1.2.0`) : une ligne par faille, version corrigée, score ; « version inconnue » ou « plage inconnue », jamais « aucune faille » ; code 2 sur un purl mal formé |
+| `~/vigie/bin/vigie vulns sync [--source <id>] [--accept-shrink]` | Lancé chaque jour par `vigie-vulns-sync.timer` : synchronise les bases de `[vulns] sources` (exports OSV `osv-crates-io`, `osv-packagist`, `osv-npm` ; `friends-of-presta` ; `wordfence`, refusée tant que la relecture de ses conditions n'est pas consignée dans le binaire), puis les tables de priorisation `kev` (CISA KEV, miroir puis cisa.gov) et `epss` (FIRST EPSS), ajoutées d'office, requête conditionnelle, dump borné lu sans rien extraire, base précédente gardée en cas d'échec ; « aucune source de failles déclarée » et code 0 sans `[vulns]` ; code 1 si une source a échoué ; `--accept-shrink` (avec `--source`) accepte une fois un dump qui rétrécit de plus de 20 % (`docs/failles.md`, « Synchronisation ») |
+| `~/vigie/bin/vigie vulns sources` | Sources de failles connues : licence, âge du dernier chargement, entrées, failles écartées et compteurs par raison, hors périmètre, licence inconnue ; état de synchronisation (dernière réussite, dernière tentative et son issue, tailles, durée, ETag et URL qui l'a servi, version du lecteur, révision, bail en cours, `Retry-After`) ; niveau de redistribution (`usage interne`, `faits seulement`, `libre`) ; pour `kev` et `epss` : version, date et lignes du jeu, synchronisations « inchangé (périmé) », âge du catalogue KEV et avertissement au-delà de 14 jours (`docs/failles.md`) |
+| `~/vigie/bin/vigie vulns show <id\|alias>` | Détail d'une faille (GHSA-…, RUSTSEC-…, ou alias CVE-…) : alias, résumé, score et origine, CWE, composants, références, licence et attribution ; pour chaque CVE, KEV (ajout, échéance, usage par rançongiciel connu) et EPSS (score, percentile, modèle), puis la gravité et sa règle ; un CVE présent seulement dans KEV ou EPSS est aussi montré |
+| `~/vigie/bin/vigie vulns match <purl>` | Failles d'un composant (`pkg:composer/vendor/nom@1.2.0`) : une ligne par faille, version corrigée, score ; « version inconnue » ou « plage inconnue », jamais « aucune faille » ; « plage corrigée » et son motif ; redistribution et attribution des failles Wordfence et Friends-Of-Presta ; code 2 sur un purl mal formé |
+| `~/vigie/bin/vigie vulns correct <id> <purl> (--range <expr> \| --clear) --reason <motif>` | Correction de plage auditée d'une faille Friends-Of-Presta en « plage inconnue » (`pkg:prestashop/module/<nom>`, grammaire fermée de `failles.md`, sans remarque) ou son retrait ; valable pour tous les sites, inscrite dans la chaîne d'audit signée de `_veilleur` ; exige `[commands]` ; code 2 sur toute erreur d'usage |
+| `~/vigie/bin/vigie vulns corrections [--audit [--verify]]` | Corrections de plage et leur état (`active`, `sans objet`, `orpheline`, `illisible`, `retirée`) ; `--audit` exporte la chaîne `_veilleur` en JSONL, `--verify` la vérifie et contrôle la correspondance dans les deux sens (code 1 sinon) |
 | `~/vigie/bin/vigie test-alert` | Envoie un e-mail de test par le relais SMTP configuré |
 
 `/health` répond 200 si le dernier `tick` date de moins de 3 minutes, sinon 503.
@@ -87,6 +90,14 @@ déclare `[sites.inventory]` (refus avant toute lecture du corps sinon). Liste
 blanche stricte, 240 s entre deux inventaires acceptés, 24 nouveaux par jour
 UTC, dernier inventaire et 30 jours d'historique ; un inventaire n'est pas une
 preuve de vie. Contrat : [`docs/protocole-agent.md`](./docs/protocole-agent.md#inventaire-des-composants-issue-19).
+
+Les projets sans agent PHP (sites `node`, `static`, projets déployés par CI)
+ont le second binaire du crate, **`vigie-inventory`** (issue #20) : il lit
+`composer.lock`, `package-lock.json`, `pnpm-lock.yaml`, `yarn.lock` et
+`Cargo.lock` au déploiement, écrit le BOM (`sbom`) ou le signe avec une clé
+d'inventaire dédiée et le pousse (`push`, source `ci`, `[sites.inventory]
+sources = ["ci"]`). Installation, clé, exemples de CI et limites :
+[`docs/inventaire.md`](./docs/inventaire.md).
 
 ## Contrôles
 

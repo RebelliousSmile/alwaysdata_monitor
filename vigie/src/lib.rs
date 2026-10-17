@@ -21,6 +21,7 @@ pub mod logs;
 pub mod recommend;
 pub mod report;
 pub mod request_id;
+pub mod secret;
 pub mod serve;
 pub mod store;
 pub mod tick;

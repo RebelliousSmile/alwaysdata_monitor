@@ -149,9 +149,7 @@ fn inventory_router(database: &std::path::Path) -> axum::Router {
         .expect("add_key");
     let mut config = veilleur::config(database.to_path_buf());
     config.sites[0].kind = SiteKind::Wordpress;
-    config.sites[0].inventory = Some(SiteInventory {
-        source: InventorySource::AgentPhp,
-    });
+    config.sites[0].inventory = Some(SiteInventory::new(&[InventorySource::AgentPhp]));
     serve::router_with_clock(config, Arc::new(FakeClock::new(SENT_AT)))
 }
 
@@ -206,7 +204,7 @@ async fn the_ingestion_accepts_the_php_inventory_as_is() {
 
     let store = Store::open(&database).expect("base");
     let head = store
-        .last_inventory("site-a")
+        .last_inventory("site-a", vigie::inventory::Source::Agent)
         .expect("lecture")
         .expect("inventaire");
     assert!(head.complete);

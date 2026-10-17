@@ -1,5 +1,5 @@
 ---
-status: pending
+status: done
 ---
 
 # Instruction: Sources KEV et EPSS dans le cadre F2, CLI et documentation

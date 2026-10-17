@@ -25,7 +25,7 @@ use crate::capability::{self, CommandKind};
 use crate::config::{Config, is_valid_id};
 use crate::ingest::{Reason, Refusal};
 use crate::report::MAX_CLOCK_SKEW;
-use crate::store::Store;
+use crate::store::{KeyTable, Store};
 
 pub const ROUTE: &str = "/r/v1/commands";
 
@@ -439,15 +439,10 @@ fn rotation(
     if &new_bytes == current {
         return Ok(Err("nouvelle clé égale à l'ancienne"));
     }
-    let used: Option<String> = tx
-        .query_row(
-            "SELECT site FROM site_keys WHERE pubkey = ?1 AND site <> ?2",
-            params![new_bytes.as_slice(), site],
-            |row| row.get(0),
-        )
-        .optional()?;
-    if used.is_some() {
-        return Ok(Err("nouvelle clé déjà celle d'un autre site"));
+    // Vérification commune à toutes les écritures de clés : ni clé d'agent
+    // ni clé d'inventaire, d'aucun site, la ligne remplacée exceptée.
+    if crate::store::pubkey_in_use(tx, &new_bytes, Some((KeyTable::Agent, site)))?.is_some() {
+        return Ok(Err("nouvelle clé déjà enregistrée"));
     }
     let Ok(verifying) = VerifyingKey::from_bytes(&new_bytes) else {
         return Ok(Err("nouvelle clé invalide"));

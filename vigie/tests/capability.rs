@@ -303,15 +303,13 @@ fn the_inventory_ecosystem_matrix_matches_the_literal_table() {
 fn only_a_declared_section_opens_the_inventory() {
     use vigie::config::{InventorySource, SiteInventory};
     let mut wp = site("site-a", SiteKind::Wordpress, None, false);
-    assert_eq!(capability::inventory_source(&wp), None);
-    wp.inventory = Some(SiteInventory {
-        source: InventorySource::AgentPhp,
-    });
+    assert_eq!(capability::inventory_sources(&wp), []);
+    wp.inventory = Some(SiteInventory::new(&[InventorySource::AgentPhp]));
     assert_eq!(
-        capability::inventory_source(&wp),
-        Some(InventorySource::AgentPhp)
+        capability::inventory_sources(&wp),
+        [InventorySource::AgentPhp]
     );
-    // L'inventaire n'ouvre aucun contrôle en F5 : `vulns` viendra avec F7.
+    // L'inventaire n'ouvre aucun contrôle en F5 et F6 : `vulns` viendra avec F7.
     for ctx in CONTEXTS {
         let mut without = wp.clone();
         without.inventory = None;
@@ -319,6 +317,40 @@ fn only_a_declared_section_opens_the_inventory() {
             capability::allowed_controls(&wp, &ctx),
             capability::allowed_controls(&without, &ctx)
         );
+    }
+}
+
+/// Matrice CMS × runtime (absent compris) × sources déclarées : `agent-php`
+/// n'est ouvert qu'au runtime effectif `php`, `ci` partout (#20). La
+/// configuration refuse déjà `agent-php` ailleurs (`config_edges.rs`) : le
+/// registre ne l'ouvre pas non plus pour une configuration construite.
+#[test]
+fn inventory_sources_follow_the_runtime_matrix() {
+    use vigie::config::{InventorySource as S, SiteInventory};
+    let declared: [&[S]; 3] = [&[S::AgentPhp], &[S::Ci], &[S::AgentPhp, S::Ci]];
+    for kind in [SiteKind::Generic, SiteKind::Wordpress, SiteKind::Prestashop] {
+        for runtime in [
+            None,
+            Some(Runtime::Php),
+            Some(Runtime::Node),
+            Some(Runtime::Static),
+        ] {
+            for sources in declared {
+                let mut s = site("site-a", kind, runtime, false);
+                s.inventory = Some(SiteInventory::new(sources));
+                let php = s.effective_runtime() == Some(Runtime::Php);
+                let expected: Vec<S> = sources
+                    .iter()
+                    .copied()
+                    .filter(|source| *source == S::Ci || php)
+                    .collect();
+                assert_eq!(
+                    capability::inventory_sources(&s),
+                    expected,
+                    "{kind:?} {runtime:?} {sources:?}"
+                );
+            }
+        }
     }
 }
 
@@ -513,10 +545,17 @@ async fn the_api_tick_and_ingestion_give_the_same_verdict_on_the_whole_matrix() 
     );
     let mut store = Store::open(&config.database).expect("base");
     let public = key().verifying_key().to_bytes();
+    // Une même clé pour toute la matrice, posée en base comme dans une base
+    // d'avant #20 : `add_key` refuse désormais une clé déjà enregistrée.
+    let raw = rusqlite::Connection::open(&config.database).expect("sqlite");
     for v in &variants {
         let id = &v.site.id;
         if v.ctx.agent {
-            store.add_key(id, &public, T0).expect("add_key");
+            raw.execute(
+                "INSERT INTO site_keys (site, pubkey, added_at) VALUES (?1, ?2, ?3)",
+                rusqlite::params![id, public.as_slice(), T0],
+            )
+            .expect("clé");
         }
         // Un passage et un incident ouvert pour chaque nom éprouvé.
         for name in names() {
@@ -945,6 +984,7 @@ fn vulns_sync_is_a_watcher_control_never_watched_for_a_site() {
     ));
     config.vulns = Some(vigie::config::Vulns {
         sources: vec!["osv-npm".into()],
+        wordfence: None,
     });
     assert!(capability::watched_by_watcher(
         &config,

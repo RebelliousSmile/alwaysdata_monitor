@@ -1,0 +1,49 @@
+{
+ "00000000-0000-4000-8000-00000000002e": {
+  "id": "00000000-0000-4000-8000-00000000002e",
+  "title": "Exemple 46 - faille fictive",
+  "software": [
+   {
+    "type": "plugin",
+    "name": "Exemple Hostile",
+    "slug": "exemple-hostile",
+    "affected_versions": {
+     "* - 1.0": {
+      "from_version": "*",
+      "from_inclusive": true,
+      "to_version": "1.0",
+      "to_inclusive": true
+     }
+    },
+    "patched": true,
+    "patched_versions": [
+     "1.1"
+    ],
+    "remediation": "Mettre à jour."
+   }
+  ],
+  "informational": false,
+  "description": "Texte fictif jamais stocké.",
+  "references": [
+   "https://example.org/wf/46"
+  ],
+  "cwe": {
+   "id": 79,
+   "name": "Cross-site Scripting",
+   "description": "Fictif."
+  },
+  "cvss": {
+   "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N",
+   "score": 6.1,
+   "rating": "Medium"
+  },
+  "cve": "CVE-2099-0046",
+  "cve_link": "https://example.org/cve/CVE-2099-0046",
+  "researchers": [
+   "Chercheuse fictive"
+  ],
+  "published": "2099-01-10 12:00:00",
+  "updated": "2099-01-12T08:00:00+00:00",
+  "copyrights": {}
+ }
+}

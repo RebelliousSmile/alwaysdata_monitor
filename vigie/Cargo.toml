@@ -8,6 +8,18 @@ rust-version = "1.93.0"
 description = "Veilleur multi-sites : contrôles externes, rapports signés, alertes par e-mail"
 publish = false
 
+# Outil d'inventaire des projets sans agent PHP (issue #20, docs/inventaire.md) :
+# même crate, même liste blanche et même signature que le veilleur ; version
+# propre (`vigie::inventory::TOOL_VERSION`). Le binaire `vigie` reste
+# src/main.rs.
+[[bin]]
+name = "vigie-inventory"
+path = "src/bin/vigie-inventory.rs"
+
+[[bin]]
+name = "vigie"
+path = "src/main.rs"
+
 [dependencies]
 anyhow = "1"
 # matched-path : gabarit de route cité par le journal des appels de /api/v1.
@@ -33,7 +45,9 @@ log = "0.4"
 qrcode = { version = "0.14", default-features = false }
 rusqlite = { version = "0.37", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+# raw_value : flux Wordfence lu entrée par entrée (`Box<RawValue>`), sans
+# arbre complet en mémoire (F3).
+serde_json = { version = "1", features = ["raw_value"] }
 sha2 = "0.10"
 subtle = "2"
 thiserror = "2"

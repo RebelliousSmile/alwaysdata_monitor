@@ -119,15 +119,68 @@ jobs:
             cargo install cargo-zigbuild --version 0.23.4 --locked --force
           fi
       - run: cargo zigbuild --release --locked --target x86_64-unknown-linux-musl
-      - name: binaire statique
-        run: file target/x86_64-unknown-linux-musl/release/vigie | grep -q "statically linked"
+      # Les deux binaires du crate : le veilleur et vigie-inventory (#20).
+      - name: binaires statiques
+        run: |
+          for bin in vigie vigie-inventory; do
+            file "target/x86_64-unknown-linux-musl/release/$bin" | grep -q "statically linked"
+          done
       # Empreinte et binaire publiés : le relevé de la cible les compare
       # (docs/audit-chemin-critique.md, « Cible réelle »).
-      - name: empreinte SHA-256
-        run: sha256sum target/x86_64-unknown-linux-musl/release/vigie
+      - name: empreintes SHA-256
+        run: >-
+          sha256sum target/x86_64-unknown-linux-musl/release/vigie
+          target/x86_64-unknown-linux-musl/release/vigie-inventory
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: vigie-musl
           path: vigie/target/x86_64-unknown-linux-musl/release/vigie
           retention-days: 14
           if-no-files-found: error
+
+  # BOM de vigie-inventory contre le schéma officiel CycloneDX 1.7 (#20) :
+  # chaque fixture de tests/fixtures/inventory-tool/, copiée sous son vrai nom,
+  # et composer/ aussi avec --cms wordpress. cyclonedx-cli v0.33.1 (publiée le
+  # 2026-07-23), somme de cyclonedx-linux-x64 relevée sur la release
+  # (vigie/docs/decisions.md) ; téléchargé à chaque run, jamais mis en cache.
+  inventory-schema:
+    name: schéma CycloneDX 1.7 (vigie-inventory)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      CYCLONEDX_CLI_VERSION: "0.33.1"
+      CYCLONEDX_CLI_SHA256: bfc8b2538da86fe239bc53658bbb63c1c8c510a293c1e6891aa5bea5d3c58746
+      DOTNET_SYSTEM_GLOBALIZATION_INVARIANT: "1"
+    defaults:
+      run:
+        working-directory: vigie
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master
+        with:
+          toolchain: "1.93.0" # même version que vigie/rust-toolchain.toml
+      - name: installer cyclonedx-cli (somme vérifiée)
+        run: |
+          curl -sSfL -o "$RUNNER_TEMP/cyclonedx" "https://github.com/CycloneDX/cyclonedx-cli/releases/download/v${CYCLONEDX_CLI_VERSION}/cyclonedx-linux-x64"
+          echo "${CYCLONEDX_CLI_SHA256}  $RUNNER_TEMP/cyclonedx" | sha256sum -c -
+          chmod +x "$RUNNER_TEMP/cyclonedx"
+      - run: cargo build --locked --release --bin vigie-inventory
+      - name: valider le BOM de chaque fixture
+        run: |
+          set -eu
+          for dir in tests/fixtures/inventory-tool/*/; do
+            name=$(basename "$dir")
+            # Deux lockfiles npm dans un dossier : refus attendu (code 2).
+            [ "$name" = npm-and-yarn ] && continue
+            project="$RUNNER_TEMP/projet-$name"
+            mkdir -p "$project"
+            for file in "$dir"*.fixture; do
+              cp "$file" "$project/$(basename "$file" .fixture)"
+            done
+            for cms in "" wordpress; do
+              [ -n "$cms" ] && [ "$name" != composer ] && continue
+              out="$RUNNER_TEMP/sbom-$name${cms:+-$cms}.json"
+              target/release/vigie-inventory sbom --project-dir "$project" --output "$out" ${cms:+--cms "$cms"}
+              "$RUNNER_TEMP/cyclonedx" validate --input-file "$out" --input-version v1_7 --fail-on-errors
+            done
+          done

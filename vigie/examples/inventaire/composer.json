@@ -1,0 +1,6 @@
+{
+    "_comment": "Extrait à fusionner dans le composer.json du projet (vigie/docs/inventaire.md) : script lancé par le déploiement (composer run-script vigie-inventory), jamais en post-install-cmd. Sans binaire vigie-inventory dans le PATH : code 0, rien n'est envoyé. Shell POSIX : pas sous Windows.",
+    "scripts": {
+        "vigie-inventory": "command -v vigie-inventory >/dev/null 2>&1 || exit 0; sh vigie-inventory-push.sh --site site-a --endpoint https://vigie.example.org --skip-without-key"
+    }
+}
