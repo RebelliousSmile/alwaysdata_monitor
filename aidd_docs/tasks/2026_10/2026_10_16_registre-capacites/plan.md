@@ -1,6 +1,6 @@
 ---
 objective: "Un seul registre de capacités déclare, pour chaque contrôle (externe, battement de cœur, familles de l'agent, logs) et chaque commande, les typologies qu'il exige ; tick, l'ingestion, la clôture des incidents, la CLI et l'API le consultent tous, refusent fail-closed ce qu'il ne connaît pas, et l'audit du chemin critique avant déploiement est fait et écrit."
-status: pending
+status: done
 issue_number: 4
 ---
 

@@ -23,6 +23,7 @@ est public.
 | Sortie IPv4 et IPv6 du site A | **Fait** le 2026-10-15 : `curl -4` et `curl -6` vers un site externe en 200 depuis le compte du site A |
 | `/health` en IPv4 et IPv6 depuis le poste | **Fait** le 2026-10-15 : `curl -4` et `curl -6` en 200 |
 | API de la console (schéma 6) | **Fait** le 2026-10-16 : déploiement du commit 0401e1c à 09:08 UTC (code 0), `/api/v1/overview` sans jeton en 401, `/health` en 200, rapport de l'agent du site A accepté à 09:10:08 par le nouveau binaire (`site list`). Incident : `[api]` posé avant le déploiement, le binaire c874f74 refuse toute section inconnue, aucun tick de 08:58 à 09:08 UTC et `/health` en 503 `late`, signalé par la sonde externe (voir l'ordre imposé dans [API de la console](#api-de-la-console)) |
+| Registre des capacités (schéma 14, issue #4) | **Non déployé** : relevés de la cible (binaire de la CI, `tick` à blanc) et de la configuration (aucune clé d'agent sur un site sans runtime `php`) à faire avant, voir [`audit-chemin-critique.md`](./audit-chemin-critique.md) |
 
 ## Installation
 
@@ -287,6 +288,27 @@ binaire (`deny_unknown_fields`) :
 Retour au binaire précédent : retirer d'abord `[commands]` de `config.toml`.
 L'ancien binaire refuse aussi une base au schéma 8 : le retour arrière demande
 la base sauvegardée avant le déploiement. Les clés restent sur le disque.
+
+## Registre des capacités (issue #4)
+
+Le binaire du registre (schéma 14) ne surveille l'agent d'un site que si son
+runtime effectif est `php` (`runtime = "php"`, implicite pour `wordpress` et
+`prestashop`) :
+
+1. **avant** le déploiement, vérifier qu'aucun site sans runtime `php` n'a de
+   clé d'agent (relevé de [`audit-chemin-critique.md`](./audit-chemin-critique.md#relevé--configuration-du-vps)) ;
+   sinon poser `runtime = "php"` et relancer `serve` ;
+2. déployer : `serve` et `tick` appliquent la migration 14
+   (`reports.dropped`, `incidents.close_reason`), deux colonnes ajoutées sans
+   arrêt ;
+3. au premier `tick`, les incidents des contrôles que le registre ne surveille
+   plus (famille d'agent inconnue, `heartbeat` d'un site sans `php`…) sont
+   clos avec un e-mail « plus surveillé » ; `vigie status` montre les constats
+   écartés et l'avertissement `typology` éventuel.
+
+Retour au binaire précédent : il refuse une base au schéma 14 (« binaire trop
+ancien ») ; le retour arrière demande la base sauvegardée avant le
+déploiement.
 
 ## Secrets
 
