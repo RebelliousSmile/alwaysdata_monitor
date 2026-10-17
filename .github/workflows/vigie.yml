@@ -69,6 +69,15 @@ jobs:
           -v $GITHUB_WORKSPACE:$GITHUB_WORKSPACE -v /tmp:/tmp
           php:8.1-cli@sha256:12154452109ad780fedbcf68b820a2b7dc5880d66ee38b7d87129c2de225f836 php"
           cargo test --locked --test agent_e2e -- --ignored
+      # Comparateurs PHP et Composer (tests/vulns_php_diff.rs) contre
+      # version_compare du même PHP 8.1 épinglé ; paires écrites sous /tmp,
+      # partagé. Le test échoue au lieu d'être sauté quand VIGIE_PHP est posé.
+      - name: différentiel version_compare (PHP 8.1)
+        if: runner.os == 'Linux'
+        run: >-
+          VIGIE_PHP="docker run --rm --user $(id -u):$(id -g) -v /tmp:/tmp
+          php:8.1-cli@sha256:12154452109ad780fedbcf68b820a2b7dc5880d66ee38b7d87129c2de225f836 php"
+          cargo test --locked --test vulns_php_diff -- --ignored
 
   # Cible de déploiement du VPS : binaire statique musl, croisé par zigbuild.
   # Le valider ici évite de découvrir au déploiement une dépendance qui casse
