@@ -70,6 +70,7 @@ journey
     Aucune section Summary ou aucun Product => aucun paquet identifié, faille écartée, no_affected: 1: lib
     Nom de fichier hors grammaire [A-Za-z0-9._-] => bad_id: 1: lib
     Published at absent => date du nom de fichier ; illisible partout => bad_date: 1: lib
+    Published at illisible et date du nom de fichier valide => faille gardée, bad_published, hors seuil: 1: lib
     severity critical (12), (9.85) ou (9,8) => ignoré seul, bad_severity ; critical (10) => 100 dixièmes: 1: lib
     Titre avec ESC, U+202E, 600 caractères => assaini, 500 caractères: 1: lib
   section Fuzz
