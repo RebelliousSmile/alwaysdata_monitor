@@ -8,6 +8,7 @@
 
 pub mod advisory;
 pub mod cvss;
+pub mod enrich_store;
 pub mod exploit;
 pub mod purl;
 pub mod range;

@@ -191,6 +191,10 @@ pub fn sync_source(
         active_sha256: state.dump_sha256.clone(),
         conditional,
     };
+    // URL demandée, gardée avec les validateurs qu'elle sert.
+    let requested = source_url(meta.url, options.endpoint_override.as_ref())
+        .ok()
+        .map(|u| u.to_string());
     let mut tally = Tally::default();
     let fetched = (|| {
         let url = source_url(meta.url, options.endpoint_override.as_ref())?;
@@ -257,6 +261,7 @@ pub fn sync_source(
                 Some(v) => Validators::Set {
                     etag: v.etag,
                     last_modified: v.last_modified,
+                    url: requested.clone(),
                 },
             };
             match load.finish_unchanged(&validators, outcome) {
@@ -334,6 +339,7 @@ pub fn sync_source(
                 duration_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
                 loader_version: meta.loader_version,
                 accept_shrink,
+                validator_url: requested.clone(),
             };
             match load.commit(&tally, &meta) {
                 Ok(done) => report(
