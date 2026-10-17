@@ -37,3 +37,34 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - run: sh vigie/scripts/check-tls-deps.sh vigie/Cargo.lock vigie/app/src-tauri/Cargo.lock
+
+  deps:
+    name: osv-scanner
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      OSV_SCANNER_VERSION: "2.6.0"
+      # Somme de osv-scanner_SHA256SUMS de la release v2.6.0 ; provenance
+      # SLSA vérifiée à l'épinglage (vigie/docs/decisions.md). Binaire
+      # téléchargé à chaque run, jamais mis en cache.
+      OSV_SCANNER_SHA256: ca69b3d3cd08f889a49dc0a383122f71cc528b83803671df5fd874d97485b108
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: installer osv-scanner (somme vérifiée)
+        run: |
+          curl -sSfL -o osv-scanner "https://github.com/google/osv-scanner/releases/download/v${OSV_SCANNER_VERSION}/osv-scanner_linux_amd64"
+          echo "${OSV_SCANNER_SHA256}  osv-scanner" | sha256sum -c -
+          chmod +x osv-scanner
+      # Lockfiles nommés : un lockfile absent sort en 127 au lieu d'être sauté.
+      # Tout code non nul fait échouer le job (1 = faille, 127 = erreur,
+      # 128 = aucun paquet). Exceptions : osv-scanner.toml du dossier du
+      # lockfile, lu sans --config.
+      - name: scanner les lockfiles
+        run: >-
+          ./osv-scanner scan source
+          --lockfile=vigie/Cargo.lock
+          --lockfile=vigie/app/src-tauri/Cargo.lock
+          --lockfile=vigie/app/pnpm-lock.yaml
+          --lockfile=composer.lock
