@@ -23,6 +23,7 @@ pub mod request_id;
 pub mod serve;
 pub mod store;
 pub mod tick;
+pub mod vulns;
 pub mod writer;
 
 /// Heure courante, en secondes Unix.

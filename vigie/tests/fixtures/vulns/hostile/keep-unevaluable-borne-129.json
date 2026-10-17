@@ -1,0 +1,28 @@
+{
+ "schema_version": "1.9.0",
+ "id": "GHSA-ex21-ex21-ex21",
+ "modified": "2026-10-01T00:00:00Z",
+ "published": "2026-09-01T00:00:00Z",
+ "summary": "Faille fictive de test",
+ "affected": [
+  {
+   "package": {
+    "ecosystem": "Packagist",
+    "name": "exemple/paquet"
+   },
+   "ranges": [
+    {
+     "type": "ECOSYSTEM",
+     "events": [
+      {
+       "introduced": "0"
+      },
+      {
+       "fixed": "1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1"
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

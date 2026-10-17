@@ -1,0 +1,21 @@
+[
+  {"ecosystem": "Packagist", "name": "exemple/paquet", "out": ["pkg:composer/exemple/paquet"], "why": "Composer"},
+  {"ecosystem": "Packagist", "name": "Exemple/Paquet", "out": ["pkg:composer/exemple/paquet"], "why": "Composer en minuscules"},
+  {"ecosystem": "Packagist", "name": "prestashop/prestashop", "out": ["pkg:prestashop/core/prestashop"], "why": "noyau PrestaShop seul"},
+  {"ecosystem": "Packagist", "name": "PrestaShop/PrestaShop", "out": ["pkg:prestashop/core/prestashop"], "why": "noyau PrestaShop, casse"},
+  {"ecosystem": "Packagist", "name": "prestashop/exemplemodule", "out": ["pkg:composer/prestashop/exemplemodule", "pkg:prestashop/module/exemplemodule"], "why": "prestashop/<x> : deux purl"},
+  {"ecosystem": "Packagist", "name": "prestashop/exemple.lib", "out": ["pkg:composer/prestashop/exemple.lib"], "why": "prestashop/<x> avec point : pas un nom de module, purl Composer seul"},
+  {"ecosystem": "Packagist", "name": "wpackagist-plugin/exemple-plugin", "out": ["pkg:wordpress/plugin/exemple-plugin"], "why": "Bedrock, extension"},
+  {"ecosystem": "Packagist", "name": "wpackagist-theme/exemple-theme", "out": ["pkg:wordpress/theme/exemple-theme"], "why": "Bedrock, thème"},
+  {"ecosystem": "npm", "name": "paquet", "out": ["pkg:npm/paquet"], "why": "npm"},
+  {"ecosystem": "npm", "name": "@exemple/paquet", "out": ["pkg:npm/%40exemple/paquet"], "why": "npm à scope"},
+  {"ecosystem": "crates.io", "name": "exemple", "out": ["pkg:cargo/exemple"], "why": "crate"},
+  {"ecosystem": "crates.io", "name": "Exemple_X", "out": ["pkg:cargo/Exemple_X"], "why": "crate, casse gardée"},
+  {"ecosystem": "Packagist:https://packages.drupal.org/8", "name": "drupal/core", "out": null, "why": "out_of_scope : dépôt suffixé"},
+  {"ecosystem": "PyPI", "name": "exemple", "out": null, "why": "out_of_scope"},
+  {"ecosystem": "packagist", "name": "exemple/paquet", "out": null, "why": "out_of_scope : casse exacte de l'écosystème"},
+  {"ecosystem": "Packagist", "name": "paquet", "out": null, "why": "bad_name : sans vendor"},
+  {"ecosystem": "Packagist", "name": "exemple/pa quet", "out": null, "why": "bad_name"},
+  {"ecosystem": "npm", "name": "exemple/paquet", "out": null, "why": "bad_name : scope sans @"},
+  {"ecosystem": "crates.io", "name": "1exemple", "out": null, "why": "bad_name"}
+]

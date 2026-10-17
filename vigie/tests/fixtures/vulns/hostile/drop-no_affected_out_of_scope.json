@@ -1,0 +1,41 @@
+{
+ "schema_version": "1.9.0",
+ "id": "GHSA-ex15-ex15-ex15",
+ "modified": "2026-10-01T00:00:00Z",
+ "published": "2026-09-01T00:00:00Z",
+ "summary": "Faille fictive de test",
+ "affected": [
+  {
+   "package": {
+    "ecosystem": "PyPI",
+    "name": "exemple"
+   },
+   "ranges": [
+    {
+     "type": "ECOSYSTEM",
+     "events": [
+      {
+       "introduced": "0"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "package": {
+    "ecosystem": "Packagist:https://packages.drupal.org/8",
+    "name": "drupal/exemple"
+   },
+   "ranges": [
+    {
+     "type": "ECOSYSTEM",
+     "events": [
+      {
+       "introduced": "0"
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

@@ -1,0 +1,43 @@
+{
+  "cmp": [
+    {"a": "5.9", "b": "5.9.0", "order": -1, "why": "un composant numérique restant rend la version plus grande, comme PHP"},
+    {"a": "5.9", "b": "5.9", "order": 0, "why": "égalité"},
+    {"a": "1.0.0", "b": "1.0", "order": 1, "why": "version_compare(\"1.0.0\", \"1.0\") vaut 1 : une borne last_affected 1.0 n'inclut pas 1.0.0 (limite de la sémantique PHP)"},
+    {"a": "6.4-beta1", "b": "6.4-RC1", "order": -1, "why": "beta < RC"},
+    {"a": "6.4-RC1", "b": "6.4", "order": -1, "why": "un mot restant (RC) est sous #"},
+    {"a": "6.4", "b": "6.4.1", "order": -1, "why": "composant restant numérique"},
+    {"a": "6.4-beta1", "b": "6.4-beta2", "order": -1, "why": "numéro de préversion"},
+    {"a": "6.4-alpha", "b": "6.4-beta", "order": -1, "why": "alpha < beta"},
+    {"a": "6.4-dev", "b": "6.4-alpha", "order": -1, "why": "dev au plus bas"},
+    {"a": "6.4a1", "b": "6.4alpha1", "order": 0, "why": "a et alpha au même rang"},
+    {"a": "6.4b1", "b": "6.4beta1", "order": 0, "why": "b et beta au même rang"},
+    {"a": "6.4rc1", "b": "6.4RC1", "order": 0, "why": "RC et rc admis, même rang"},
+    {"a": "6.4", "b": "6.4pl1", "order": -1, "why": "pl au-dessus de #"},
+    {"a": "6.4p1", "b": "6.4pl1", "order": 0, "why": "p et pl au même rang"},
+    {"a": "6.10", "b": "6.9", "order": 1, "why": "comparaison numérique, pas lexicale"},
+    {"a": "1.01", "b": "1.1", "order": 0, "why": "zéro initial ignoré par strtol"},
+    {"a": "1.0_1", "b": "1.0+1", "order": 0, "why": "_, + et - deviennent ."},
+    {"a": "1.0-1", "b": "1.0.1", "order": 0, "why": "- devient ."},
+    {"a": "6.4.0", "b": "6.4.0.0", "order": -1, "why": "longueurs différentes"},
+    {"a": "6.4.1", "b": "6.4.0.9", "order": 1, "why": "premier écart décide"},
+    {"a": "4.9.26", "b": "5.0", "order": -1, "why": "majeur"},
+    {"a": "6.4-beta", "b": "6.4.0", "order": -1, "why": "mot face à un nombre : comparé à #"},
+    {"a": "123456789012345678", "b": "123456789012345677", "order": 1, "why": "18 chiffres, sans débordement"}
+  ],
+  "unparsable": [
+    {"v": "", "why": "chaîne vide"},
+    {"v": "1.0-bogus", "why": "mot inconnu (PHP l'apparie par préfixe à b)"},
+    {"v": "1.0-ALPHA", "why": "PHP est sensible à la casse : ALPHA n'est pas alpha"},
+    {"v": "1.0-Rc1", "why": "seuls RC et rc"},
+    {"v": "1.0-patch", "why": "patch n'est pas un mot de version_compare"},
+    {"v": "1.0-stable", "why": "mot inconnu"},
+    {"v": "1.0.", "why": "composant vide"},
+    {"v": ".1", "why": "composant vide"},
+    {"v": "-1", "why": "premier octet recopié : composant -"},
+    {"v": "1.0\u0007", "why": "octet de contrôle"},
+    {"v": "1.0\u202e", "why": "U+202E"},
+    {"v": "1 0", "why": "espace"},
+    {"v": "1234567890123456789", "why": "19 chiffres"},
+    {"v": "1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1.1", "why": "129 caractères"}
+  ]
+}

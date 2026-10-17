@@ -1,0 +1,25 @@
+{
+ "schema_version": "1.9.0",
+ "id": "GHSA-ex16-ex16-ex16",
+ "modified": "2026-10-01T00:00:00Z",
+ "published": "2026-09-01T00:00:00Z",
+ "summary": "Faille fictive de test",
+ "affected": [
+  {
+   "package": {
+    "ecosystem": "Packagist",
+    "name": "pas un nom"
+   },
+   "ranges": [
+    {
+     "type": "ECOSYSTEM",
+     "events": [
+      {
+       "introduced": "0"
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

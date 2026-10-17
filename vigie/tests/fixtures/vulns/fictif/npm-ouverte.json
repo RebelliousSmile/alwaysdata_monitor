@@ -1,0 +1,36 @@
+{
+ "schema_version": "1.9.0",
+ "id": "GHSA-ex05-ex05-ex05",
+ "modified": "2026-10-01T00:00:00Z",
+ "published": "2026-09-01T00:00:00Z",
+ "summary": "Faille fictive de test",
+ "affected": [
+  {
+   "package": {
+    "ecosystem": "npm",
+    "name": "@exemple/paquet"
+   },
+   "ranges": [
+    {
+     "type": "SEMVER",
+     "events": [
+      {
+       "introduced": "2.0.0-rc.1"
+      }
+     ]
+    }
+   ],
+   "versions": [
+    "2.0.0-rc.1",
+    "2.0.0",
+    "1.0.0-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+   ],
+   "database_specific": {
+    "last_known_affected_version_range": "< 2.1.0"
+   }
+  }
+ ],
+ "database_specific": {
+  "severity": "LOW"
+ }
+}

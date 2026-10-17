@@ -1,0 +1,45 @@
+{
+ "schema_version": "1.9.0",
+ "id": "GHSA-ex07-ex07-ex07",
+ "modified": "2026-10-01T00:00:00Z",
+ "published": "2026-09-01T00:00:00Z",
+ "summary": "Faille fictive de test",
+ "affected": [
+  {
+   "package": {
+    "ecosystem": "Packagist",
+    "name": "exemple/autre"
+   },
+   "ranges": [
+    {
+     "type": "ECOSYSTEM",
+     "events": [
+      {
+       "introduced": "1.0.0",
+       "fixed": "1.1.0"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "package": {
+    "ecosystem": "Packagist",
+    "name": "exemple/autre"
+   },
+   "ranges": [
+    {
+     "type": "ECOSYSTEM",
+     "events": [
+      {
+       "introduced": "2.0.0"
+      },
+      {
+       "fixed": "2.1.0"
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

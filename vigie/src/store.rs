@@ -70,6 +70,10 @@ const MIGRATIONS: &[&str] = &[
     // 14 : registre des capacités (#4) : constats écartés du dernier rapport
     // d'agent, et raison de la clôture d'un incident (« plus surveillé »).
     include_str!("../migrations/0014.sql"),
+    // 15 : failles connues (`vulns/store.rs`, issue #15) : sources et leurs
+    // générations sous bail, failles, alias et lignes `affected` par
+    // génération, index de purge et de rapprochement par purl.
+    include_str!("../migrations/0015.sql"),
 ];
 
 /// Version de schéma à partir de laquelle les incidents existent.
@@ -103,6 +107,9 @@ pub const SCHEMA_AGENT_SOURCES: usize = 13;
 /// Version de schéma à partir de laquelle les constats écartés d'un rapport
 /// et la raison de clôture d'un incident existent (registre, #4).
 pub const SCHEMA_REGISTRY: usize = 14;
+/// Version de schéma à partir de laquelle les failles connues existent
+/// (issue #15).
+pub const SCHEMA_VULNS: usize = 15;
 /// Une adresse source de retrait est oubliée 30 jours après le dernier.
 pub const AGENT_SOURCE_RETENTION: i64 = 30 * 86_400;
 
@@ -1810,7 +1817,7 @@ mod tests {
         drop(reader);
 
         let mut store = Store::open(&path).expect("open");
-        assert_eq!(store.schema_version().expect("version"), SCHEMA_REGISTRY);
+        assert_eq!(store.schema_version().expect("version"), MIGRATIONS.len());
         let closed = store.closed_incidents("site-a", 0).expect("clos");
         assert_eq!(closed.len(), 1);
         assert_eq!(closed[0].close_reason, Some(CloseReason::Resolved));
@@ -2548,7 +2555,7 @@ mod tests {
             assert!(!migration.contains('\r'), "migration {} en CRLF", i + 1);
         }
         let (_dir, store) = temp_store();
-        assert_eq!(store.schema_version().expect("version"), SCHEMA_REGISTRY);
+        assert_eq!(store.schema_version().expect("version"), MIGRATIONS.len());
         let mut stmt = store
             .conn
             .prepare("SELECT type, name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name")
@@ -2577,6 +2584,11 @@ mod tests {
             ("index", "log_verdicts_generated"),
             ("index", "log_verdicts_score"),
             ("index", "ticks_at"),
+            ("index", "vuln_advisories_id"),
+            ("index", "vuln_affected_advisory"),
+            ("index", "vuln_affected_purl"),
+            ("index", "vuln_aliases_advisory"),
+            ("index", "vuln_aliases_alias"),
             ("table", "agent_sources"),
             ("table", "audit_notified"),
             ("table", "baselines"),
@@ -2602,6 +2614,10 @@ mod tests {
             ("table", "reports"),
             ("table", "site_keys"),
             ("table", "ticks"),
+            ("table", "vuln_advisories"),
+            ("table", "vuln_affected"),
+            ("table", "vuln_aliases"),
+            ("table", "vuln_sources"),
             ("trigger", "command_audit_no_delete"),
             ("trigger", "command_audit_no_update"),
         ];
@@ -2640,6 +2656,49 @@ mod tests {
             Some("last_logs_seq")
         );
         assert_eq!(columns("log_entries")[0], "id");
+        // Migration 15 : failles connues.
+        assert_eq!(
+            columns("vuln_sources")[4..8],
+            [
+                "active_generation",
+                "next_generation",
+                "loading_generation",
+                "loading_since"
+            ]
+        );
+        assert_eq!(
+            columns("vuln_affected")[3..7],
+            ["purl_type", "purl_namespace", "purl_name", "scheme"]
+        );
+    }
+
+    #[test]
+    fn migrates_a_registry_database_to_vulns() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("vigie.db");
+        {
+            let conn = Connection::open(&path).expect("open");
+            for migration in &MIGRATIONS[..SCHEMA_REGISTRY] {
+                conn.execute_batch(migration).expect("migration");
+            }
+            conn.pragma_update(None, "user_version", SCHEMA_REGISTRY as i64)
+                .expect("user_version");
+            conn.execute("INSERT INTO ticks (at) VALUES (42)", [])
+                .expect("données v14");
+        }
+        let store = Store::open(&path).expect("open");
+        assert_eq!(store.schema_version().expect("version"), SCHEMA_VULNS);
+        assert_eq!(SCHEMA_VULNS, MIGRATIONS.len());
+        assert_eq!(store.last_tick().expect("tick"), Some(42));
+        let sources: i64 = store
+            .conn
+            .query_row("SELECT count(*) FROM vuln_sources", [], |row| row.get(0))
+            .expect("vuln_sources");
+        assert_eq!(sources, 0);
+        drop(store);
+        // Rejouées sans effet.
+        let store = Store::open(&path).expect("réouverture");
+        assert_eq!(store.schema_version().expect("version"), SCHEMA_VULNS);
     }
 
     #[test]
