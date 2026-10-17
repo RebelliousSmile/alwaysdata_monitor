@@ -1,5 +1,5 @@
 ---
-status: pending
+status: done
 ---
 
 # Instruction: Binaire `vigie-inventory` : CLI, clé, envoi, bout en bout, schéma

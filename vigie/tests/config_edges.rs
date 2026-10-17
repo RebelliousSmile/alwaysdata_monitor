@@ -163,6 +163,69 @@ fn an_inventory_source_needs_the_php_runtime() {
     refused("kind = \"wordpress\"\n[sites.inventory]\n", "source");
 }
 
+/// `[sites.inventory]` de #20 : `sources` (1 ou 2 valeurs distinctes) ou la
+/// forme `source` de F5, jamais les deux ; seul `agent-php` exige le runtime
+/// effectif `php`, `ci` est admis partout, runtime absent compris.
+#[test]
+fn inventory_sources_admit_ci_for_any_runtime() {
+    use vigie::config::InventorySource::{AgentPhp, Ci};
+    let kinds = ["", "kind = \"wordpress\"\n", "kind = \"prestashop\"\n"];
+    let runtimes = [
+        "",
+        "runtime = \"php\"\n",
+        "runtime = \"node\"\n",
+        "runtime = \"static\"\n",
+    ];
+    let declared = [
+        ("[\"agent-php\"]", vec![AgentPhp]),
+        ("[\"ci\"]", vec![Ci]),
+        ("[\"agent-php\", \"ci\"]", vec![AgentPhp, Ci]),
+        ("[\"ci\", \"agent-php\"]", vec![Ci, AgentPhp]),
+    ];
+    for kind in kinds {
+        for runtime in runtimes {
+            let base = format!("{kind}{runtime}");
+            // Combinaison refusée par la règle #4 (CMS PHP sans runtime php) :
+            // hors sujet ici.
+            let Ok(plain) = load(&base) else {
+                continue;
+            };
+            let php = plain.sites[0].effective_runtime() == Some(Runtime::Php);
+            for (value, sources) in &declared {
+                let extra = format!("{base}[sites.inventory]\nsources = {value}\n");
+                if sources.contains(&AgentPhp) && !php {
+                    let err = refused(&extra, "exige le runtime php");
+                    assert!(matches!(err, ConfigError::Invalid { .. }), "{err}");
+                } else {
+                    let config = load(&extra).expect(&extra);
+                    assert_eq!(&config.sites[0].inventory_sources(), sources, "{extra}");
+                }
+            }
+        }
+    }
+    // La forme de F5 reste lue comme une liste d'un élément.
+    let config = load("kind = \"wordpress\"\n[sites.inventory]\nsource = \"agent-php\"\n")
+        .expect("forme F5");
+    assert_eq!(config.sites[0].inventory_sources(), [AgentPhp]);
+    let config = load("runtime = \"static\"\n[sites.inventory]\nsource = \"ci\"\n").expect("ci");
+    assert_eq!(config.sites[0].inventory_sources(), [Ci]);
+    for (extra, field) in [
+        (
+            "kind = \"wordpress\"\n[sites.inventory]\nsource = \"agent-php\"\nsources = [\"ci\"]\n",
+            "ensemble",
+        ),
+        ("[sites.inventory]\nsources = []\n", "une valeur au moins"),
+        (
+            "[sites.inventory]\nsources = [\"ci\", \"ci\"]\n",
+            "en double",
+        ),
+        ("[sites.inventory]\nsources = [\"cd\"]\n", "sources"),
+        ("[sites.inventory]\nsources = \"ci\"\n", "sources"),
+    ] {
+        refused(extra, field);
+    }
+}
+
 #[test]
 fn vulns_sources_are_a_closed_list_without_duplicates() {
     // Liste fermée (#16) : identifiant inconnu, doublon ou clé inconnue
@@ -185,9 +248,72 @@ fn vulns_sources_are_a_closed_list_without_duplicates() {
     let config = load("[vulns]\nsources = []\n").expect("liste vide");
     assert!(vigie::vulns::sync::registry::declared(&config).is_empty());
     let config = load("[vulns]\nsources = [\"osv-npm\", \"osv-crates-io\"]\n").expect("admise");
+    // KEV et EPSS (#18) d'office, après les sources de failles.
     assert_eq!(
         vigie::vulns::sync::registry::declared(&config),
-        ["osv-crates-io", "osv-npm"]
+        ["osv-crates-io", "osv-npm", "kev", "epss"]
     );
     assert!(load("").expect("sans section").vulns.is_none());
+}
+
+#[test]
+fn the_wordfence_section_goes_with_the_source() {
+    // `wordfence` déclarée sans sa section, ou l'inverse : refusé.
+    refused("[vulns]\nsources = [\"wordfence\"]\n", "[vulns.wordfence]");
+    let section = "[vulns.wordfence]\ntoken_file = \"/home/vigie/vigie/keys/wordfence-token\"\nterms_reviewed = \"2099-01-01\"\n";
+    refused(&format!("[vulns]\nsources = []\n{section}"), "sans effet");
+    // Chemin relatif, date invalide, clé inconnue.
+    refused(
+        "[vulns]\nsources = [\"wordfence\"]\n[vulns.wordfence]\ntoken_file = \"keys/token\"\nterms_reviewed = \"2099-01-01\"\n",
+        "chemin absolu",
+    );
+    refused(
+        "[vulns]\nsources = [\"wordfence\"]\n[vulns.wordfence]\ntoken_file = \"/k/t\"\nterms_reviewed = \"2099-13-45\"\n",
+        "AAAA-MM-JJ",
+    );
+    refused(
+        "[vulns]\nsources = [\"wordfence\"]\n[vulns.wordfence]\ntoken_file = \"/k/t\"\nterms_reviewed = \"2099-01-01\"\nurl = \"x\"\n",
+        "url",
+    );
+    // Section admise même si le binaire n'a pas consigné la relecture : le
+    // refus vient de la source, la configuration reste valide.
+    let config = load(&format!(
+        "[vulns]\nsources = [\"wordfence\", \"friends-of-presta\"]\n{section}"
+    ))
+    .expect("admise");
+    assert_eq!(
+        vigie::vulns::sync::registry::declared(&config),
+        ["friends-of-presta", "wordfence", "kev", "epss"]
+    );
+    assert_eq!(
+        config.vulns.unwrap().wordfence.unwrap().terms_reviewed,
+        "2099-01-01"
+    );
+}
+
+#[test]
+fn kev_and_epss_come_with_vulnerability_sources_only() {
+    let config = load("[vulns]\nsources = [\"osv-npm\"]\n").expect("admise");
+    assert_eq!(
+        vigie::vulns::sync::registry::declared(&config),
+        ["osv-npm", "kev", "epss"]
+    );
+    // Écrits explicitement : admis, une seule fois.
+    let config = load("[vulns]\nsources = [\"kev\", \"osv-npm\", \"epss\"]\n").expect("admise");
+    assert_eq!(
+        vigie::vulns::sync::registry::declared(&config),
+        ["osv-npm", "kev", "epss"]
+    );
+    for sources in ["[\"kev\"]", "[\"epss\"]", "[\"kev\", \"epss\"]"] {
+        let err = refused(
+            &format!("[vulns]\nsources = {sources}\n"),
+            "au moins une source de failles",
+        );
+        assert!(matches!(err, ConfigError::Invalid { .. }), "{err}");
+    }
+    let err = refused(
+        "[vulns]\nsources = [\"osv-npm\", \"kev\", \"kev\"]\n",
+        "deux fois",
+    );
+    assert!(matches!(err, ConfigError::Invalid { .. }), "{err}");
 }

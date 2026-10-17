@@ -1,0 +1,59 @@
+{
+ "00000000-0000-4000-8000-000000000029": {
+  "id": "00000000-0000-4000-8000-000000000029",
+  "title": "Exemple 41 - faille fictive",
+  "software": [
+   {
+    "type": "plugin",
+    "name": "Exemple Inversee",
+    "slug": "exemple-inversee",
+    "affected_versions": {
+     "2.0 - 1.0": {
+      "from_version": "2.0",
+      "from_inclusive": true,
+      "to_version": "1.0",
+      "to_inclusive": true
+     }
+    },
+    "patched": false,
+    "patched_versions": [],
+    "remediation": "Mettre à jour."
+   }
+  ],
+  "informational": false,
+  "description": "Texte fictif jamais stocké.",
+  "references": [
+   "https://example.org/wf/41"
+  ],
+  "cwe": {
+   "id": 79,
+   "name": "Cross-site Scripting",
+   "description": "Fictif."
+  },
+  "cvss": {
+   "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N",
+   "score": 6.1,
+   "rating": "Medium"
+  },
+  "cve": "CVE-2099-0041",
+  "cve_link": "https://example.org/cve/CVE-2099-0041",
+  "researchers": [
+   "Chercheuse fictive"
+  ],
+  "published": "2099-01-10 12:00:00",
+  "updated": "2099-01-12T08:00:00+00:00",
+  "copyrights": {
+   "message": "Ces données fictives sont fournies par Exemple Intelligence SARL.",
+   "exemple": {
+    "notice": "Copyright 2099 Exemple Intelligence SARL",
+    "license": "Licence fictive d'exemple",
+    "license_url": "https://example.org/licence-exemple"
+   },
+   "mitre-fictif": {
+    "notice": "Copyright 2099 Registre fictif de CVE",
+    "license": "Conditions fictives du registre",
+    "license_url": "https://example.org/conditions-registre"
+   }
+  }
+ }
+}

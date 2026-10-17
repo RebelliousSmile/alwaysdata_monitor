@@ -262,13 +262,17 @@ pub fn run_with_sources(
         Err(err) => log::error!("purge des logs : {err:#}"),
     }
     purge_analysis(&mut store, now);
-    // Inventaires : dernier et 30 jours d'historique ; le dernier d'un site
-    // qui ne déclare plus [sites.inventory] part aussi après 30 jours.
-    let declared: Vec<&str> = config
+    // Inventaires : dernier et 30 jours d'historique par (site, source) ; le
+    // dernier d'une source que le site ne déclare plus part aussi après 30
+    // jours.
+    let declared: Vec<(String, crate::inventory::Source)> = config
         .sites
         .iter()
-        .filter(|site| crate::capability::inventory_source(site).is_some())
-        .map(|site| site.id.as_str())
+        .flat_map(|site| {
+            crate::capability::inventory_sources(site)
+                .into_iter()
+                .map(|source| (site.id.clone(), source.into()))
+        })
         .collect();
     match store.purge_inventory(now, &declared) {
         Ok(0) => {}

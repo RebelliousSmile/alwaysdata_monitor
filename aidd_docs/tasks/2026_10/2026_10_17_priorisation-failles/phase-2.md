@@ -1,5 +1,5 @@
 ---
-status: pending
+status: done
 ---
 
 # Instruction: Stockage KEV et EPSS par générations, lecture pour F7

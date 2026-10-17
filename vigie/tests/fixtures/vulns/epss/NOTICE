@@ -1,0 +1,5 @@
+Scores FIRST EPSS fictifs, écrits pour Vigie : même forme que
+epss_scores-current.csv (commentaire #model_version, en-tête
+cve,epss,percentile), CVE inventés CVE-2099-…, scores inventés. Les
+fichiers gzip, volumineux ou hostiles (bombe gzip, ligne sans fin) sont
+générés en flux par tests/vulns_enrich_sync.rs, jamais commités.

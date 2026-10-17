@@ -1,0 +1,6 @@
+Catalogues CISA KEV fictifs, écrits pour Vigie : même structure que
+known_exploited_vulnerabilities.json (schéma publié par cisagov/kev-data),
+CVE inventés de la plage manifestement fictive CVE-2099-…, produits, textes
+et liens (example.org) inventés. Aucun texte n'est repris d'une vraie
+entrée KEV. Les catalogues volumineux, tronqués ou rétrécis sont générés
+par tests/vulns_enrich_sync.rs.

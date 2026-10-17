@@ -514,6 +514,31 @@ async fn rotate_key_needs_a_proof_and_switches_atomically() {
         false
     );
 
+    // Clé d'inventaire du site B (#20) : une clé ne sert qu'un usage, même
+    // vérification que `site add` et `site inventory-key`.
+    let inventory = SigningKey::from_bytes(&[23; 32]);
+    v.store()
+        .add_inventory_key("site-b", &inventory.verifying_key().to_bytes(), T0)
+        .unwrap();
+    let id = v.enqueue(CommandKind::RotateKey);
+    v.advance(30);
+    v.pull(None).await;
+    v.advance(30);
+    let reply = v
+        .pull(Some(rotation_result(&id, &inventory, &inventory)))
+        .await;
+    assert_eq!(reply.json()["accepted"], false);
+    assert_eq!(v.state(&id), State::Failed);
+    let refused: i64 = rusqlite::Connection::open(&v.config().database)
+        .unwrap()
+        .query_row(
+            "SELECT count(*) FROM command_audit WHERE entry LIKE '%nouvelle clé déjà enregistrée%'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(refused, 2, "site B, puis clé d'inventaire");
+
     // Bonne preuve : bascule, séquences remises à zéro (logs et inventaire
     // compris).
     rusqlite::Connection::open(&v.config().database)

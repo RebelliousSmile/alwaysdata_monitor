@@ -1,0 +1,247 @@
+name: inventory-release
+
+# Release de vigie-inventory (issue #20, vigie/docs/inventaire.md) : binaires
+# Linux musl (x86_64, aarch64), Windows et macOS, réunis avec SHA256SUMS dans
+# une release GitHub en brouillon.
+#
+# Tag inventory-vX.Y.Z : brouillon rattaché à ce tag. Le préfixe tient à
+# l'écart les tags v* du module PrestaShop et console-v* de la console.
+# Lancement manuel : brouillon nommé inventory-vX.Y.Z-manuel.N, marqué
+# préversion, à essayer avant le premier tag.
+#
+# Garde-fous du veilleur : check-tls-deps.sh avant tout build, toolchain de
+# rust-toolchain.toml, --locked, images de runner épinglées, aucun cache.
+# Reproductibilité autant que possible : SOURCE_DATE_EPOCH du commit, chemins
+# réécrits pour Rust (--remap-path-prefix) et pour le C de rusqlite et ring
+# (-ffile-prefix-map) ; sous Linux musl, deux builds x86_64 dans deux dossiers
+# différents doivent donner les mêmes octets. Windows et macOS : non vérifié.
+# Une cible qui échoue est retirée et notée dans vigie/docs/decisions.md.
+on:
+  push:
+    tags:
+      - "inventory-v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: inventory-release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  RUST_TOOLCHAIN: "1.93.0" # même version que vigie/rust-toolchain.toml
+
+jobs:
+  # TOOL_VERSION de vigie/src/inventory/mod.rs, et, sur un tag, celle du tag :
+  # sinon arrêt avant tout build.
+  version:
+    name: version
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+      tag: ${{ steps.check.outputs.tag }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: version concordante
+        id: check
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          set -euo pipefail
+          VERSION=$(sed -n 's/^pub const TOOL_VERSION: &str = "\(.*\)";$/\1/p' vigie/src/inventory/mod.rs)
+          test -n "$VERSION" || { echo "::error::TOOL_VERSION introuvable"; exit 1; }
+          echo "TOOL_VERSION : $VERSION"
+          if [ "$REF_TYPE" = "tag" ]; then
+            if [ "$REF_NAME" != "inventory-v$VERSION" ]; then
+              echo "::error::le tag $REF_NAME ne correspond pas à TOOL_VERSION $VERSION (attendu inventory-v$VERSION)"
+              exit 1
+            fi
+            TAG="$REF_NAME"
+          else
+            TAG="inventory-v$VERSION-manuel.$RUN_NUMBER"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "release : $TAG"
+
+  guards:
+    name: dépendances TLS
+    needs: version
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - run: sh vigie/scripts/check-tls-deps.sh vigie/Cargo.lock
+
+  # cargo-zigbuild 0.23.4 comme vigie.yml ; zig 0.14.1 par le paquet ziglang
+  # de PyPI, épinglé par la SHA-256 de sa roue (cargo-zigbuild le trouve par
+  # `python3 -m ziglang`) : vigie/docs/decisions.md.
+  linux:
+    name: linux musl
+    needs: [version, guards]
+    runs-on: ubuntu-24.04
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      ZIGLANG_WHEEL: ziglang==0.14.1 --hash=sha256:6eb9d4d759b292c83810dbee2e9e8e3fbfbf01d864e6e9811bae711fd74e1c2f
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          targets: x86_64-unknown-linux-musl, aarch64-unknown-linux-musl
+      - name: zig 0.14.1 (somme vérifiée)
+        run: |
+          set -euo pipefail
+          echo "$ZIGLANG_WHEEL" > "$RUNNER_TEMP/zig-requirements.txt"
+          python3 -m pip install --user --require-hashes --only-binary :all: -r "$RUNNER_TEMP/zig-requirements.txt"
+          python3 -m ziglang version
+      - run: cargo install cargo-zigbuild --version 0.23.4 --locked
+      # Deux copies du dépôt, construites chacune dans son dossier : mêmes
+      # octets attendus, chemins réécrits en /build et /cargo.
+      - name: double build x86_64 et build aarch64
+        run: |
+          set -euo pipefail
+          SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)
+          export SOURCE_DATE_EPOCH
+          CARGO_HOME="${CARGO_HOME:-$HOME/.cargo}"
+          COPY="$RUNNER_TEMP/copie"
+          cp -a "$GITHUB_WORKSPACE" "$COPY"
+          build() { # dossier cible
+            dir=$1 target=$2
+            (
+              cd "$dir/vigie"
+              export RUSTFLAGS="--remap-path-prefix=$dir=/build --remap-path-prefix=$CARGO_HOME=/cargo"
+              export CFLAGS="-ffile-prefix-map=$dir=/build -ffile-prefix-map=$CARGO_HOME=/cargo"
+              cargo zigbuild --release --locked --bin vigie-inventory --target "$target"
+              file "target/$target/release/vigie-inventory" | grep -q "statically linked"
+            )
+          }
+          build "$GITHUB_WORKSPACE" x86_64-unknown-linux-musl
+          build "$COPY" x86_64-unknown-linux-musl
+          A="$GITHUB_WORKSPACE/vigie/target/x86_64-unknown-linux-musl/release/vigie-inventory"
+          B="$COPY/vigie/target/x86_64-unknown-linux-musl/release/vigie-inventory"
+          sha256sum "$A" "$B"
+          cmp "$A" "$B" || { echo "::error::deux builds x86_64 musl différents : build non reproductible"; exit 1; }
+          build "$GITHUB_WORKSPACE" aarch64-unknown-linux-musl
+          mkdir -p dist
+          cp "$A" "dist/vigie-inventory-$VERSION-x86_64-unknown-linux-musl"
+          cp "vigie/target/aarch64-unknown-linux-musl/release/vigie-inventory" \
+            "dist/vigie-inventory-$VERSION-aarch64-unknown-linux-musl"
+          sha256sum dist/*
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: linux
+          path: dist/*
+          retention-days: 7
+          if-no-files-found: error
+
+  windows:
+    name: windows
+    needs: [version, guards]
+    runs-on: windows-2022
+    defaults:
+      run:
+        shell: bash
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - name: build
+        run: |
+          set -euo pipefail
+          SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)
+          export SOURCE_DATE_EPOCH
+          export RUSTFLAGS="--remap-path-prefix=$GITHUB_WORKSPACE=/build --remap-path-prefix=$USERPROFILE\\.cargo=/cargo"
+          cd vigie
+          cargo build --release --locked --bin vigie-inventory --target x86_64-pc-windows-msvc
+          mkdir -p ../dist
+          cp target/x86_64-pc-windows-msvc/release/vigie-inventory.exe \
+            "../dist/vigie-inventory-$VERSION-x86_64-pc-windows-msvc.exe"
+          sha256sum ../dist/*
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: windows
+          path: dist/*
+          retention-days: 7
+          if-no-files-found: error
+
+  macos:
+    name: macos
+    needs: [version, guards]
+    runs-on: macos-14
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          targets: aarch64-apple-darwin, x86_64-apple-darwin
+      - name: build
+        run: |
+          set -euo pipefail
+          SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)
+          export SOURCE_DATE_EPOCH
+          CARGO_HOME="${CARGO_HOME:-$HOME/.cargo}"
+          export RUSTFLAGS="--remap-path-prefix=$GITHUB_WORKSPACE=/build --remap-path-prefix=$CARGO_HOME=/cargo"
+          export CFLAGS="-ffile-prefix-map=$GITHUB_WORKSPACE=/build -ffile-prefix-map=$CARGO_HOME=/cargo"
+          mkdir -p dist
+          for target in aarch64-apple-darwin x86_64-apple-darwin; do
+            (cd vigie && cargo build --release --locked --bin vigie-inventory --target "$target")
+            cp "vigie/target/$target/release/vigie-inventory" "dist/vigie-inventory-$VERSION-$target"
+          done
+          shasum -a 256 dist/*
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: macos
+          path: dist/*
+          retention-days: 7
+          if-no-files-found: error
+
+  # Seul job à écrire : jamais sur une release existante.
+  release:
+    name: release
+    needs: [version, linux, windows, macos]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          path: dist
+          merge-multiple: true
+      - name: brouillon de release
+        working-directory: dist
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.version.outputs.tag }}
+          VERSION: ${{ needs.version.outputs.version }}
+          REF_TYPE: ${{ github.ref_type }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          sha256sum -- vigie-inventory-* > SHA256SUMS
+          cat SHA256SUMS
+          {
+            echo "vigie-inventory $VERSION : inventaire CycloneDX des lockfiles d'un projet, poussé au veilleur Vigie."
+            echo
+            echo "Installation, clé et exemples de CI : vigie/docs/inventaire.md."
+            echo "Vérifier le binaire avec SHA256SUMS, dans une étape à part, avant de l'exécuter :"
+            echo
+            echo '```'
+            cat SHA256SUMS
+            echo '```'
+          } > notes.md
+          FLAGS=(--draft --title "vigie-inventory $VERSION" --notes-file notes.md)
+          if [ "$REF_TYPE" = "tag" ]; then
+            FLAGS+=(--verify-tag)
+          else
+            FLAGS+=(--target "$SHA" --prerelease)
+          fi
+          gh release create "$TAG" "${FLAGS[@]}" -- vigie-inventory-* SHA256SUMS

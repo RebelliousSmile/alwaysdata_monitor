@@ -118,6 +118,7 @@ impl Env {
         let mut config = veilleur::config(dir.path().join("data").join("vigie.db"));
         config.vulns = Some(Vulns {
             sources: sources.iter().map(|s| (*s).to_owned()).collect(),
+            wordfence: None,
         });
         Self {
             _dir: dir,
@@ -145,6 +146,8 @@ impl Env {
             endpoint_override: Some(self.server.base()),
             limits_override: self.limits.clone(),
             free_space_override: None,
+            // KEV et EPSS, déclarés d'office (#18) : `vulns_enrich_sync.rs`.
+            skip_enrichment: true,
         }
     }
 

@@ -1,0 +1,6 @@
+{
+  "//": "Extrait à fusionner dans le package.json du projet (vigie/docs/inventaire.md) : npm run vigie:inventory, appelé par le déploiement ; jamais postinstall (lancé à chaque npm install, ignoré par --ignore-scripts). Shell POSIX : pas sous Windows.",
+  "scripts": {
+    "vigie:inventory": "command -v vigie-inventory >/dev/null 2>&1 || exit 0; sh vigie-inventory-push.sh --site site-a --endpoint https://vigie.example.org --skip-without-key"
+  }
+}

@@ -19,6 +19,17 @@
 //!   `bad_severity`, `bad_last_known`, `bad_alias`, `bad_cwe` ; écart entre
 //!   `package.purl` d'OSV et le purl calculé : `purl_mismatch` (le purl
 //!   calculé l'emporte).
+//!
+//! Raisons propres aux sources de F3 : `bad_record` (enregistrement Wordfence
+//! dont `id` ou `software[]` n'a pas la forme attendue, faille perdue) ;
+//! `bad_published` (date de publication illisible alors qu'un repli fournit
+//! `modified`, faille gardée) ; `empty_copyrights`, `no_copyrights`,
+//! `attribution_overflow` (mention Wordfence vide, absente ou trop longue,
+//! remplacée par la mention fixe, faille gardée) ; Friends-Of-Presta :
+//! `bad_front_matter` (en-tête YAML hors de la grammaire fermée) et
+//! `unknown_category` (catégorie absente ou inconnue), failles perdues ;
+//! `bad_archive_member` (membre de l'archive ignoré : chemin absolu ou en
+//! `..`, lien, périphérique, nom trop long).
 
 use std::collections::BTreeMap;
 
@@ -83,6 +94,37 @@ pub enum Reason {
     PurlMismatch,
     BadAlias,
     BadCwe,
+    /// Wordfence : `id`, `software[]` ou `software[].type` / `slug` d'une
+    /// forme inattendue.
+    BadRecord,
+    /// Date de publication illisible ; `modified` vient d'un repli.
+    BadPublished,
+    /// Wordfence : `copyrights` vide (`{}`), mention fixe.
+    EmptyCopyrights,
+    /// Wordfence : `copyrights` absent ou illisible, mention fixe.
+    NoCopyrights,
+    /// Wordfence : mention de plus de 2 000 caractères, mention fixe.
+    AttributionOverflow,
+    /// Friends-Of-Presta : en-tête YAML hors de la grammaire fermée.
+    BadFrontMatter,
+    /// Friends-Of-Presta : catégorie absente ou inconnue.
+    UnknownCategory,
+    /// Friends-Of-Presta : membre de l'archive ignoré.
+    BadArchiveMember,
+    /// Tables KEV et EPSS (F4) : identifiant hors de la grammaire CVE du
+    /// schéma KEV.
+    BadCve,
+    /// Tables KEV et EPSS : nombre illisible ou hors de `[0, 1]`.
+    BadValue,
+    /// Tables KEV et EPSS : champ requis absent.
+    MissingField,
+    /// Tables KEV et EPSS : CVE déjà vu dans le même chargement.
+    Duplicate,
+    /// KEV : `knownRansomwareCampaignUse` ni `Known` ni `Unknown`, lu
+    /// « non ».
+    UnknownRansomware,
+    /// KEV : `count` différent du nombre d'entrées.
+    CountMismatch,
 }
 
 impl Reason {
@@ -108,6 +150,20 @@ impl Reason {
             Self::PurlMismatch => "purl_mismatch",
             Self::BadAlias => "bad_alias",
             Self::BadCwe => "bad_cwe",
+            Self::BadRecord => "bad_record",
+            Self::BadPublished => "bad_published",
+            Self::EmptyCopyrights => "empty_copyrights",
+            Self::NoCopyrights => "no_copyrights",
+            Self::AttributionOverflow => "attribution_overflow",
+            Self::BadFrontMatter => "bad_front_matter",
+            Self::UnknownCategory => "unknown_category",
+            Self::BadArchiveMember => "bad_archive_member",
+            Self::BadCve => "bad_cve",
+            Self::BadValue => "bad_value",
+            Self::MissingField => "missing_field",
+            Self::Duplicate => "duplicate",
+            Self::UnknownRansomware => "unknown_ransomware",
+            Self::CountMismatch => "count_mismatch",
         }
     }
 
@@ -115,7 +171,10 @@ impl Reason {
     /// d'écart de F2 est la somme de ces raisons. Sinon, simple note : ligne
     /// ou entrée écartée seule, ou exclusion normale (`withdrawn`, faille
     /// d'un autre écosystème `no_affected_out_of_scope`). Sans joker : une
-    /// raison ajoutée (F3) ne compile pas sans son classement.
+    /// raison ajoutée (F3) ne compile pas sans son classement. Pour KEV et
+    /// EPSS (F4), une ligne perdue est un écart (`bad_cve`, `bad_date`,
+    /// `bad_value`, `missing_field`, `duplicate`) ; `unknown_ransomware` et
+    /// `count_mismatch` ne sont que des notes.
     pub fn is_drop(self) -> bool {
         match self {
             Self::TooLarge
@@ -124,7 +183,14 @@ impl Reason {
             | Self::BadDate
             | Self::DuplicateId
             | Self::NoAffected
-            | Self::BadEntryName => true,
+            | Self::BadEntryName
+            | Self::BadRecord
+            | Self::BadFrontMatter
+            | Self::UnknownCategory
+            | Self::BadCve
+            | Self::BadValue
+            | Self::MissingField
+            | Self::Duplicate => true,
             Self::Withdrawn
             | Self::NoAffectedOutOfScope
             | Self::BadPurl
@@ -137,12 +203,19 @@ impl Reason {
             | Self::BadLastKnown
             | Self::PurlMismatch
             | Self::BadAlias
-            | Self::BadCwe => false,
+            | Self::BadCwe
+            | Self::BadPublished
+            | Self::EmptyCopyrights
+            | Self::NoCopyrights
+            | Self::AttributionOverflow
+            | Self::BadArchiveMember
+            | Self::UnknownRansomware
+            | Self::CountMismatch => false,
         }
     }
 
     /// Toutes les raisons, dans l'ordre d'affichage.
-    pub const ALL: [Reason; 20] = [
+    pub const ALL: [Reason; 34] = [
         Self::TooLarge,
         Self::BadJson,
         Self::BadId,
@@ -163,6 +236,20 @@ impl Reason {
         Self::PurlMismatch,
         Self::BadAlias,
         Self::BadCwe,
+        Self::BadRecord,
+        Self::BadPublished,
+        Self::EmptyCopyrights,
+        Self::NoCopyrights,
+        Self::AttributionOverflow,
+        Self::BadFrontMatter,
+        Self::UnknownCategory,
+        Self::BadArchiveMember,
+        Self::BadCve,
+        Self::BadValue,
+        Self::MissingField,
+        Self::Duplicate,
+        Self::UnknownRansomware,
+        Self::CountMismatch,
     ];
 }
 
@@ -1129,7 +1216,14 @@ mod tests {
                 "bad_date",
                 "duplicate_id",
                 "no_affected",
-                "bad_entry_name"
+                "bad_entry_name",
+                "bad_record",
+                "bad_front_matter",
+                "unknown_category",
+                "bad_cve",
+                "bad_value",
+                "missing_field",
+                "duplicate"
             ]
         );
         for r in Reason::ALL {

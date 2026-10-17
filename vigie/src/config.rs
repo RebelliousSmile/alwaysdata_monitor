@@ -56,12 +56,31 @@ pub struct Config {
 }
 
 /// `[vulns]` : sources de failles à synchroniser, parmi la liste fermée
-/// `vulns::sync::registry::KNOWN`. Aucune URL n'est configurable.
+/// `vulns::sync::registry::KNOWN` ; `kev` et `epss` s'y ajoutent d'office
+/// (`registry::declared`). Aucune URL n'est configurable.
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Vulns {
     #[serde(default)]
     pub sources: Vec<String>,
+    /// `[vulns.wordfence]` : exigée si `wordfence` est dans `sources`, et
+    /// réciproquement.
+    #[serde(default)]
+    pub wordfence: Option<WordfenceConfig>,
+}
+
+/// `[vulns.wordfence]` (#17). La configuration reste valide même si le
+/// binaire n'a pas consigné la relecture des conditions : le refus vient de
+/// la source, à chaque synchronisation, sans arrêter `serve` ni `tick`.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WordfenceConfig {
+    /// Jeton « Integrations », fichier 0600 dans un dossier 0700, chemin
+    /// absolu ; lu à chaque synchronisation, jamais copié.
+    pub token_file: PathBuf,
+    /// Date (`AAAA-MM-JJ`) de la relecture des conditions consignée dans
+    /// `docs/failles.md` : doit égaler celle du binaire.
+    pub terms_reviewed: String,
 }
 
 /// `[logs]` : règles par défaut à désactiver et règles ajoutées
@@ -166,29 +185,97 @@ impl SiteLogs {
     }
 }
 
-/// `[sites.inventory]` : source de l'inventaire des composants du site
-/// (issue #19). Sans elle, `/r/v1/inventory` refuse le site avant de lire le
-/// corps, et le contrôle `vulns` (F7) n'existe pas : « surveillé » se lit
-/// dans la configuration du veilleur, jamais dans ce qu'un agent envoie.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
+/// `[sites.inventory]` : sources de l'inventaire des composants du site
+/// (issues #19 et #20). Sans elle, `/r/v1/inventory` refuse le site avant de
+/// lire le corps, et le contrôle `vulns` (F7) n'existe pas : « surveillé » se
+/// lit dans la configuration du veilleur, jamais dans ce qu'un agent envoie.
+///
+/// Deux formes, exclusives : `source = "agent-php"` (forme de F5, lue comme
+/// une liste d'un élément) ou `sources = ["agent-php", "ci"]` (1 ou 2 valeurs
+/// distinctes, vérifiées par `Config::validate`).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(try_from = "RawSiteInventory")]
 pub struct SiteInventory {
-    pub source: InventorySource,
+    pub sources: Vec<InventorySource>,
 }
 
-/// Source d'inventaire : liste fermée (#20 ajoutera la sienne).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+impl SiteInventory {
+    pub fn new(sources: &[InventorySource]) -> Self {
+        Self {
+            sources: sources.to_vec(),
+        }
+    }
+
+    /// 1 ou 2 sources distinctes ; `agent-php` seul exige le runtime
+    /// effectif `php` (règle de F5, message inchangé).
+    fn validate(&self, site: &Site) -> Result<(), String> {
+        if self.sources.is_empty() {
+            return Err("sources : une valeur au moins".into());
+        }
+        let mut seen = self.sources.clone();
+        seen.sort_unstable();
+        seen.dedup();
+        if seen.len() != self.sources.len() {
+            return Err("sources : valeur en double".into());
+        }
+        for source in &self.sources {
+            match source {
+                InventorySource::AgentPhp if site.effective_runtime() != Some(Runtime::Php) => {
+                    return Err(format!(
+                        "source = \"{}\" exige le runtime php (reçu : {})",
+                        source.as_str(),
+                        site.effective_runtime().map_or("-", Runtime::as_str)
+                    ));
+                }
+                InventorySource::AgentPhp | InventorySource::Ci => {}
+            }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawSiteInventory {
+    source: Option<InventorySource>,
+    sources: Option<Vec<InventorySource>>,
+}
+
+impl TryFrom<RawSiteInventory> for SiteInventory {
+    type Error = &'static str;
+
+    fn try_from(raw: RawSiteInventory) -> Result<Self, Self::Error> {
+        match (raw.source, raw.sources) {
+            (Some(source), None) => Ok(Self {
+                sources: vec![source],
+            }),
+            (None, Some(sources)) => Ok(Self { sources }),
+            (Some(_), Some(_)) => Err("source et sources ensemble : n'en garder qu'une"),
+            (None, None) => Err("source ou sources attendu"),
+        }
+    }
+}
+
+/// Source d'inventaire : liste fermée.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum InventorySource {
     /// L'agent PHP relève les composants du site (`docs/agent-php.md`) ;
     /// exige le runtime effectif `php`.
     AgentPhp,
+    /// `vigie-inventory` lit les lockfiles du projet au déploiement et pousse
+    /// l'inventaire sous la clé d'inventaire du site (`docs/inventaire.md`) ;
+    /// admis quel que soit le runtime, même absent.
+    Ci,
 }
 
 impl InventorySource {
+    pub const ALL: [Self; 2] = [Self::AgentPhp, Self::Ci];
+
     pub fn as_str(self) -> &'static str {
         match self {
             Self::AgentPhp => "agent-php",
+            Self::Ci => "ci",
         }
     }
 }
@@ -336,6 +423,14 @@ impl Site {
             SiteKind::Wordpress | SiteKind::Prestashop => Some(Runtime::Php),
             SiteKind::Generic => None,
         })
+    }
+
+    /// Sources d'inventaire déclarées (`[sites.inventory]`), dans l'ordre de
+    /// la configuration ; vide sans la section.
+    pub fn inventory_sources(&self) -> Vec<InventorySource> {
+        self.inventory
+            .as_ref()
+            .map_or_else(Vec::new, |inventory| inventory.sources.clone())
     }
 
     pub fn content_url(&self) -> &str {
@@ -586,6 +681,48 @@ impl Config {
                     return Err(format!("vulns.sources : « {id} » déclarée deux fois"));
                 }
             }
+            let declared = seen.contains("wordfence");
+            match (&vulns.wordfence, declared) {
+                (None, true) => {
+                    return Err(
+                        "vulns.sources : « wordfence » exige [vulns.wordfence] (token_file, terms_reviewed)".into(),
+                    );
+                }
+                (Some(_), false) => {
+                    return Err(
+                        "[vulns.wordfence] sans « wordfence » dans vulns.sources : section sans effet refusée".into(),
+                    );
+                }
+                (Some(wf), true) => {
+                    let shown = wf.token_file.to_string_lossy();
+                    if !(wf.token_file.is_absolute() || shown.starts_with('/')) {
+                        return Err(format!(
+                            "vulns.wordfence.token_file doit être un chemin absolu (reçu : {shown})"
+                        ));
+                    }
+                    let date = &wf.terms_reviewed;
+                    if date.len() != 10 || date.parse::<jiff::civil::Date>().is_err() {
+                        return Err(format!(
+                            "vulns.wordfence.terms_reviewed doit être une date AAAA-MM-JJ (reçu : {date})"
+                        ));
+                    }
+                }
+                (None, false) => {}
+            }
+            // KEV et EPSS (#18) n'enrichissent que des failles : déclarés
+            // d'office avec la première source de failles, jamais seuls.
+            let enrichment = crate::vulns::sync::registry::ENRICHMENT;
+            if !vulns.sources.is_empty()
+                && vulns
+                    .sources
+                    .iter()
+                    .all(|id| enrichment.contains(&id.as_str()))
+            {
+                return Err(format!(
+                    "vulns.sources : {} demandent au moins une source de failles (ils sont alors ajoutés d'office)",
+                    enrichment.join(" et ")
+                ));
+            }
         }
         let mut seen = HashSet::new();
         for site in &self.sites {
@@ -638,17 +775,9 @@ impl Config {
                 ));
             }
             if let Some(inventory) = &site.inventory {
-                match inventory.source {
-                    InventorySource::AgentPhp if site.effective_runtime() != Some(Runtime::Php) => {
-                        return Err(format!(
-                            "inventory du site « {} » : source = \"{}\" exige le runtime php (reçu : {})",
-                            site.id,
-                            inventory.source.as_str(),
-                            site.effective_runtime().map_or("-", Runtime::as_str)
-                        ));
-                    }
-                    InventorySource::AgentPhp => {}
-                }
+                inventory
+                    .validate(site)
+                    .map_err(|err| format!("inventory du site « {} » : {err}", site.id))?;
             }
             if let Some(logs) = &site.logs {
                 logs.validate()

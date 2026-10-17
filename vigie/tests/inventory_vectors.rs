@@ -78,9 +78,7 @@ async fn each_vector_gets_its_status_from_the_router() {
             .expect("add_key");
         let mut config = veilleur::config(database.clone());
         config.sites[0].kind = SiteKind::Wordpress;
-        config.sites[0].inventory = Some(SiteInventory {
-            source: InventorySource::AgentPhp,
-        });
+        config.sites[0].inventory = Some(SiteInventory::new(&[InventorySource::AgentPhp]));
         let router = serve::router_with_clock(config, Arc::new(FakeClock::new(v.now)));
         let request = Request::post("/r/v1/inventory")
             .header(HEADER_SITE, "site-a")
@@ -96,7 +94,7 @@ async fn each_vector_gets_its_status_from_the_router() {
         );
         let stored = Store::open(&database)
             .expect("base")
-            .last_inventory("site-a")
+            .last_inventory("site-a", vigie::inventory::Source::Agent)
             .expect("lecture")
             .is_some();
         assert_eq!(stored, vector.status == 204, "{}", vector.name);
