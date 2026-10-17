@@ -610,3 +610,175 @@ fn sources_warns_about_a_kev_catalogue_older_than_14_days() {
         "{text}"
     );
 }
+
+// --- Rapprochement des sites (#21) ----------------------------------------
+
+#[path = "support/match_cli.rs"]
+mod match_cli;
+#[path = "support/match_harness.rs"]
+mod match_harness;
+#[path = "support/matching_data.rs"]
+mod matching_data;
+
+/// Site A WordPress : extension 1.2.3 (Wordfence fictive critique, attribution
+/// hostile), paquet Composer d'information, paquet sans faille ; tick.
+fn matched_site() -> match_cli::Cli {
+    use matching_data::{ATTRIBUTION_FREE, Fake, PAQUET, PLUGIN, build};
+    let cli = match_cli::setup("wordpress", "source = \"agent-php\"", true);
+    let t = match_cli::now() - 3_000;
+    let h = &cli.harness;
+    let critical = build(&Fake {
+        id: "WF-2099-0002",
+        aliases: &["CVE-2099-0002"],
+        purl: PLUGIN,
+        scheme: Scheme::Php,
+        score: Some(95),
+        attribution: "Exemple Intelligence SARL\u{1b}[2J\u{202e} (attribution fictive)",
+        ..Fake::default()
+    });
+    let info = build(&Fake {
+        id: "GHSA-2099-aaaa-0003",
+        aliases: &["CVE-2099-0003"],
+        score: Some(30),
+        attribution: ATTRIBUTION_FREE,
+        ..Fake::default()
+    });
+    h.load("wordfence", &[critical], t);
+    h.load("osv-packagist", &[info], t);
+    let plugin = format!("{PLUGIN}@1.2.3");
+    let paquet = format!("{PAQUET}@1.2.3");
+    h.inventory(
+        "site-a",
+        vigie::inventory::Source::Agent,
+        true,
+        &[
+            (&plugin, "wp-content/plugins/exemple-plugin"),
+            (&paquet, "vendor"),
+            ("pkg:npm/sans-faille@1.0.0", "package.json"),
+        ],
+        t,
+    );
+    h.tick(t + 60);
+    cli
+}
+
+#[test]
+fn site_components_lists_each_source_component_by_severity() {
+    let cli = matched_site();
+    let out = cli.run(&["site", "components", "site-a"]);
+    assert!(out.status.success(), "{out:?}");
+    let text = match_cli::stdout(&out);
+    let lines: Vec<&str> = text.lines().collect();
+    assert_eq!(lines.len(), 3, "{text}");
+    assert!(lines[0].starts_with(
+        "agent  pkg:wordpress/plugin/exemple-plugin  1.2.3  required  1 faille(s)  critique"
+    ));
+    assert!(lines[1].contains("pkg:composer/exemple/paquet") && lines[1].ends_with("information"));
+    assert!(lines[2].contains("pkg:npm/sans-faille  1.0.0  required  0 faille(s)  -"));
+    assert!(!text.contains("vendor"), "jamais le chemin : {text}");
+}
+
+#[test]
+fn site_vulns_shows_groups_attributions_and_all_adds_information() {
+    let cli = matched_site();
+    let text = match_cli::stdout(&cli.run(&["site", "vulns", "site-a"]));
+    assert!(text.starts_with("critique  CVE-2099-0002 (WF-2099-0002)  pkg:wordpress/plugin/exemple-plugin  (agent : 1.2.3)  touché"), "{text}");
+    assert!(text.contains("CVSS 9,5"), "{text}");
+    assert!(text.contains("redistribution : usage interne"), "{text}");
+    assert!(
+        text.contains("https://example.org/avis/WF-2099-0002"),
+        "{text}"
+    );
+    assert!(
+        text.contains(
+            "attribution : Exemple Intelligence SARL\u{fffd}[2J\u{fffd} (attribution fictive)"
+        ),
+        "{text}"
+    );
+    assert!(
+        !text.contains("CVE-2099-0003"),
+        "information masquée : {text}"
+    );
+    let all = match_cli::stdout(&cli.run(&["site", "vulns", "site-a", "--all"]));
+    assert!(all.contains("information  CVE-2099-0003"), "{all}");
+}
+
+#[test]
+fn vulns_report_is_internal_and_puts_critical_sites_first() {
+    let cli = matched_site();
+    let out = cli.run(&["vulns", "report"]);
+    assert!(out.status.success(), "{out:?}");
+    let text = match_cli::stdout(&out);
+    assert!(text.starts_with("document interne"), "{text}");
+    assert!(
+        text.contains("site-a  1 critique(s), 0 avertissement(s), 1 information(s)"),
+        "{text}"
+    );
+    assert!(text.contains("non redistribuables"), "{text}");
+    assert!(
+        text.contains("osv-packagist : synchronisée il y a"),
+        "{text}"
+    );
+    assert!(text.contains("constats vulns-sync ouverts :"), "{text}");
+}
+
+#[test]
+fn status_prints_one_vulns_line_per_watched_site() {
+    let cli = matched_site();
+    let text = match_cli::stdout(&cli.run(&["status"]));
+    assert!(
+        text.contains(&format!(
+            "    failles : 1 critique(s), 0 avertissement(s) ; inventaire agent du {}",
+            match_cli::day(match_cli::now() - 3_000)
+        )),
+        "{text}"
+    );
+    cli.harness
+        .raw()
+        .execute("UPDATE vuln_match_state SET error_count = 3", [])
+        .unwrap();
+    let text = match_cli::stdout(&cli.run(&["status"]));
+    assert!(
+        text.contains("rapprochement en échec depuis 3 passage(s)"),
+        "{text}"
+    );
+}
+
+#[test]
+fn reads_without_a_match_base_say_so_and_waivers_are_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = write_config(dir.path());
+    let raw = std::fs::read_to_string(&config).unwrap()
+        + "[[sites]]\nid = \"site-a\"\nurl = \"https://site-a.example.org/\"\nkind = \"wordpress\"\n[sites.inventory]\nsource = \"agent-php\"\n";
+    std::fs::write(&config, raw).unwrap();
+    for args in [
+        vec!["site", "components", "site-a"],
+        vec!["site", "vulns", "site-a"],
+        vec!["vulns", "report"],
+    ] {
+        let out = vigie(&config, &args);
+        assert!(out.status.success(), "{args:?} : {out:?}");
+        assert!(stdout(&out).contains("aucune base de failles"), "{args:?}");
+    }
+    let until = match_cli::day(match_cli::now() + 30 * 86_400);
+    let out = vigie(
+        &config,
+        &[
+            "site",
+            "vulns-ack",
+            "site-a",
+            matching_data::PLUGIN,
+            "CVE-2099-0002",
+            "--reason",
+            "motif",
+            "--until",
+            &until,
+        ],
+    );
+    assert_eq!(out.status.code(), Some(2), "{out:?}");
+    // Site inconnu ou non surveillé : code 2.
+    assert_eq!(
+        vigie(&config, &["site", "vulns", "site-z"]).status.code(),
+        Some(2)
+    );
+}

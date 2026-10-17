@@ -28,7 +28,10 @@ pub struct Entry {
     /// Secondes Unix.
     pub at: i64,
     /// `enabled`, `disabled`, `created`, `served`, `result`, `result-late`,
-    /// `result-rejected`, `expired`, `unknown`, `cancelled`, `key-rotated`.
+    /// `result-rejected`, `expired`, `unknown`, `cancelled`, `key-rotated` ;
+    /// `range-corrected`, `range-correction-cleared` (#17, pseudo-site
+    /// `_veilleur`) ; `vuln-waived`, `vuln-waiver-revoked` (#21 : `detail` =
+    /// purl, faille, échéance, opérateur et `reason_sha256`, jamais le motif).
     pub event: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub command_id: Option<String>,

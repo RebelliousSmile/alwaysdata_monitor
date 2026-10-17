@@ -70,6 +70,51 @@ pub struct Harness {
 }
 
 impl Harness {
+    /// Veilleur d'une configuration lue d'un fichier (tests de la CLI) :
+    /// clés d'agent et d'inventaire enregistrées, sources de failles créées.
+    pub fn from_config(dir: tempfile::TempDir, config: Config, at: i64) -> Self {
+        let vulns: Vec<String> = config
+            .vulns
+            .as_ref()
+            .map(|v| v.sources.clone())
+            .unwrap_or_default();
+        let mut store = Store::open(&config.database).expect("base");
+        for site in &config.sites {
+            store
+                .add_key(
+                    &site.id,
+                    &agent_key(&site.id).verifying_key().to_bytes(),
+                    at,
+                )
+                .expect("clé d'agent");
+            store
+                .add_inventory_key(&site.id, &ci_key(&site.id).verifying_key().to_bytes(), at)
+                .expect("clé d'inventaire");
+        }
+        for id in vulns.iter().map(String::as_str).chain(["kev", "epss"]) {
+            upsert_source(
+                &mut store,
+                &SourceMeta {
+                    id: id.into(),
+                    url: "https://example.org/dump.zip".into(),
+                    license: String::new(),
+                    attribution: format!("Attribution fictive de la source {id}"),
+                },
+            )
+            .expect("source");
+        }
+        Self {
+            dir,
+            config: RefCell::new(config),
+            mail: MemoryNotifier::new(),
+            options: RefCell::new(Options {
+                check_budget: Duration::ZERO,
+                ..Options::default()
+            }),
+            seq: RefCell::new(BTreeMap::new()),
+        }
+    }
+
     pub fn new(sites: Vec<Site>, vulns: &[&str]) -> Self {
         let dir = tempfile::tempdir().expect("tempdir");
         let database = dir.path().join("vigie.db");
