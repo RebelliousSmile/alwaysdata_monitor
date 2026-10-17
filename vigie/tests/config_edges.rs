@@ -225,3 +225,32 @@ fn inventory_sources_admit_ci_for_any_runtime() {
         refused(extra, field);
     }
 }
+
+#[test]
+fn vulns_sources_are_a_closed_list_without_duplicates() {
+    // Liste fermée (#16) : identifiant inconnu, doublon ou clé inconnue
+    // refusés au chargement ; liste vide admise, comme l'absence de section.
+    let err = refused(
+        "[vulns]\nsources = [\"osv-npm\", \"osv-pypi\"]\n",
+        "osv-pypi",
+    );
+    assert!(matches!(err, ConfigError::Invalid { .. }), "{err}");
+    let err = refused(
+        "[vulns]\nsources = [\"osv-npm\", \"osv-npm\"]\n",
+        "deux fois",
+    );
+    assert!(matches!(err, ConfigError::Invalid { .. }), "{err}");
+    let err = refused(
+        "[vulns]\nsources = [\"osv-npm\"]\nurl = \"https://example.org/all.zip\"\n",
+        "url",
+    );
+    assert!(matches!(err, ConfigError::Parse { .. }), "{err}");
+    let config = load("[vulns]\nsources = []\n").expect("liste vide");
+    assert!(vigie::vulns::sync::registry::declared(&config).is_empty());
+    let config = load("[vulns]\nsources = [\"osv-npm\", \"osv-crates-io\"]\n").expect("admise");
+    assert_eq!(
+        vigie::vulns::sync::registry::declared(&config),
+        ["osv-crates-io", "osv-npm"]
+    );
+    assert!(load("").expect("sans section").vulns.is_none());
+}

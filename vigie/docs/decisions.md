@@ -313,6 +313,33 @@ dans [`inventaire.md`](./inventaire.md), contrat dans
 | Dépôts Composer publics autres que Packagist (asset-packagist, `packages.drupal.org`) : **non vérifiés**, injoignables depuis le conteneur ; la règle de registre (`notification-url`) reste à confronter à un de leurs lockfiles | Un dépôt qui n'écrit pas `notification-url` verrait ses paquets comptés hors registre (inventaire incomplet, jamais une faille tue) |
 | Écarts à F5 constatés : aucun (parité verte sur `wp-inventory`) ; les tests F5 changent seulement leur construction (`SiteInventory::new`, source des lectures) et, là où trois sites partagent une clé, la posent en SQL comme une base d'avant #20 | `add_key` refuse désormais une clé déjà enregistrée |
 
+### Synchronisation des failles (issue #16)
+
+Plan : `aidd_docs/tasks/2026_10/2026_10_17_synchro-failles/plan.md` ; règles
+détaillées dans [`failles.md`](./failles.md#synchronisation-f2).
+
+| Décision du 2026-10-17 | Raison |
+| --- | --- |
+| Portée réduite par F0 : `osv-crates-io`, `osv-packagist`, `osv-npm`, une source par export OSV ; **FriendsOfPHP retiré** (écart à l'issue), aucun lecteur YAML ni tar | Ses avis sont dans les GHSA, donc dans l'export Packagist ; le lecteur tar revient à F3 |
+| **`ureq` 3 existant, pas `reqwest`** (écart à l'issue) : agent commun extrait de `http.rs`, `Accept-Encoding: identity`, tout autre encodage refusé | Une seule pile HTTP, déjà conforme à `check-tls-deps.sh` et au build musl ; un corps encodé ne serait pas le zip dont on calcule l'empreinte |
+| Aucune crate ajoutée : `flate2` (Rust pur) passe en dépendance, CRC par `flate2::Crc`, SHA-256 par `sha2`, dates HTTP par `jiff` | Rien de nouveau pour F8, musl ni `check-tls-deps.sh` |
+| Lecteur zip maison strict (fin classique et ZIP64 chaînées, répertoire central consommé exactement, méthodes 0 et 8, descripteurs refusés, en-tête local comparé, recouvrements refusés, arithmétique vérifiée) ; différentiel contre `zipfile` de Python en CI | Les dumps n'emploient qu'un sous-ensemble mesuré du format ; la crate `zip` tire des formats inutiles et a connu des versions retirées ; le différentiel prouve que le générateur de test écrit de vrais zips |
+| Rien d'extrait sur le disque : dump compressé seul dans `vulns-work/<source>/` (0700, fichier 0600), entrées décompressées en mémoire, nom jamais employé comme chemin | Zip-slip impossible par construction ; mémoire bornée ; `data/` est le seul dossier ouvert en écriture |
+| Plafonds par source, facteur ≈ 3 sur la mesure, contrôlés avant et pendant la décompression ; entrée de plus de 4 Mio sautée et comptée, nom invalide sauté et compté, toute autre anomalie refuse le dump | Une bombe zip est arrêtée par les tailles déclarées puis réelles ; une structure incohérente dit que tout le fichier est douteux |
+| Origines codées en dur et comparées en entier (schéma, hôte, port), redirections revérifiées (3 au plus), en-têtes sensibles retirés au changement d'origine ; les tests épinglent l'origine par le code seulement (`SyncOptions`) | Une origine ne vient jamais de la configuration ni d'un tiers ; un autre port du même hôte n'est pas admis |
+| Pas de vérification MD5 de `x-goog-hash` | TLS, `Content-Length` et le CRC de chaque entrée suffisent ; un MD5 demanderait une crate |
+| Dump complet chaque jour, `modified_id.csv` évalué et écarté | Les générations de F1 interdisent les deltas ; le CSV ne dit pas les suppressions et n'est pas trié ; ≈ 6,4 Gio par mois, acceptable ; à revoir au-delà de 30 min pour npm |
+| Inchangé (304, même SHA-256) : aucune génération, bail rendu et succès daté en une instruction compare-and-swap (`finish_unchanged`, primitive partagée avec F4) ; validateurs écrits dans l'instruction de la bascule (`commit(tally, SyncMeta)`), jamais avant ; pas de `mark_fresh` | Un ETag sans sa génération figerait la base sur un 304 perpétuel ; un 304 pendant une bascule concurrente ne date pas de « frais » une génération qu'il n'a pas vue |
+| `LOADER_VERSION` par source, enregistrée avec la génération ; différente : requête non conditionnelle et empreinte ignorée | Une correction du lecteur s'applique au passage suivant, pas au prochain changement du dump |
+| Migration en fichier `0017.sql` (F1 : 15, F5 : 16) ; `SCHEMA_VULNS_SYNC` calculé à la compilation depuis la place du fichier dans la liste des migrations | Une migration publiée ne se modifie jamais ; le numéro reste juste quel que soit l'ordre de fusion de #19 |
+| Bail pris avant toute requête, durée = plafond de la source + 30 min ; débit en compare-and-swap (`last_request_at`, `retry_after_until`) ; `busy` et `rate_limited` en code 0 | Le timer et un lancement à la main ne téléchargent pas deux fois 218 Mo ; un `Retry-After` n'est pas une panne |
+| Échec d'une source = base précédente intacte, les autres continuent, code 1 | Une base périmée vaut mieux qu'une base partielle ; l'unité `failed` se voit dans le journal |
+| Taux d'écart de 1 % sur les seules raisons `is_drop`, avant la garde contre le rétrécissement (80 % du maximum des 7 derniers chargements, dès 100 failles), `--accept-shrink` pour un retrait légitime | Au-delà d'un pour cent, le format a changé ; un zip vide ou tronqué en amont ferait passer des milliers de paquets pour « aucune faille » |
+| Trait `VulnSource` en flux (`fetch(&mut Download, &mut dyn Sink, &mut Tally)`), pas `fetch -> Vec<Advisory>` (écart à l'issue) ; `SourceMeta` ouverte (F3 : redistribution, F4 : encodages bruts) ; registre fermé `KNOWN` | 230 382 failles npm ne tiennent pas en mémoire sur un VPS partagé ; F3 et F4 se branchent sans toucher au moteur |
+| `[vulns] sources` facultative, liste fermée ; sans source, « aucune source de failles déclarée » et code 0 | Le timer, installé partout, reste silencieux sans failles ; aucune URL configurable |
+| Constat `vulns-sync` évalué par `tick` (3 jours sans réussite), pseudo-site réservé `_veilleur` déclaré au registre (`Needs::Watcher`), `close_unwatched` reçoit l'incident entier, e-mails propres au veilleur ; lecture de l'état en échec : aucune réconciliation | Un timer cassé se voit ; tout incident porte un contrôle déclaré ; retirer une source ne l'annonce pas « rétablie » |
+| Timer quotidien à 03:40 décalé de 45 min, `Persistent=true`, basse priorité CPU et E/S, tué avant `serve` et `tick` en manque de mémoire | Heure creuse ; un VPS éteint rattrape ; la synchronisation ne prive jamais le service |
+
 ## Dépendances (issue #22)
 
 Plan : `aidd_docs/tasks/2026_10/2026_10_17_osv-scanner/plan.md`. Job `deps`

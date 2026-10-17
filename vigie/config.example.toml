@@ -41,6 +41,13 @@ password_file = "/home/vigie/vigie/smtp-password"
 # [logs]
 # protect_ips = ["192.0.2.1"]
 
+# Bases de failles synchronisées chaque jour par vigie-vulns-sync.timer
+# (`vigie vulns sync`, docs/failles.md) : liste fermée parmi osv-crates-io,
+# osv-packagist et osv-npm. Sans cette section ou avec une liste vide, aucune
+# synchronisation ni constat `vulns-sync`. Aucune URL n'est configurable.
+# [vulns]
+# sources = ["osv-crates-io", "osv-packagist", "osv-npm"]
+
 # Identifiant : [a-z0-9-], 64 caractères au plus. URL en https, finie par /
 # quand le site vit dans un sous-dossier (les chemins sondés y sont joints).
 [[sites]]

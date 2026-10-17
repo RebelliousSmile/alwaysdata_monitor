@@ -15,6 +15,7 @@ use lettre::message::header::ContentType;
 use lettre::transport::smtp::authentication::Credentials;
 use lettre::{Message, SmtpTransport, Transport};
 
+use crate::capability::WATCHER_SITE;
 use crate::config::Alerts;
 use crate::store::{CloseReason, Incident};
 
@@ -185,7 +186,82 @@ fn ack_hint(incident: &Incident) -> String {
     )
 }
 
+/// Incident d'un contrôle du veilleur (pseudo-site [`WATCHER_SITE`]) :
+/// gabarits propres, sans ligne « site » ni URL.
+fn is_watcher(incident: &Incident) -> bool {
+    incident.site == WATCHER_SITE
+}
+
+/// Source de failles d'un incident `vulns-sync` (clé du constat).
+fn watcher_source(incident: &Incident) -> String {
+    one_line(incident.finding_key().unwrap_or("?"))
+}
+
+fn watcher_header(incident: &Incident) -> String {
+    let source = watcher_source(incident);
+    format!(
+        "Veilleur : base de failles {source}\nContrôle : {} — {}\nConstat : {}\nPremier signal : {}\nIncident n° {}\n",
+        incident.check_name,
+        incident.severity,
+        incident.detail,
+        crate::iso_utc(incident.opened_at),
+        incident.id,
+    )
+}
+
+fn watcher_hint(incident: &Incident) -> String {
+    format!(
+        "\nRelancer à la main et lire le journal, sur le veilleur :\n  ~/vigie/bin/vigie vulns sync --source {}\n  journalctl -u vigie-vulns-sync\n",
+        watcher_source(incident)
+    )
+}
+
+/// E-mail d'un incident du veilleur.
+#[derive(Clone, Copy)]
+enum Mail {
+    Open,
+    Reminder,
+    Close,
+}
+
+fn watcher_email(incident: &Incident, kind: Mail) -> Email {
+    let source = watcher_source(incident);
+    let closed = incident
+        .closed_at
+        .map(crate::iso_utc)
+        .unwrap_or_else(|| "?".into());
+    let (subject, tail) = match kind {
+        Mail::Open => (
+            format!("[vigie] veilleur : base de failles {source} non synchronisée"),
+            format!("{}{}", watcher_hint(incident), ack_hint(incident)),
+        ),
+        Mail::Reminder => (
+            format!("[vigie] veilleur : base de failles {source} toujours non synchronisée"),
+            format!("{}{}", watcher_hint(incident), ack_hint(incident)),
+        ),
+        Mail::Close => match incident.close_reason {
+            Some(CloseReason::Unwatched) => (
+                format!("[vigie] veilleur : base de failles {source} plus surveillée"),
+                format!(
+                    "Plus surveillée : {closed}\nLa source n'est plus déclarée dans [vulns] sources : l'incident est clos sans que l'état de la base soit connu.\n"
+                ),
+            ),
+            Some(CloseReason::Resolved) | None => (
+                format!("[vigie] veilleur : base de failles {source} de nouveau synchronisée"),
+                format!("Synchronisée de nouveau : {closed}\n"),
+            ),
+        },
+    };
+    Email {
+        subject: one_line(&subject),
+        body: format!("{}{tail}", watcher_header(incident)),
+    }
+}
+
 pub fn open_email(incident: &Incident, site_url: &str) -> Email {
+    if is_watcher(incident) {
+        return watcher_email(incident, Mail::Open);
+    }
     Email {
         subject: one_line(&format!("[vigie] {} : {}", incident.site, incident.detail)),
         body: format!("{}{}", header(site_url, incident), ack_hint(incident)),
@@ -193,6 +269,9 @@ pub fn open_email(incident: &Incident, site_url: &str) -> Email {
 }
 
 pub fn reminder_email(incident: &Incident, site_url: &str) -> Email {
+    if is_watcher(incident) {
+        return watcher_email(incident, Mail::Reminder);
+    }
     Email {
         subject: one_line(&format!(
             "[vigie] {} : toujours en cours — {}",
@@ -206,6 +285,9 @@ pub fn reminder_email(incident: &Incident, site_url: &str) -> Email {
 /// voit plus le constat, « plus surveillé » quand le contrôle a quitté la
 /// typologie du site (`close_unwatched`), sans rien dire de l'état du site.
 pub fn close_email(incident: &Incident, site_url: &str) -> Email {
+    if is_watcher(incident) {
+        return watcher_email(incident, Mail::Close);
+    }
     let closed = incident
         .closed_at
         .map(crate::iso_utc)
@@ -288,6 +370,48 @@ mod tests {
         for text in [&close.subject, &close.body] {
             assert!(!text.to_lowercase().contains("rétabli"), "{close:?}");
         }
+    }
+
+    #[test]
+    fn watcher_emails_have_their_own_wording() {
+        let incident = Incident {
+            key: "_veilleur/vulns-sync/osv-npm".into(),
+            site: WATCHER_SITE.into(),
+            check_name: "vulns-sync".into(),
+            severity: Severity::Warning,
+            detail: "base osv-npm non synchronisée depuis 4 jours".into(),
+            close_reason: None,
+            closed_at: None,
+            ..incident()
+        };
+        let open = open_email(&incident, "site retiré de la configuration");
+        assert_eq!(
+            open.subject,
+            "[vigie] veilleur : base de failles osv-npm non synchronisée"
+        );
+        let reminder = reminder_email(&incident, "site retiré de la configuration");
+        for email in [&open, &reminder] {
+            assert!(email.body.contains("vigie vulns sync --source osv-npm"));
+            assert!(email.body.contains("journalctl -u vigie-vulns-sync"));
+            assert!(email.body.contains("vigie ack 7"));
+            assert!(!email.body.contains("Site :"), "{email:?}");
+            assert!(!email.body.contains("site retiré"), "{email:?}");
+        }
+        let resolved = Incident {
+            closed_at: Some(60),
+            close_reason: Some(CloseReason::Resolved),
+            ..incident.clone()
+        };
+        let close = close_email(&resolved, "site retiré de la configuration");
+        assert!(close.subject.ends_with("de nouveau synchronisée"));
+        let unwatched = Incident {
+            close_reason: Some(CloseReason::Unwatched),
+            ..resolved
+        };
+        let close = close_email(&unwatched, "site retiré de la configuration");
+        assert!(close.subject.ends_with("plus surveillée"));
+        assert!(!close.body.contains("site retiré"));
+        assert!(!close.body.to_lowercase().contains("rétabli"));
     }
 
     #[test]
