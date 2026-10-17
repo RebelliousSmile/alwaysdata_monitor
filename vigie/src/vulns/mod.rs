@@ -6,4 +6,12 @@
 //! télécharge rien (F2, F3) : il porte le modèle sur lequel les imports
 //! s'appuient.
 
+pub mod advisory;
+pub mod cvss;
+pub mod purl;
+pub mod range;
 pub mod version;
+
+pub use advisory::{Advisory, Draft, Reason, Score, ScoreOrigin, Tally, from_osv};
+pub use purl::Purl;
+pub use range::{UnknownReason, Verdict, match_advisory};

@@ -1,0 +1,31 @@
+{
+ "schema_version": "1.9.0",
+ "id": "GHSA-ex02-ex02-ex02",
+ "modified": "2026-10-01T00:00:00Z",
+ "published": "2026-09-01T00:00:00Z",
+ "summary": "Faille fictive de test",
+ "affected": [
+  {
+   "package": {
+    "ecosystem": "Packagist",
+    "name": "prestashop/exemplemodule"
+   },
+   "ranges": [
+    {
+     "type": "ECOSYSTEM",
+     "events": [
+      {
+       "introduced": "0"
+      },
+      {
+       "fixed": "1.2.1"
+      }
+     ]
+    }
+   ]
+  }
+ ],
+ "database_specific": {
+  "severity": "MODERATE"
+ }
+}

@@ -1,0 +1,28 @@
+{
+ "schema_version": "1.9.0",
+ "id": "DRUPAL-CONTRIB-2026-001",
+ "modified": "2026-10-01T00:00:00Z",
+ "published": "2026-09-01T00:00:00Z",
+ "affected": [
+  {
+   "package": {
+    "ecosystem": "Packagist",
+    "name": "exemple/drupal-like"
+   },
+   "ranges": [
+    {
+     "type": "ECOSYSTEM",
+     "events": [
+      {
+       "introduced": "0"
+      },
+      {
+       "fixed": "1.0.0"
+      }
+     ]
+    }
+   ]
+  }
+ ],
+ "details": "\n\nPremière ligne du détail.\nSuite jamais stockée."
+}

@@ -1,0 +1,37 @@
+{
+ "schema_version": "1.9.0",
+ "id": "RUSTSEC-2026-9001",
+ "modified": "2026-10-01T00:00:00Z",
+ "published": "2026-09-01T00:00:00Z",
+ "summary": "Faille fictive de test",
+ "affected": [
+  {
+   "package": {
+    "ecosystem": "crates.io",
+    "name": "exemple"
+   },
+   "ranges": [
+    {
+     "type": "SEMVER",
+     "events": [
+      {
+       "introduced": "0"
+      },
+      {
+       "fixed": "1.0.0"
+      },
+      {
+       "introduced": "1.1.0"
+      },
+      {
+       "last_affected": "1.2.0"
+      }
+     ]
+    }
+   ]
+  }
+ ],
+ "aliases": [
+  "GHSA-ex06-ex06-ex06"
+ ]
+}
