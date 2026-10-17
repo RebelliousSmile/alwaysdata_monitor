@@ -219,6 +219,63 @@ pub struct Reason {
     pub label: String,
 }
 
+/// Codes des raisons, servis par `/api/v1/sites/{id}/logs/ips` à la place
+/// du libellé, qui peut citer un user-agent ou un reverse DNS.
+pub const REASON_CODES: [&str; 13] = [
+    "fake_search_engine",
+    "search_engine",
+    "declared_bot",
+    "facets",
+    "no_static_resources",
+    "no_referer",
+    "tool_user_agent",
+    "user_agent_rotation",
+    "burst",
+    "hosting_network",
+    "consumer_isp",
+    "no_reverse_dns",
+    "shared_signature",
+];
+
+impl Reason {
+    /// Code stable de la raison, tiré du début du libellé écrit par
+    /// [`score`] ou [`Verdict::with_shared_signature`] ; `other` pour un
+    /// libellé inconnu (instantané d'un binaire plus récent).
+    pub fn code(&self) -> &'static str {
+        let label = self.label.as_str();
+        let starts = |prefix: &str| label.starts_with(prefix);
+        if starts("se présente comme ") {
+            "fake_search_engine"
+        } else if starts("moteur de recherche ") {
+            "search_engine"
+        } else if starts("bot déclaré ") {
+            "declared_bot"
+        } else if label.contains(" % de ses requêtes sont des facettes") {
+            "facets"
+        } else if starts("aucune ressource statique") {
+            "no_static_resources"
+        } else if starts("pages demandées sans referer") {
+            "no_referer"
+        } else if starts("user-agent d'outil") {
+            "tool_user_agent"
+        } else if label.contains(" user-agents différents ") {
+            "user_agent_rotation"
+        } else if starts("pic de ") {
+            "burst"
+        } else if starts("IP d'hébergeur") {
+            "hosting_network"
+        } else if starts("FAI grand public") {
+            "consumer_isp"
+        } else if starts("aucun reverse DNS") {
+            "no_reverse_dns"
+        } else if starts("user-agent de robot noté suspect") {
+            "shared_signature"
+        } else {
+            "other"
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Verdict {
     /// 0 à 100, signature partagée comprise.
@@ -450,6 +507,50 @@ mod tests {
             uas: vec!["Mozilla/5.0 Firefox".to_string()],
             peak_minute: 5,
         }
+    }
+
+    fn codes(verdict: &Verdict) -> Vec<&'static str> {
+        verdict.reasons.iter().map(Reason::code).collect()
+    }
+
+    #[test]
+    fn every_reason_written_by_the_score_has_a_code() {
+        let scraper = Stats {
+            statics: 0,
+            facets: 95,
+            empty_referer_pages: 100,
+            peak_minute: 80,
+            uas: (0..5).map(|i| format!("curl/8.{i}")).collect(),
+            ..stats()
+        };
+        let mut seen: Vec<&str> = Vec::new();
+        for verdict in [
+            score(&scraper, Some("ec2-192-0-2-1.compute.amazonaws.com"), None),
+            score(&scraper, Some("lfbn-idf1-1-2-3.w90-1.abo.wanadoo.fr"), None),
+            score(&scraper, None, Some("ExampleBot")).with_shared_signature(),
+            score(&stats(), Some("host.example"), Some("Googlebot")),
+            score(&stats(), None, Some("Googlebot")),
+            score(
+                &Stats {
+                    facets: 50,
+                    peak_minute: 30,
+                    ..stats()
+                },
+                None,
+                None,
+            ),
+        ] {
+            seen.extend(codes(&verdict));
+        }
+        assert!(!seen.contains(&"other"), "{seen:?}");
+        for code in REASON_CODES {
+            assert!(seen.contains(&code), "{code} jamais écrit : {seen:?}");
+        }
+        let unknown = Reason {
+            points: 1,
+            label: "raison d'un binaire plus récent".into(),
+        };
+        assert_eq!(unknown.code(), "other");
     }
 
     fn points(verdict: &Verdict) -> Vec<i32> {

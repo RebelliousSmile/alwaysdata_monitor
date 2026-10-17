@@ -1,8 +1,14 @@
 //! Routes de lecture et d'acquittement de `/api/v1` (`docs/api-console.md`),
 //! sur le routeur de `serve`, une base remplie à la main et une horloge fixe.
+//! Pagination par clé et lecture de l'analyse des logs (issue #5, phase 2).
+//!
+//! IP des plages de documentation (RFC 5737).
 
+use std::collections::{BTreeSet, HashSet};
+use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
 use axum::body::Body;
 use axum::http::{Method, Request, StatusCode};
@@ -16,9 +22,11 @@ mod veilleur;
 use vigie::alert::MemoryNotifier;
 use vigie::checks::CheckKind;
 use vigie::clock::{Clock, FakeClock};
-use vigie::config::{Api, Config, Site, SiteKind};
+use vigie::config::{Api, Config, LogSourceKind, Site, SiteKind, SiteLogs};
 use vigie::device::{self, PAIRING_TTL};
 use vigie::finding::{Finding, Severity};
+use vigie::logs::Entry;
+use vigie::logs::source::{LogSource, MemorySource};
 use vigie::serve;
 use vigie::store::{AcceptedReport, REMINDER_PERIOD, ReportOutcome, RunRecord, Store};
 use vigie::tick::{self, Options};
@@ -46,6 +54,7 @@ impl Reply {
     /// égal à l'en-tête `X-Request-Id`, aucune cause exposée.
     fn assert_api_error(&self, context: &str) {
         let code = match self.status.as_u16() {
+            400 => "bad_request",
             401 => "unauthorized",
             404 => "not_found",
             409 => "conflict",
@@ -66,6 +75,17 @@ impl Reply {
 
     fn json(&self) -> Value {
         serde_json::from_slice(&self.body).expect("json")
+    }
+
+    /// Erreur au format commun, de code `code`.
+    fn assert_error_code(&self, code: &str, context: &str) {
+        let json = self.json();
+        assert_eq!(json["error"]["code"], code, "{context} : {json}");
+        assert_eq!(
+            json["error"]["request_id"].as_str(),
+            self.request_id.as_deref(),
+            "{context}"
+        );
     }
 }
 
@@ -672,4 +692,516 @@ async fn a_device_revokes_itself_and_its_token_stops_working() {
         v.get("/api/v1/overview", &other).await.status,
         StatusCode::OK
     );
+}
+
+// --- Pagination des incidents clos (#5, phase 2) ---------------------------
+
+/// Identifiants des incidents d'une page.
+fn ids_of(json: &Value) -> Vec<i64> {
+    json["incidents"]
+        .as_array()
+        .expect("incidents")
+        .iter()
+        .map(|i| i["id"].as_i64().expect("id"))
+        .collect()
+}
+
+/// Ouvre `count` incidents du contrôle `content` l'un après l'autre : chacun
+/// clôt le précédent. Rend les ids clos et celui qui reste ouvert.
+fn closed_series(v: &Veilleur, count: i64) -> (Vec<i64>, i64) {
+    let ids: Vec<i64> = (0..=count)
+        .map(|i| {
+            v.open(
+                "site-a",
+                "content",
+                Severity::Warning,
+                &format!("k{i}"),
+                T0 - DAY + i * 60,
+            )
+        })
+        .collect();
+    (ids[..ids.len() - 1].to_vec(), ids[ids.len() - 1])
+}
+
+#[tokio::test]
+async fn closed_incidents_come_in_pages_of_50_50_20_without_duplicate_or_gap() {
+    let v = Veilleur::new();
+    let (closed, still_open) = closed_series(&v, 120);
+    let token = v.token("pc").await;
+
+    // Première page, comme la lit la console 0.1.1 : sans paramètre.
+    let first = v.get("/api/v1/sites/site-a/incidents", &token).await;
+    assert_eq!(first.status, StatusCode::OK);
+    let json = first.json();
+    assert_eq!(json["site"], "site-a");
+    assert_eq!(json["since"], T0 - 30 * DAY);
+    let incident = &json["incidents"][0];
+    for field in [
+        "id",
+        "site",
+        "check",
+        "severity",
+        "detail",
+        "opened_at",
+        "closed_at",
+        "acked_at",
+        "open_notified_at",
+        "close_notified_at",
+        "last_reminder_at",
+        "state",
+    ] {
+        assert!(
+            incident.get(field).is_some(),
+            "{field} lu par la console 0.1.1"
+        );
+    }
+    assert_eq!(incident["state"], "closed");
+    let mut pages = vec![ids_of(&json)];
+    let mut cursor = json["next_cursor"].as_str().map(str::to_owned);
+
+    // Un incident clos pendant le parcours se place avant la première page.
+    v.store()
+        .reconcile("site-a", "content", &[], T0)
+        .expect("clôture pendant le parcours");
+
+    while let Some(next) = cursor {
+        assert!(next.len() <= 256);
+        let reply = v
+            .get(
+                &format!("/api/v1/sites/site-a/incidents?cursor={next}"),
+                &token,
+            )
+            .await;
+        assert_eq!(reply.status, StatusCode::OK);
+        let json = reply.json();
+        pages.push(ids_of(&json));
+        cursor = json["next_cursor"].as_str().map(str::to_owned);
+        assert!(pages.len() <= 3, "trop de pages");
+    }
+    let sizes: Vec<usize> = pages.iter().map(Vec::len).collect();
+    assert_eq!(sizes, [50, 50, 20]);
+    let seen: Vec<i64> = pages.concat();
+    let unique: HashSet<i64> = seen.iter().copied().collect();
+    assert_eq!(unique.len(), 120, "doublon");
+    assert!(
+        !unique.contains(&still_open),
+        "clos pendant le parcours : non revu"
+    );
+    assert_eq!(unique, closed.iter().copied().collect(), "trou");
+    // Les plus récents d'abord.
+    let mut expected = closed.clone();
+    expected.reverse();
+    assert_eq!(seen, expected);
+
+    // Un nouveau parcours le voit en tête.
+    let json = v
+        .get("/api/v1/sites/site-a/incidents?limit=1", &token)
+        .await
+        .json();
+    assert_eq!(ids_of(&json), [still_open]);
+    assert!(json["next_cursor"].is_string());
+}
+
+#[tokio::test]
+async fn limit_and_cursor_out_of_rules_are_a_400() {
+    let v = Veilleur::new();
+    closed_series(&v, 3);
+    let token = v.token("pc").await;
+    let base = "/api/v1/sites/site-a/incidents";
+
+    let json = v.get(&format!("{base}?limit=2"), &token).await.json();
+    assert_eq!(ids_of(&json).len(), 2);
+    let incidents_cursor = json["next_cursor"].as_str().expect("curseur").to_owned();
+    let json = v
+        .get(
+            &format!("{base}?limit=100&cursor={incidents_cursor}"),
+            &token,
+        )
+        .await
+        .json();
+    assert_eq!(ids_of(&json).len(), 1);
+    assert_eq!(json["next_cursor"], Value::Null);
+
+    // Curseur des verdicts d'IP : forgé pour cette liste.
+    let other_list = "djF8MTc5MjAwMDAwMHw4NXwxOTIuMC4yLjE";
+    for query in [
+        "limit=0".to_owned(),
+        "limit=101".to_owned(),
+        "limit=abc".to_owned(),
+        "cursor=".to_owned(),
+        "cursor=!!!".to_owned(),
+        "cursor=Zm9yZ8OpIQ".to_owned(),
+        format!("cursor={other_list}"),
+        format!("cursor={}", "A".repeat(257)),
+        format!("cursor={incidents_cursor}&cursor={incidents_cursor}"),
+    ] {
+        let reply = v.get(&format!("{base}?{query}"), &token).await;
+        assert_eq!(reply.status, StatusCode::BAD_REQUEST, "{query}");
+        reply.assert_api_error(&query);
+        reply.assert_error_code("bad_request", &query);
+    }
+    // Un site inconnu reste un 404, même avec un curseur forgé.
+    let reply = v
+        .get("/api/v1/sites/inconnu/incidents?cursor=!!!", &token)
+        .await;
+    assert_eq!(reply.status, StatusCode::NOT_FOUND);
+}
+
+// --- Analyse des logs (#5, phase 2) -----------------------------------------
+
+const CURL: &str = "curl/8.4.0";
+const FIREFOX: &str = "Mozilla/5.0 (X11; Linux x86_64; rv:131.0) Gecko/20100101 Firefox/131.0";
+const GPTBOT: &str = "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; GPTBot/1.2)";
+/// IP aux verdicts élevés et moyens du jeu de logs.
+const HIGH: u8 = 60;
+const MEDIUM: u8 = 15;
+
+fn ipv4(text: &str) -> IpAddr {
+    text.parse().expect("ip")
+}
+
+fn hit(timestamp_ms: i64, from: IpAddr, path: &str, ua: &str, facet: bool) -> Entry {
+    Entry {
+        ip: Some(from),
+        method: Some("GET".into()),
+        user_agent: ua.into(),
+        query_keys: if facet { vec!["q".into()] } else { Vec::new() },
+        ..Entry::new(timestamp_ms, path, 200)
+    }
+}
+
+/// Logs des dix dernières minutes avant `now` : 60 IP en curl sur des
+/// facettes (score élevé), 15 en Firefox sur des facettes (moyen), 5
+/// visiteurs ordinaires et GPTBot (faibles).
+fn scraped(now: i64) -> Vec<Entry> {
+    let start = (now - 600) * 1000;
+    let mut entries = Vec::new();
+    for n in 1..=HIGH {
+        for j in 0..20 {
+            entries.push(hit(
+                start + i64::from(n) * 100 + j * 1000,
+                ipv4(&format!("192.0.2.{n}")),
+                "/categorie",
+                CURL,
+                true,
+            ));
+        }
+    }
+    for n in 1..=MEDIUM {
+        for j in 0..20 {
+            entries.push(hit(
+                start + 30_000 + i64::from(n) * 100 + j * 1000,
+                ipv4(&format!("198.51.100.{n}")),
+                "/categorie",
+                FIREFOX,
+                true,
+            ));
+        }
+    }
+    for n in 1..=5 {
+        entries.push(hit(
+            start + 60_000 + n * 100,
+            ipv4(&format!("203.0.113.{n}")),
+            "/",
+            FIREFOX,
+            false,
+        ));
+    }
+    for j in 0..10 {
+        entries.push(hit(
+            start + 90_000 + j * 100,
+            ipv4("203.0.113.50"),
+            "/article",
+            GPTBOT,
+            false,
+        ));
+    }
+    entries
+}
+
+/// Site A avec une source de logs, site B sans.
+fn with_logs() -> Veilleur {
+    Veilleur::with(|config| {
+        config.sites[0].logs = Some(SiteLogs {
+            source: Some(LogSourceKind::Alwaysdata),
+            hosts: vec!["site-a.example.org".into()],
+            ..SiteLogs::default()
+        });
+        config.sites.push(site("site-b", SiteKind::Generic, 300));
+    })
+}
+
+/// Un passage de `tick` à `now`, sans contrôle externe, sur les entrées
+/// données : le curseur enregistré fait replier les seules nouvelles.
+fn tick_logs(v: &Veilleur, now: i64, entries: &[Entry]) {
+    let options = Options {
+        check_budget: Duration::ZERO,
+        ..Options::default()
+    };
+    let mail = MemoryNotifier::new();
+    let summary = tick::run_with_sources(&v.config, now, &options, &mail, &|site| {
+        (site.id == "site-a")
+            .then(|| Box::new(MemorySource::new("memoire", entries.to_vec())) as Box<dyn LogSource>)
+    })
+    .expect("tick");
+    assert!(summary.logs_folded > 0, "{summary:?}");
+    v.clock.set(now);
+}
+
+/// Toutes les pages de verdicts depuis `first` ; `limit` est redonné à
+/// chaque page, comme le ferait le client.
+async fn ip_pages(v: &Veilleur, token: &str, first: &str, limit: usize) -> Vec<Value> {
+    let mut pages = Vec::new();
+    let mut path = Some(first.to_owned());
+    while let Some(next) = path {
+        let reply = v.get(&next, token).await;
+        assert_eq!(reply.status, StatusCode::OK, "{next}");
+        let json = reply.json();
+        path = json["next_cursor"]
+            .as_str()
+            .map(|c| format!("/api/v1/sites/site-a/logs/ips?limit={limit}&cursor={c}"));
+        pages.push(json);
+    }
+    pages
+}
+
+#[tokio::test]
+async fn the_logs_of_a_site_show_robots_rules_and_load_and_null_before_any_analysis() {
+    let v = with_logs();
+    let token = v.token("pc").await;
+
+    // Source déclarée, aucune analyse encore.
+    let reply = v.get("/api/v1/sites/site-a/logs", &token).await;
+    assert_eq!(reply.status, StatusCode::OK);
+    assert_eq!(reply.json(), serde_json::json!({ "analysis": null }));
+    let json = v.get("/api/v1/sites/site-a/logs/ips", &token).await.json();
+    assert_eq!(json["items"], serde_json::json!([]));
+    assert_eq!(json["generated_at"], Value::Null);
+    assert_eq!(json["next_cursor"], Value::Null);
+
+    // Site sans source, ou inconnu : 404 uniforme.
+    for path in [
+        "/api/v1/sites/site-b/logs",
+        "/api/v1/sites/site-b/logs/ips",
+        "/api/v1/sites/inconnu/logs",
+        "/api/v1/sites/inconnu/logs/ips",
+    ] {
+        let reply = v.get(path, &token).await;
+        assert_eq!(reply.status, StatusCode::NOT_FOUND, "{path}");
+        reply.assert_api_error(path);
+    }
+
+    let entries = scraped(T0);
+    tick_logs(&v, T0, &entries);
+    let reply = v.get("/api/v1/sites/site-a/logs", &token).await;
+    assert_eq!(reply.status, StatusCode::OK);
+    let analysis = &reply.json()["analysis"];
+    assert_eq!(analysis["generated_at"], T0);
+    assert!(analysis["reference_ms"].as_i64().expect("référence") <= T0 * 1000);
+    assert_eq!(analysis["scored"], i64::from(HIGH + MEDIUM) + 6);
+    let gptbot = analysis["bots"]
+        .as_array()
+        .expect("bots")
+        .iter()
+        .find(|b| b["name"] == "GPTBot")
+        .expect("GPTBot");
+    assert_eq!(gptbot["publisher"], "OpenAI");
+    assert_eq!(gptbot["class"], "ai_training");
+    assert_eq!(gptbot["requests"], 10);
+    let rules = analysis["rules"].as_array().expect("rules");
+    assert!(!rules.is_empty());
+    for rule in rules {
+        assert!(
+            rule["rule"].is_string() && rule["exceeded"].is_boolean(),
+            "{rule}"
+        );
+    }
+    let load: u64 = analysis["load"]
+        .as_array()
+        .expect("load")
+        .iter()
+        .map(|h| h["requests"].as_u64().expect("requests"))
+        .sum();
+    assert_eq!(load, entries.len() as u64);
+    // Le résumé ne cite aucune IP, aucun user-agent, aucun chemin.
+    let text = String::from_utf8_lossy(&reply.body);
+    for forbidden in [
+        "192.0.2.",
+        "198.51.100.",
+        "203.0.113.",
+        "curl",
+        "Firefox",
+        "/categorie",
+    ] {
+        assert!(!text.contains(forbidden), "{forbidden} dans {text}");
+    }
+}
+
+#[tokio::test]
+async fn ip_verdicts_are_paged_by_score_from_one_snapshot() {
+    let v = with_logs();
+    let token = v.token("pc").await;
+    let mut entries = scraped(T0);
+    tick_logs(&v, T0, &entries);
+
+    let first = v.get("/api/v1/sites/site-a/logs/ips", &token).await;
+    assert_eq!(first.status, StatusCode::OK);
+    let json = first.json();
+    assert_eq!(json["site"], "site-a");
+    assert_eq!(json["generated_at"], T0);
+    let items = json["items"].as_array().expect("items");
+    assert_eq!(items.len(), 50);
+    for item in items {
+        let keys: BTreeSet<&str> = item
+            .as_object()
+            .expect("verdict")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        assert_eq!(
+            keys,
+            BTreeSet::from(["class", "ip", "level", "reasons", "score"]),
+            "{item}"
+        );
+        assert!(
+            ["moyen", "eleve"].contains(&item["level"].as_str().unwrap()),
+            "{item}"
+        );
+        for reason in item["reasons"].as_array().expect("reasons") {
+            let code = reason.as_str().expect("code");
+            assert!(
+                code.bytes().all(|b| b.is_ascii_lowercase() || b == b'_'),
+                "{code}"
+            );
+        }
+    }
+    let scores: Vec<u64> = items.iter().map(|i| i["score"].as_u64().unwrap()).collect();
+    assert!(scores.windows(2).all(|w| w[0] >= w[1]), "{scores:?}");
+    let text = String::from_utf8_lossy(&first.body);
+    for forbidden in [
+        "curl",
+        "Firefox",
+        "Mozilla",
+        "/categorie",
+        "?q",
+        "203.0.113.",
+    ] {
+        assert!(!text.contains(forbidden), "{forbidden} dans {text}");
+    }
+    let cursor = json["next_cursor"].as_str().expect("curseur").to_owned();
+    assert!(cursor.len() <= 256);
+
+    // Un nouveau tick écrit un autre instantané : la page 2 lit toujours le
+    // premier, gardé 15 minutes.
+    let later = T0 + 300;
+    entries.extend(scraped(later).into_iter().map(|mut e| {
+        e.ip = Some(ipv4("192.0.2.200"));
+        e
+    }));
+    tick_logs(&v, later, &entries);
+    let pages = ip_pages(
+        &v,
+        &token,
+        &format!("/api/v1/sites/site-a/logs/ips?cursor={cursor}"),
+        50,
+    )
+    .await;
+    assert_eq!(pages.len(), 1);
+    assert_eq!(pages[0]["generated_at"], T0);
+    let mut ips: Vec<String> = items
+        .iter()
+        .chain(pages[0]["items"].as_array().expect("items"))
+        .map(|i| i["ip"].as_str().unwrap().to_owned())
+        .collect();
+    assert_eq!(ips.len(), usize::from(HIGH + MEDIUM));
+    ips.sort();
+    ips.dedup();
+    assert_eq!(ips.len(), usize::from(HIGH + MEDIUM), "doublon");
+    assert!(!ips.iter().any(|ip| ip.starts_with("203.0.113.")));
+    assert!(
+        !ips.contains(&"192.0.2.200".to_owned()),
+        "instantané suivant"
+    );
+
+    // Le nouvel instantané se parcourt depuis le début, par 30.
+    let pages = ip_pages(&v, &token, "/api/v1/sites/site-a/logs/ips?limit=30", 30).await;
+    let sizes: Vec<usize> = pages
+        .iter()
+        .map(|p| p["items"].as_array().unwrap().len())
+        .collect();
+    assert_eq!(sizes, [30, 30, 16]);
+    assert!(pages.iter().all(|p| p["generated_at"] == later));
+
+    // Plus de 15 minutes après, le premier instantané est purgé : 409.
+    let purged = T0 + 1300;
+    entries.push(hit(
+        (purged - 10) * 1000,
+        ipv4("203.0.113.9"),
+        "/",
+        FIREFOX,
+        false,
+    ));
+    tick_logs(&v, purged, &entries);
+    let reply = v
+        .get(
+            &format!("/api/v1/sites/site-a/logs/ips?cursor={cursor}"),
+            &token,
+        )
+        .await;
+    assert_eq!(reply.status, StatusCode::CONFLICT);
+    reply.assert_error_code("cursor_expired", "instantané purgé");
+    // Le client reprend au début.
+    let json = v.get("/api/v1/sites/site-a/logs/ips", &token).await.json();
+    assert_eq!(json["generated_at"], purged);
+
+    // Curseurs illisibles ou d'une autre liste : 400.
+    let incidents_cursor = "aTF8MTc5MjAwMDAwMHw0Mg";
+    for query in [
+        format!("cursor={incidents_cursor}"),
+        "cursor=!!!".to_owned(),
+        format!("cursor={}", "A".repeat(257)),
+        "limit=0".to_owned(),
+        "limit=101".to_owned(),
+    ] {
+        let reply = v
+            .get(&format!("/api/v1/sites/site-a/logs/ips?{query}"), &token)
+            .await;
+        assert_eq!(reply.status, StatusCode::BAD_REQUEST, "{query}");
+        reply.assert_error_code("bad_request", &query);
+    }
+}
+
+#[tokio::test]
+async fn ip_verdicts_older_than_48_hours_are_not_served() {
+    let v = with_logs();
+    let token = v.token("pc").await;
+    tick_logs(&v, T0, &scraped(T0));
+    let json = v
+        .get("/api/v1/sites/site-a/logs/ips?limit=10", &token)
+        .await
+        .json();
+    assert_eq!(json["items"].as_array().expect("items").len(), 10);
+    let cursor = json["next_cursor"].as_str().expect("curseur").to_owned();
+
+    // À 48 h pile, encore servis ; une seconde de plus, plus rien, même si
+    // aucun tick n'a encore purgé.
+    v.clock.set(T0 + 48 * 3600);
+    let json = v.get("/api/v1/sites/site-a/logs/ips", &token).await.json();
+    assert_eq!(json["generated_at"], T0);
+    v.clock.advance(1);
+    let json = v.get("/api/v1/sites/site-a/logs/ips", &token).await.json();
+    assert_eq!(json["items"], serde_json::json!([]));
+    assert_eq!(json["generated_at"], Value::Null);
+    assert_eq!(json["next_cursor"], Value::Null);
+    let reply = v
+        .get(
+            &format!("/api/v1/sites/site-a/logs/ips?cursor={cursor}"),
+            &token,
+        )
+        .await;
+    assert_eq!(reply.status, StatusCode::CONFLICT);
+    reply.assert_error_code("cursor_expired", "48 h");
+    // Le résumé, sans IP, reste lisible.
+    let json = v.get("/api/v1/sites/site-a/logs", &token).await.json();
+    assert_eq!(json["analysis"]["generated_at"], T0);
 }

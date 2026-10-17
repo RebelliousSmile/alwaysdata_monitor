@@ -60,6 +60,9 @@ const MIGRATIONS: &[&str] = &[
     // entre sites (jamais d'IP), instantanés de l'analyse (résumé sans IP) et
     // verdicts d'IP moyens et élevés, index par score décroissant.
     include_str!("../migrations/0011.sql"),
+    // 12 : index des incidents clos d'un site, pour leur pagination par clé
+    // (`/api/v1/sites/{id}/incidents`, issue #5).
+    include_str!("../migrations/0012.sql"),
 ];
 
 /// Version de schéma à partir de laquelle les incidents existent.
@@ -84,6 +87,9 @@ pub const SCHEMA_ANALYSIS: usize = 10;
 /// Version de schéma à partir de laquelle les signatures partagées et les
 /// instantanés de l'analyse de logs existent.
 pub const SCHEMA_FINDINGS: usize = 11;
+/// Version de schéma à partir de laquelle les incidents clos sont indexés
+/// par site, date de clôture et id.
+pub const SCHEMA_CLOSED_INDEX: usize = 12;
 
 /// Empreinte de la typologie chargée par `serve` à son démarrage.
 pub const META_TYPOLOGY_SERVE: &str = "typology.serve";
@@ -762,6 +768,38 @@ impl Store {
         )?;
         found.sort_by(|a, b| b.closed_at.cmp(&a.closed_at).then(b.id.cmp(&a.id)));
         Ok(found)
+    }
+
+    /// Page d'incidents clos d'un site depuis `since`, les plus récents
+    /// d'abord (`closed_at DESC, id DESC`), après le curseur `after`
+    /// (`closed_at`, `id`) du dernier incident de la page précédente : au
+    /// plus `limit` incidents. Index `incidents_site_closed`.
+    pub fn closed_incidents_page(
+        &self,
+        site: &str,
+        since: i64,
+        after: Option<(i64, i64)>,
+        limit: usize,
+    ) -> Result<Vec<Incident>> {
+        let limit = i64::try_from(limit).unwrap_or(i64::MAX);
+        // Valeur de ligne : SQLite en fait une borne de l'index, sans relire
+        // les pages déjà servies. Sans curseur, ?3 et ?4 restent inutilisés
+        // (le nombre de paramètres suit le plus grand indice, ?5).
+        let (after_clause, closed_at, id) = match after {
+            Some((closed_at, id)) => ("AND (closed_at, id) < (?3, ?4)", Some(closed_at), Some(id)),
+            None => ("", None, None),
+        };
+        let mut stmt = self.conn.prepare_cached(&format!(
+            "SELECT {INCIDENT_COLUMNS} FROM incidents
+             WHERE site = ?1 AND closed_at >= ?2 {after_clause}
+             ORDER BY closed_at DESC, id DESC
+             LIMIT ?5"
+        ))?;
+        let rows = stmt.query_map(
+            params![site, since, closed_at, id, limit],
+            incident_from_row,
+        )?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
     /// E-mails d'ouverture à envoyer, y compris pour un incident déjà clos :
@@ -2206,6 +2244,63 @@ mod tests {
     }
 
     #[test]
+    fn closed_incidents_are_paged_by_key_on_their_index() {
+        let (_dir, store) = temp_store();
+        // Deux incidents clos à la même seconde : l'id départage.
+        for (key, site, closed_at) in [
+            ("a", "site-a", Some(100)),
+            ("b", "site-a", Some(300)),
+            ("c", "site-a", Some(300)),
+            ("d", "site-a", Some(200)),
+            ("e", "site-a", None),
+            ("f", "site-b", Some(400)),
+            ("g", "site-a", Some(50)),
+        ] {
+            store
+                .conn
+                .execute(
+                    "INSERT INTO incidents (key, site, check_name, severity, detail, opened_at, closed_at)
+                     VALUES (?1, ?2, 'content', 'warning', '', 10, ?3)",
+                    params![key, site, closed_at],
+                )
+                .expect("insert");
+        }
+        let keys = |page: &[Incident]| page.iter().map(|i| i.key.clone()).collect::<Vec<_>>();
+        let first = store
+            .closed_incidents_page("site-a", 60, None, 2)
+            .expect("page 1");
+        assert_eq!(keys(&first), ["c", "b"]);
+        let last = first.last().expect("dernier");
+        let second = store
+            .closed_incidents_page("site-a", 60, Some((last.closed_at.unwrap(), last.id)), 2)
+            .expect("page 2");
+        assert_eq!(keys(&second), ["d", "a"]);
+        let last = second.last().expect("dernier");
+        let third = store
+            .closed_incidents_page("site-a", 60, Some((last.closed_at.unwrap(), last.id)), 2)
+            .expect("page 3");
+        assert!(third.is_empty());
+
+        for after in ["", "AND (closed_at, id) < (?3, ?4)"] {
+            let plan: Vec<String> = store
+                .conn
+                .prepare(&format!(
+                    "EXPLAIN QUERY PLAN SELECT {INCIDENT_COLUMNS} FROM incidents
+                     WHERE site = ?1 AND closed_at >= ?2 {after}
+                     ORDER BY closed_at DESC, id DESC LIMIT ?5"
+                ))
+                .expect("plan")
+                .query_map(params!["site-a", 0, 1, 1, 1], |row| row.get(3))
+                .expect("plan")
+                .collect::<rusqlite::Result<_>>()
+                .expect("plan");
+            let plan = plan.join(" ; ");
+            assert!(plan.contains("incidents_site_closed"), "{plan}");
+            assert!(!plan.contains("TEMP B-TREE"), "tri hors index : {plan}");
+        }
+    }
+
+    #[test]
     fn records_check_runs() {
         let (_dir, mut store) = temp_store();
         assert_eq!(store.last_run("site-a", "content").expect("none"), None);
@@ -2225,7 +2320,10 @@ mod tests {
             assert!(!migration.contains('\r'), "migration {} en CRLF", i + 1);
         }
         let (_dir, store) = temp_store();
-        assert_eq!(store.schema_version().expect("version"), SCHEMA_FINDINGS);
+        assert_eq!(
+            store.schema_version().expect("version"),
+            SCHEMA_CLOSED_INDEX
+        );
         let mut stmt = store
             .conn
             .prepare("SELECT type, name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name")
@@ -2240,6 +2338,7 @@ mod tests {
             ("index", "commands_one_open"),
             ("index", "incidents_open_key"),
             ("index", "incidents_site_check"),
+            ("index", "incidents_site_closed"),
             ("index", "log_batches_received"),
             ("index", "log_batches_site"),
             ("index", "log_buckets_key"),

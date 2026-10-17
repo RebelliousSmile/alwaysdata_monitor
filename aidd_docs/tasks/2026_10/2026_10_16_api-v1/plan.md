@@ -1,6 +1,6 @@
 ---
 objective: "L'API /api/v1 de la console, déjà en service (appairage, lecture, acquittement), satisfait toutes les exigences de sécurité de l'issue #5 : débit limité et journal des appels, pagination de toute liste qui croît, en-têtes stricts sans CORS, DTO dont aucun champ secret ne peut sortir, champs issus des logs assainis, lecture de l'analyse des logs ; et la décision de ne pas faire de mTLS est écrite."
-status: pending
+status: done
 issue_number: 5
 ---
 

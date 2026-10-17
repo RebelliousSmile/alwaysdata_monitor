@@ -375,64 +375,120 @@ pub fn persist(store: &mut Store, analysis: &Analysis) -> Result<()> {
     Ok(())
 }
 
-/// Dernier instantané d'un site, verdicts compris (vides après 48 h).
-pub fn latest(store: &Store, site: &str) -> Result<Option<Analysis>> {
-    let row: Option<(i64, String)> = store
-        .conn
-        .query_row(
-            "SELECT generated_at, summary FROM log_analysis WHERE site = ?1
-             ORDER BY generated_at DESC LIMIT 1",
-            [site],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )
-        .optional()?;
-    let Some((at, summary)) = row else {
+/// Colonnes d'un verdict, lues par [`verdict_from_row`].
+const VERDICT_COLUMNS: &str = "ip, score, own_score, level, class, bot, requests, shared, reasons";
+
+/// Verdict d'une ligne de `log_verdicts` ; `None` pour une ligne illisible
+/// ou d'un niveau qui n'est ni moyen ni élevé.
+fn verdict_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Option<IpVerdict>> {
+    let ip: String = row.get(0)?;
+    let level: String = row.get(3)?;
+    let class: String = row.get(4)?;
+    let reasons: String = row.get(8)?;
+    let (Ok(ip), Some(class)) = (ip.parse(), BotClass::parse(&class)) else {
         return Ok(None);
     };
-    let mut analysis: Analysis =
-        serde_json::from_str(&summary).context("résumé d'analyse illisible")?;
-    let mut stmt = store.conn.prepare(
-        "SELECT ip, score, own_score, level, class, bot, requests, shared, reasons
+    let level = match level.as_str() {
+        "eleve" => Level::High,
+        "moyen" => Level::Medium,
+        _ => return Ok(None),
+    };
+    Ok(Some(IpVerdict {
+        ip,
+        score: row.get(1)?,
+        own_score: row.get(2)?,
+        level,
+        class,
+        bot: row.get(5)?,
+        requests: u64::try_from(row.get::<_, i64>(6)?).unwrap_or(0),
+        shared: row.get(7)?,
+        reasons: serde_json::from_str(&reasons).unwrap_or_default(),
+    }))
+}
+
+/// Dernier résumé d'un site, sans ses verdicts.
+pub fn latest_summary(store: &Store, site: &str) -> Result<Option<Analysis>> {
+    let row: Option<String> = store
+        .conn
+        .query_row(
+            "SELECT summary FROM log_analysis WHERE site = ?1
+             ORDER BY generated_at DESC LIMIT 1",
+            [site],
+            |row| row.get(0),
+        )
+        .optional()?;
+    row.map(|summary| serde_json::from_str(&summary).context("résumé d'analyse illisible"))
+        .transpose()
+}
+
+/// Dernier instantané d'un site, verdicts compris (vides après 48 h).
+pub fn latest(store: &Store, site: &str) -> Result<Option<Analysis>> {
+    let Some(mut analysis) = latest_summary(store, site)? else {
+        return Ok(None);
+    };
+    let mut stmt = store.conn.prepare(&format!(
+        "SELECT {VERDICT_COLUMNS}
          FROM log_verdicts WHERE site = ?1 AND generated_at = ?2
-         ORDER BY score DESC, ip",
-    )?;
-    let rows = stmt.query_map(params![site, at], |row| {
-        Ok((
-            row.get::<_, String>(0)?,
-            row.get::<_, u8>(1)?,
-            row.get::<_, u8>(2)?,
-            row.get::<_, String>(3)?,
-            row.get::<_, String>(4)?,
-            row.get::<_, Option<String>>(5)?,
-            row.get::<_, i64>(6)?,
-            row.get::<_, bool>(7)?,
-            row.get::<_, String>(8)?,
-        ))
-    })?;
+         ORDER BY score DESC, ip"
+    ))?;
+    let rows = stmt.query_map(params![site, analysis.generated_at], verdict_from_row)?;
     for row in rows {
-        let (ip, score, own_score, level, class, bot, requests, shared, reasons) = row?;
-        let (Ok(ip), Some(class)) = (ip.parse(), BotClass::parse(&class)) else {
-            continue;
-        };
-        let level = match level.as_str() {
-            "eleve" => Level::High,
-            "moyen" => Level::Medium,
-            _ => continue,
-        };
-        analysis.verdicts.push(IpVerdict {
-            ip,
-            score,
-            own_score,
-            level,
-            class,
-            bot,
-            requests: u64::try_from(requests).unwrap_or(0),
-            shared,
-            reasons: serde_json::from_str(&reasons).unwrap_or_default(),
-        });
+        analysis.verdicts.extend(row?);
     }
     by_score(&mut analysis.verdicts);
     Ok(Some(analysis))
+}
+
+/// L'instantané `generated_at` du site existe encore : un curseur de
+/// verdicts qui le cite reste valide.
+pub fn snapshot_exists(store: &Store, site: &str, generated_at: i64) -> Result<bool> {
+    Ok(store
+        .conn
+        .query_row(
+            "SELECT 1 FROM log_analysis WHERE site = ?1 AND generated_at = ?2",
+            params![site, generated_at],
+            |_| Ok(()),
+        )
+        .optional()?
+        .is_some())
+}
+
+/// Page de verdicts de l'instantané `generated_at`, du plus haut score au
+/// plus bas puis par IP (texte), après le curseur `after` (score, IP) du
+/// dernier verdict de la page précédente : au plus `limit` lignes lues
+/// (index `log_verdicts_score`). Une ligne illisible est sautée, ce qui peut
+/// raccourcir la page sans fausser le curseur : l'appelant le tire de la
+/// dernière ligne lue, rendue avec le verdict.
+pub fn verdicts_page(
+    store: &Store,
+    site: &str,
+    generated_at: i64,
+    after: Option<(u8, &str)>,
+    limit: usize,
+) -> Result<Vec<(u8, String, Option<IpVerdict>)>> {
+    let limit = i64::try_from(limit).unwrap_or(i64::MAX);
+    let (after_clause, score, ip) = match after {
+        Some((score, ip)) => (
+            "AND (score < ?3 OR (score = ?3 AND ip > ?4))",
+            Some(score),
+            Some(ip),
+        ),
+        None => ("", None, None),
+    };
+    let mut stmt = store.conn.prepare(&format!(
+        "SELECT {VERDICT_COLUMNS}
+         FROM log_verdicts WHERE site = ?1 AND generated_at = ?2 {after_clause}
+         ORDER BY score DESC, ip
+         LIMIT ?5"
+    ))?;
+    let rows = stmt.query_map(params![site, generated_at, score, ip, limit], |row| {
+        Ok((
+            row.get::<_, u8>(1)?,
+            row.get::<_, String>(0)?,
+            verdict_from_row(row)?,
+        ))
+    })?;
+    Ok(rows.collect::<rusqlite::Result<_>>()?)
 }
 
 /// Purges de `tick`, pour tous les sites, y compris ceux qui n'ont plus de

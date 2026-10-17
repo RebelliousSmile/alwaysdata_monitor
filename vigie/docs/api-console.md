@@ -7,8 +7,8 @@ créé sur le VPS. Le veilleur ne garde que l'empreinte SHA-256 des jetons et
 des codes : ni l'un ni l'autre n'est écrit en clair, en base comme au journal.
 
 Ce document est le contrat. `vigie/src/device.rs`, `vigie/src/api.rs`,
-`vigie/tests/api_auth.rs`, `vigie/tests/api_read.rs` et `vigie/tests/cli.rs`
-en reprennent chaque règle.
+`vigie/tests/api_auth.rs`, `vigie/tests/api_read.rs`,
+`vigie/tests/api_guards.rs` et `vigie/tests/cli.rs` en reprennent chaque règle.
 
 ## Configuration
 
@@ -83,8 +83,15 @@ Authorization: Bearer <jeton>
 
 Le veilleur hache le jeton présenté et cherche un appareil **actif** de même
 empreinte (comparaison en temps constant). Un jeton de plus de 128 caractères
-est refusé sans être haché. La date « vu le » de l'appareil est mise à jour au
-plus une fois par minute ; son échec n'est que journalisé, la requête passe.
+est refusé sans être haché. L'appareil trouvé passe ensuite la limite de débit
+(voir [Limite de débit](#limite-de-débit)) ; sous la limite, sa date « vu le »
+est mise à jour au plus une fois par minute ; son échec n'est que journalisé,
+la requête passe.
+
+Pas de certificat client (mTLS) : `serve` écoute sur `127.0.0.1:8080`, Caddy
+l'expose en TLS, et le jeton d'appareil (32 octets aléatoires, gardé en
+SHA-256, révocable un par un) authentifie chaque appel (`decisions.md`,
+section #5).
 
 ## Révocation
 
@@ -108,7 +115,9 @@ révocation.
 | `POST /api/v1/pair` | `{token, device_id, name}` (voir Appairage) | appairage |
 | `GET /api/v1/overview` | sites triés par état, avec leur constat le plus grave | Main, ATraiter, Etats |
 | `GET /api/v1/sites/{id}` | incidents ouverts, contrôles et dernier relevé de l'agent | ATraiter, Dispo, Controles, Parametres, Etats |
-| `GET /api/v1/sites/{id}/incidents` | incidents fermés depuis 30 jours | Dispo |
+| `GET /api/v1/sites/{id}/incidents` | incidents fermés depuis 30 jours, par pages | Dispo |
+| `GET /api/v1/sites/{id}/logs` | dernier instantané de l'analyse des logs : robots, règles, charge | — |
+| `GET /api/v1/sites/{id}/logs/ips` | verdicts d'IP moyens et élevés, par pages | — |
 | `GET /api/v1/incidents/{id}` | un incident, ouvert ou fermé | Alerte |
 | `POST /api/v1/incidents/{id}/ack` | l'incident acquitté | Alerte |
 | `GET /api/v1/settings` | sites, fréquences, destinataire masqué, appareils | Parametres, Reglages |
@@ -117,6 +126,24 @@ révocation.
 Toutes, sauf `pair`, exigent le jeton. Les heures sont des secondes Unix (UTC) ;
 un champ sans valeur connue vaut `null`, jamais zéro ni une valeur par défaut.
 Les tableaux ne sont jamais `null` : vides, ils valent `[]`.
+
+### Pagination
+
+Toute liste qui croît se lit par pages, par clé (jamais par rang) :
+
+- `limit` : de 1 à 100, 50 par défaut ; hors de ces bornes ou illisible,
+  400 `bad_request`.
+- `cursor` : opaque (base64url), 256 caractères au plus avant décodage ;
+  illisible, trop long, vide ou émis par une autre liste, 400 `bad_request`.
+  Un paramètre répété est aussi un 400. Les autres paramètres sont ignorés.
+- La réponse porte la page (`items`, ou `incidents` pour les incidents, voir
+  plus bas) et `next_cursor`, le curseur de la page suivante, `null` sur la
+  dernière. La page suivante se demande avec ce curseur et le même `limit`.
+
+Le curseur porte la clé du dernier élément servi : une page lue plus tard
+reprend juste après lui, sans doublon ni trou dû aux éléments arrivés
+entre-temps. Les listes bornées par la configuration ne se paginent pas :
+sites (200 au plus, `config.toml` en refuse davantage) et contrôles d'un site.
 
 ### Incident
 
@@ -241,12 +268,101 @@ Forme commune à toutes les routes qui renvoient un incident :
 ### `GET /api/v1/sites/{id}/incidents`
 
 ```json
-{ "site": "site-a", "since": 1789408000, "incidents": [ { "...": "un incident" } ] }
+{ "site": "site-a", "since": 1789408000, "incidents": [ { "...": "un incident" } ], "next_cursor": "aTF8…" }
 ```
 
 Incidents du site fermés depuis `since` (maintenant moins 30 jours), du plus
-récemment fermé au plus ancien. Les incidents ouverts sont dans
+récemment fermé au plus ancien (`closed_at`, puis `id` décroissants), par
+pages (voir [Pagination](#pagination)) : `incidents` est la page,
+`next_cursor` le curseur de la suivante. Les incidents ouverts sont dans
 `GET /api/v1/sites/{id}`. Identifiant absent de la configuration : 404.
+
+- Un incident fermé pendant un parcours se place avant la première page : il
+  n'est pas revu par les pages suivantes, et aucun autre n'y manque. Un
+  nouveau parcours le voit en tête.
+- **Changement depuis la console 0.1.1** : sans paramètre, la réponse ne porte
+  plus tous les incidents des 30 jours, mais la première page (les 50 derniers
+  fermés). Le nom `incidents` est gardé pour que la console 0.1.1 continue de
+  lire la réponse ; elle ignore `next_cursor` (son client n'a pas de
+  `deny_unknown_fields`) et ne voit donc que ces 50 incidents.
+
+### `GET /api/v1/sites/{id}/logs`
+
+```json
+{
+  "analysis": {
+    "generated_at": 1792000000,
+    "reference_ms": 1791999940000,
+    "bots": [
+      { "name": "GPTBot", "publisher": "OpenAI", "purpose": "…", "robots_only": false,
+        "honours_robots": true, "class": "ai_training", "protected": false, "requests": 120 }
+    ],
+    "scored": 81,
+    "unscored": 0,
+    "rules": [
+      { "rule": "spike-404", "scope": "site", "severity": "warning", "window_secs": 300,
+        "min_count": 100, "min_ips": 1, "count": 140, "distinct_ips": 12, "keys_over": 0,
+        "exceeded": true }
+    ],
+    "load": [
+      { "hour": 497777, "requests": 5120, "refused": 30, "timed": 5000, "service_us": 900000000,
+        "facets": 800, "facets_us": 300000000, "bots": 400, "bots_us": 20000000 }
+    ],
+    "load_threshold_us": 1800000000
+  }
+}
+```
+
+Dernier instantané de l'analyse des logs du site (#8), écrit par `tick` :
+
+- `generated_at` : heure du veilleur à l'écriture, en secondes ;
+  `reference_ms` : heure de référence des fenêtres, en ms (heure des données).
+- `bots` : robots du catalogue vus sur 24 h, du plus actif au moins actif,
+  avec leurs métadonnées (`class`, `protected` : jamais visé par les actions
+  robots.txt et UA de #13).
+- `rules` : chaque règle sur sa fenêtre finie à la référence ; `exceeded`
+  dit si elle est dépassée. Aucune IP.
+- `load` : charge des 24 heures, par tranche horaire (`timestamp_ms / 3 600
+  000`), temps de service en µs.
+- `scored` et `unscored` : IP notées, et IP sans score fiable.
+
+Site qui a une source de logs mais aucune analyse encore : 200
+`{"analysis": null}`. Site sans source (`[sites.logs] source`) ou absent de
+la configuration : 404.
+
+### `GET /api/v1/sites/{id}/logs/ips`
+
+```json
+{
+  "site": "site-a",
+  "generated_at": 1792000000,
+  "items": [
+    { "ip": "192.0.2.10", "score": 85, "level": "eleve", "reasons": ["facets", "tool_user_agent"], "class": "tool" }
+  ],
+  "next_cursor": "djF8…"
+}
+```
+
+Verdicts d'IP d'un instantané de l'analyse, du plus haut score au plus bas
+(puis par IP), par pages (voir [Pagination](#pagination)). Données
+personnelles en liste blanche : l'IP, le score (0 à 100), le niveau
+(`moyen` ou `eleve`, jamais les autres), les raisons en codes, la classe du
+premier robot vu (`browser` sans robot). Ni user-agent, ni chemin, ni le
+libellé des raisons, qui peut citer l'un ou l'autre.
+
+- `reasons` : `fake_search_engine`, `search_engine`, `declared_bot`,
+  `facets`, `no_static_resources`, `no_referer`, `tool_user_agent`,
+  `user_agent_rotation`, `burst`, `hosting_network`, `consumer_isp`,
+  `no_reverse_dns`, `shared_signature` ; `other` pour une raison inconnue de
+  ce binaire.
+- Rien au-delà de 48 heures : seul un instantané de `generated_at` ≥
+  maintenant moins 48 h est servi, même avant la purge de `tick`. Sinon,
+  `generated_at` vaut `null` et `items` `[]`.
+- La première page lit le dernier instantané ; le curseur le fixe : une page
+  suivante le relit même après un nouveau `tick` (l'instantané précédent est
+  gardé 15 minutes). Instantané purgé depuis, ou de plus de 48 h : 409
+  `cursor_expired`, le client reprend au début, sans curseur.
+- Site sans source de logs ou absent de la configuration : 404.
 
 ### `GET /api/v1/incidents/{id}`
 
@@ -255,7 +371,9 @@ L'incident, ouvert ou fermé. Identifiant inconnu ou non entier : 404.
 ### `POST /api/v1/incidents/{id}/ack`
 
 Même effet que `vigie ack <id>` : les rappels s'arrêtent, la clôture
-automatique et son e-mail restent. Corps de la requête ignoré.
+automatique et son e-mail restent. La console envoie la requête sans corps ni
+`Content-Type` ; un corps JSON est ignoré, un corps annoncé d'un autre type
+reçoit 415 (voir [En-têtes](#en-têtes)).
 
 - 200 et l'incident, `state` à `acked`. Sur un incident déjà acquitté, la même
   réponse, `acked_at` inchangé.
@@ -302,6 +420,21 @@ corps, puis 401 pour toute requête avec ce jeton. C'est la seule écriture sur
 les appareils accessible par l'API ; `vigie device list` montre ensuite
 l'appareil révoqué.
 
+## Texte issu des logs
+
+Tout champ dont le texte vient des logs d'un site est assaini avant d'être
+servi (`LogText`, `vigie/src/api/log_text.rs`) : caractères de contrôle C0,
+DEL et C1, U+2028, U+2029 et contrôles bidirectionnels (U+061C, U+200E,
+U+200F, U+202A à U+202E, U+2066 à U+2069) deviennent U+FFFD. Aujourd'hui :
+`key` et `detail` des incidents du contrôle `logs`, `detail` de son passage
+(analyse de #8, déjà assainie à l'écriture ; la lecture ne s'y fie pas) ;
+`ip` des verdicts de `logs/ips`, et les textes du résumé de `logs` (`name`,
+`publisher`, `purpose` des robots, `rule`), tirés du catalogue et de la
+configuration mais relus de la base. Un user-agent ou un chemin, s'il en est
+servi un jour, suit la même règle : coupé à 512 caractères, chemin sans query
+string, referer réduit à son origine. La console n'injecte jamais de HTML brut (`vue/no-v-html` en erreur
+dans `vigie/app/eslint.config.js`).
+
 ## État d'un site
 
 Calculé par le veilleur seul (`SiteState` dans `vigie/src/api.rs`) ; la
@@ -332,6 +465,56 @@ des maquettes (non conforme, aveugle, à vérifier, OK) : il est placé avant
 | Reglages | `settings` : `alerts.to`, `devices`, `public_url` ; retrait par `devices/self`. |
 | Etats | `state` à `blind` ou `first_read`, `server_time` et `last_read` pour la fraîcheur, échec réseau pour « hors ligne ». |
 
+## Limite de débit
+
+En mémoire de `serve`, perdue à son redémarrage ; deux tables de seaux à
+jetons, sur une horloge monotone :
+
+| Table | Règle | Appliquée à |
+| ----- | ----- | ----------- |
+| Par appareil | 120 appels par minute, rafale de 30 | Toute requête au jeton valide, après l'authentification et avant « vu le ». Bornée par le nombre d'appareils, jamais évincée. |
+| Par IP cliente | 10 par minute | `POST /api/v1/pair`, avant tout traitement ; ailleurs, seulement un échec d'authentification (jeton absent, inconnu ou révoqué), qui reçoit alors 429 au lieu de 401. |
+
+- Un seau d'IP vide ne bloque **jamais** une requête au jeton valide : un
+  appareil derrière le même NAT qu'un attaquant reste servi.
+- IP cliente : une IPv4 entière, une IPv6 sur son /64. Derrière Caddy, le pair
+  est la boucle locale (`127.0.0.1` ou `::1`) et l'IP est la dernière valeur
+  de `X-Forwarded-For`, que Caddy écrit lui-même ; venant d'un autre pair,
+  l'en-tête est ignoré.
+- La table des IP garde 4 096 clés au plus. Seul un seau plein, équivalent à
+  une clé absente, en est évincé ; quand elle est pleine de seaux entamés, une
+  IP nouvelle reçoit 429 (fermé) : arroser d'adresses ne libère personne.
+- 429 au format commun, avec `Retry-After` en secondes.
+
+## En-têtes
+
+Toute réponse de `/api/v1`, corps d'erreur compris, porte
+`X-Content-Type-Options: nosniff` et `Cache-Control: no-store`, et
+`Content-Type: application/json` quand elle a un corps. Aucun en-tête CORS :
+la console appelle depuis Rust, aucun navigateur n'est à autoriser. `OPTIONS`
+reçoit le 404 commun.
+
+Un `POST` qui annonce un corps (`Content-Length` non nul ou
+`Transfer-Encoding`) d'un autre type que `application/json` (paramètres
+admis : `application/json; charset=utf-8`) reçoit 415, d'après les seuls
+en-têtes. Un `POST` sans corps ni `Content-Type` est accepté. Un JSON
+illisible sur `pair` garde son 401.
+
+## Journal des appels
+
+Une ligne par appel de `/api/v1` sur la sortie de `serve` (journald) :
+
+```text
+[3f…] appel /api/v1 : appareil 1 GET /api/v1/sites/{id} 200 4 ms
+```
+
+Identifiant de requête, appareil (`-` sans authentification), méthode,
+gabarit de route (jamais le chemin brut ni la query string ; `-` hors des
+routes connues), statut, durée. Jamais de jeton, de code d'appairage ni
+d'en-tête. Les 429 d'une même IP sont regroupés : la première ligne d'une
+minute cite l'IP, les suivants sont comptés et le compte est écrit à la
+minute suivante (`N autre(s) 429 regroupé(s) pour <ip> sur une minute`).
+
 ## Codes de réponse
 
 Toute réponse du veilleur porte un en-tête `X-Request-Id` : 32 caractères hex
@@ -339,7 +522,8 @@ minuscules, tirés au hasard pour chaque requête. Le journal du veilleur cite l
 même identifiant entre crochets ; un `X-Request-Id` envoyé par le client est
 ignoré.
 
-Toute erreur de `/api/v1` porte le même corps, avec `Cache-Control: no-store` :
+Toute erreur de `/api/v1` porte le même corps, avec les en-têtes stricts
+(voir [En-têtes](#en-têtes)) :
 
 ```json
 {"error": {"code": "unauthorized", "message": "authentification requise", "request_id": "3f…"}}
@@ -353,13 +537,23 @@ qu'indicatif et ne dit jamais la cause d'un refus ou d'une erreur interne.
 | ---- | ------------ | --- |
 | 200 | — | Succès, avec `Cache-Control: no-store`. |
 | 204 | — | `DELETE /api/v1/devices/self` réussi, corps vide. |
+| 400 | `bad_request` | `limit` hors de 1 à 100 ou illisible, curseur illisible, trop long ou d'une autre liste, paramètre de pagination répété (voir [Pagination](#pagination)). Vérifié après le 404 d'un site. |
 | 401 | `unauthorized` | Code inconnu, expiré, déjà utilisé, corps illisible, trop gros ou trop lent ; jeton absent, mal formé, inconnu ou révoqué ; base absente ou antérieure au schéma 6. **Le même corps**, quelle qu'en soit la raison : le journal du veilleur seul dit laquelle. Toujours vérifié avant le 404 d'un site ou d'un incident : leur existence ne se devine pas sans jeton. |
 | 404 | `not_found` | Site absent de la configuration, incident inconnu, méthode refusée sur une route de l'API. |
 | 409 | `conflict` | Acquittement d'un incident fermé. |
+| 409 | `cursor_expired` | Curseur de `logs/ips` dont l'instantané a été purgé ou a plus de 48 h : reprendre au début. |
+| 415 | `unsupported_media_type` | `POST` dont le corps annoncé n'est pas `application/json`. |
+| 429 | `too_many_requests` | Limite de débit dépassée (voir [Limite de débit](#limite-de-débit)), avec `Retry-After`. |
 | 500 | `internal` | Erreur interne (base illisible, tirage aléatoire impossible). |
 
 Hors de ces routes, une route inconnue, y compris sous `/api/v1`, reçoit le 404
-sans corps du reste du veilleur, comme tout refus de `POST /r/v1/report`.
+sans corps du reste du veilleur, comme tout refus de `POST /r/v1/report` (sous
+`/api/v1`, avec les en-têtes stricts et sa ligne de journal).
+
+La console 0.1.1 ne connaît pas 400, 409 `cursor_expired`, 415 ni 429 : elle
+les affiche comme « le veilleur a répondu N ». Aucune de ses requêtes ne les
+reçoit sous la limite : elle n'envoie ni `limit` ni `cursor`, et ne lit pas
+les routes `logs`.
 
 ## Base de données
 
@@ -367,3 +561,8 @@ L'API ne crée jamais la base et ne la migre pas : `vigie serve` applique les
 migrations au démarrage, `vigie device pair` aussi. Tant que la base est
 absente ou antérieure au schéma 6 (appareils au schéma 5, résultat des
 passages au schéma 6), toute requête reçoit 401.
+
+Avant le schéma 11 (instantanés de l'analyse des logs), `logs` répond
+`{"analysis": null}` et `logs/ips` une liste vide. Le schéma 12 ajoute
+l'index `(site, closed_at, id)` des incidents clos, lu par
+`sites/{id}/incidents`.
