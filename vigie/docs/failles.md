@@ -424,7 +424,7 @@ Aucun score n'est jamais calculé depuis un vecteur CVSS v4.
 | Gravité | Condition |
 | --- | --- |
 | critique | un CVE de la faille est dans KEV, ou entrée `MAL-` (paquet malveillant), ou CVSS ≥ 9,0 |
-| avertissement | CVSS ≥ 7,0, ou EPSS ≥ 0,1, ou gravité inconnue (sauf une entrée Wordfence `informational: true` sans score, classée information) ; « version inconnue » d'un composant qui a une faille critique |
+| avertissement | CVSS ≥ 7,0, ou EPSS ≥ 0,1, ou gravité inconnue (sauf une entrée Wordfence `informational: true` sans score, classée information) ; « version inconnue » ou « plage inconnue » sur une faille critique (KEV, `MAL-`, CVSS ≥ 9,0) |
 | information | tout le reste |
 
 Les règles se lisent de haut en bas ; la première qui s'applique fixe la
