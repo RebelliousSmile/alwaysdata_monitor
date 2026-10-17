@@ -1,0 +1,12 @@
+# BEGIN vigie
+# Gere par Vigie (vigie site recommend) : ne pas modifier a la main.
+RewriteEngine On
+# ip jusqu'au 2026-06-16 12:00:00
+RewriteCond %{REMOTE_ADDR} "^203\.0\.113\.7$"
+RewriteCond %{TIME} <20260616120000
+RewriteRule ^ - [F,L]
+# ip jusqu'au 2026-06-16 12:00:00
+RewriteCond %{REMOTE_ADDR} "^2001\:db8\:\:7$"
+RewriteCond %{TIME} <20260616120000
+RewriteRule ^ - [F,L]
+# END vigie

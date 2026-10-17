@@ -60,6 +60,10 @@ pub struct Logs {
     pub disable: Vec<String>,
     #[serde(default)]
     pub rules: Vec<Rule>,
+    /// IP sortantes du veilleur (et autres IP communes à tous les sites) :
+    /// jamais visées par une règle d'IP de #13.
+    #[serde(default)]
+    pub protect_ips: Vec<std::net::IpAddr>,
 }
 
 /// `[sites.logs]` : réception (#1) et analyse (#8) des logs propres au site.
@@ -84,7 +88,14 @@ pub struct SiteLogs {
     /// Règles ajoutées pour ce site seulement.
     #[serde(default)]
     pub rules: Vec<Rule>,
+    /// IP jamais visées par une règle d'IP de #13 (tâches planifiées,
+    /// webhooks de paiement, bureau de l'exploitant…).
+    #[serde(default)]
+    pub protect_ips: Vec<std::net::IpAddr>,
 }
+
+/// IP de `protect_ips` au plus, par section.
+pub const MAX_PROTECT_IPS: usize = 100;
 
 /// Hôtes de `[sites.logs]` au plus.
 pub const MAX_LOG_HOSTS: usize = 20;
@@ -120,6 +131,9 @@ impl SiteLogs {
         }
         if self.source.is_some() && self.hosts.is_empty() {
             return Err("hosts est obligatoire et non vide quand source est posé".into());
+        }
+        if self.protect_ips.len() > MAX_PROTECT_IPS {
+            return Err(format!("protect_ips : {MAX_PROTECT_IPS} IP au plus"));
         }
         if self.hosts.len() > MAX_LOG_HOSTS {
             return Err(format!("hosts : {MAX_LOG_HOSTS} hôtes au plus"));
@@ -511,6 +525,9 @@ impl Config {
                 "{MAX_SITES} sites au plus (reçu : {})",
                 self.sites.len()
             ));
+        }
+        if self.logs.protect_ips.len() > MAX_PROTECT_IPS {
+            return Err(format!("logs.protect_ips : {MAX_PROTECT_IPS} IP au plus"));
         }
         let mut seen = HashSet::new();
         for site in &self.sites {

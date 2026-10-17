@@ -334,6 +334,7 @@ async fn commands_handler(
     };
     let site = header(HEADER_SITE);
     let signature = header(HEADER_SIGNATURE);
+    let source = pull_source(&parts);
     let announced = header(CONTENT_LENGTH.as_str()).and_then(|v| v.parse::<u64>().ok());
     let bytes = match read_agent_body(body, announced).await {
         Ok(bytes) => bytes,
@@ -370,6 +371,7 @@ async fn commands_handler(
                 task_site.as_deref(),
                 signature.as_deref(),
                 &bytes,
+                source,
                 now,
             ))
         });
@@ -415,6 +417,29 @@ async fn commands_handler(
             Reason::Internal(format!("tâche interrompue : {err}")),
         )),
     }
+}
+
+/// Adresse source d'un retrait (#13) : le pair TCP, ou, quand le pair est
+/// la boucle locale (Caddy sur le VPS), la dernière adresse de
+/// `X-Forwarded-For`, celle que Caddy ajoute. Jamais l'en-tête d'un pair
+/// distant.
+fn pull_source(parts: &axum::http::request::Parts) -> Option<IpAddr> {
+    let peer = parts
+        .extensions
+        .get::<axum::extract::ConnectInfo<SocketAddr>>()?
+        .0
+        .ip();
+    if !peer.is_loopback() {
+        return Some(peer);
+    }
+    parts
+        .headers
+        .get_all("x-forwarded-for")
+        .iter()
+        .next_back()
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.rsplit(',').next())
+        .and_then(|v| v.trim().parse().ok())
 }
 
 /// 204 si le lot est accepté ou déjà reçu, 404 sans corps sinon. Mêmes

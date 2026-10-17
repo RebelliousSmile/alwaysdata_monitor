@@ -92,7 +92,10 @@ fn nonce_ok(nonce: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
 }
 
-/// Traite un retrait. `config` est la configuration relue pour ce retrait.
+/// Traite un retrait. `config` est la configuration relue pour ce retrait ;
+/// `source`, l'adresse d'où il vient (relevée par `serve`), est notée pour un
+/// retrait accepté : une règle d'IP ne la vise jamais (#13).
+#[allow(clippy::too_many_arguments)]
 pub fn pull(
     store: &mut Store,
     config: &Config,
@@ -100,6 +103,7 @@ pub fn pull(
     site_header: Option<&str>,
     signature_header: Option<&str>,
     body: &[u8],
+    source: Option<std::net::IpAddr>,
     now: i64,
 ) -> Result<(Signed, Served), Refusal> {
     let refuse = |reason| Refusal::new(site_header, reason);
@@ -149,6 +153,14 @@ pub fn pull(
     {
         return schema("result : detail imprimable de 1000 caractères au plus");
     }
+    if let Some(result) = &request.result
+        && [&result.data.current_sha256, &result.data.new_sha256]
+            .into_iter()
+            .flatten()
+            .any(|h| !super::is_sha256(h))
+    {
+        return schema("result : empreinte SHA-256 en hexadécimal minuscule attendue");
+    }
     let skew = request.sent_at.saturating_sub(now);
     if skew.saturating_abs() > MAX_CLOCK_SKEW {
         return Err(refuse(Reason::Clock { skew }));
@@ -184,6 +196,17 @@ pub fn pull(
             "UPDATE command_sites SET last_pull_seq = ?2, last_pull_at = ?3 WHERE site = ?1",
             params![site_id, request.seq, now],
         )?;
+        if let Some(ip) = source {
+            tx.execute(
+                "INSERT INTO agent_sources (site, ip, last_seen) VALUES (?1, ?2, ?3)
+                 ON CONFLICT (site, ip) DO UPDATE SET last_seen = excluded.last_seen",
+                params![site_id, ip.to_string(), now],
+            )?;
+            tx.execute(
+                "DELETE FROM agent_sources WHERE site = ?1 AND last_seen < ?2",
+                params![site_id, now - crate::store::AGENT_SOURCE_RETENTION],
+            )?;
+        }
         let acked = match &request.result {
             Some(result) => Some(record_result(
                 &mut tx,
@@ -324,6 +347,14 @@ fn record_result(
             }
         }
     }
+    if matches!(
+        command.kind,
+        CommandKind::HtaccessApply | CommandKind::HtaccessRollback
+    ) && let Some(current) = &result.data.current_sha256
+        && follow_htaccess(tx, site, &command, current)?
+    {
+        detail.push_str(" ; référence du .htaccess suivie");
+    }
     transition(tx, &command, next, now)?;
     tx.execute(
         "UPDATE commands SET result = ?2 WHERE id = ?1",
@@ -342,6 +373,44 @@ fn record_result(
         ),
     )?;
     Ok((id, accepted))
+}
+
+/// La référence d'intégrité du `.htaccess` suit l'empreinte rendue par
+/// l'agent, seulement si elle fait partie des empreintes attendues de la
+/// commande (`htaccess_expected`). Vrai si la référence a changé.
+fn follow_htaccess(
+    tx: &Transaction<'_>,
+    site: &str,
+    command: &Command,
+    current: &str,
+) -> anyhow::Result<bool> {
+    if !super::htaccess_expected(command.kind, &command.params)
+        .iter()
+        .any(|h| h == current)
+    {
+        return Ok(false);
+    }
+    let baseline: Option<String> = tx
+        .query_row(
+            "SELECT files FROM baselines WHERE site = ?1",
+            [site],
+            |row| row.get(0),
+        )
+        .optional()?;
+    let Some(baseline) = baseline else {
+        return Ok(false);
+    };
+    let mut files: crate::facts::Files = serde_json::from_str(&baseline)?;
+    let path = super::HTACCESS.to_owned();
+    if files.get(&path) == Some(&Some(current.to_owned())) {
+        return Ok(false);
+    }
+    files.insert(path, Some(current.to_owned()));
+    tx.execute(
+        "UPDATE baselines SET files = ?2 WHERE site = ?1",
+        params![site, serde_json::to_string(&files)?],
+    )?;
+    Ok(true)
 }
 
 /// `rotate-key` : preuve de possession par la nouvelle clé, bascule et remise

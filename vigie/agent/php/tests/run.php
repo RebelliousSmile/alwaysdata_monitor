@@ -167,7 +167,7 @@ function free_port(): int
  *
  * @return array{0: int, 1: \Closure} port et fonction d'arrêt
  */
-function php_server(string $router, string $docroot): array
+function php_server(string $router, string $docroot, array $env = []): array
 {
     $port = free_port();
     $null = \DIRECTORY_SEPARATOR === '\\' ? 'NUL' : '/dev/null';
@@ -175,6 +175,8 @@ function php_server(string $router, string $docroot): array
         [...php_command(), '-S', "127.0.0.1:{$port}", '-t', $docroot, $router],
         [0 => ['file', $null, 'r'], 1 => ['file', $null, 'w'], 2 => ['file', $null, 'w']],
         $pipes,
+        null,
+        $env === [] ? null : getenv() + $env,
     );
     $deadline = microtime(true) + 10;
     while (microtime(true) < $deadline) {

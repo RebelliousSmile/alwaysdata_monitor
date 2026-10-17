@@ -181,3 +181,23 @@ fonctionnement : [`logs.md`](./logs.md#analyse-issue-8).
 | Minimisation : profils et verdicts d'IP 48 h, résumés d'analyse sans IP et signatures 30 jours, détails des incidents `logs` clos masqués à 30 jours, y compris pour un site qui n'a plus de source | RGPD |
 | `close_unwatched` garde le contrôle `logs` d'un site qui a une source (prédicat provisoire dans `tick.rs`, repris par le registre de #4) | Sinon chaque passage clôt puis rouvre |
 | Les verdicts ne sont recalculés, et l'instantané écrit, que quand un passage a replié des entrées ; sinon ils sont repris du dernier instantané | Les profils ne bougent pas sans entrée nouvelle ; relire 10 000 profils chaque minute pour rien coûterait le budget |
+
+## Recommandations htaccess (issue #13)
+
+Plan : `aidd_docs/tasks/2026_10/2026_10_16_recommandations-htaccess/plan.md`,
+relu en quatre tours ; fonctionnement : [`htaccess.md`](./htaccess.md).
+
+| Décision du 2026-10-16 | Raison |
+| --- | --- |
+| Analyse (déterministe, `Analysis` → `Proposal`) séparée de la génération du bloc, testée par fichiers de référence | Le texte est la partie fragile |
+| Gradation robots.txt → UA (jeton du catalogue, 30 j) → IP (score propre élevé, reverse DNS hébergeur, 24 h) ; rien contre moteurs, aperçus, navigateurs, `AiUser`, ni IP d'une classe protégée, ni site `behind_proxy` | Garde-fous de l'issue et protections de #8 |
+| robots.txt reste une proposition à poser à la main | Plus petite surface : la liste fermée des commandes ne s'y étend pas |
+| Grammaire fermée **par groupes**, validée au veilleur et par l'agent, au code de refus près, sur des vecteurs générés et un fuzz différentiel à graine fixe | Un `.htaccess` libre donne l'exécution de code ; deux validateurs divergent sinon en silence ; la validation tient même si le veilleur est compromis |
+| Toute règle expire dans Apache (`%{TIME}`, fuseau du site au veilleur, `tz` explicite à l'agent) ; sondes d'horloge Apache dans le bac à sable | Pas d'écriture à l'expiration ; `%{TIME}` est l'heure locale du serveur web |
+| Bac à sable différentiel `-a`/`-b` à nonces, compare-and-swap, copie privée dans le dossier de l'agent, reprise d'après l'empreinte, retour arrière seulement si le fichier a encore la nouvelle empreinte | Jamais d'écrasement d'une modification d'un tiers ; une copie dans le webroot pourrait être réécrite par une porte dérobée |
+| Intégrité : empreintes attendues admises tant qu'une commande `htaccess-*` est `served` ou `unknown` ; la référence ne suit `current_sha256` que s'il en fait partie | Le rapport part avant le retrait qui porte le résultat |
+| **Écart au plan** : `new_sha256` n'est pas calculé par `site recommend` ; un premier `htaccess-apply` à `new_sha256: null` le fait calculer par l'agent sans rien écrire, le second `--apply` applique le bloc ainsi préparé | Le veilleur ne connaît du `.htaccess` que des empreintes, et SHA-256 n'est pas composable. Les paramètres et le contrôle de l'agent restent ceux du plan |
+| IP sortantes du veilleur déclarées dans `[logs] protect_ips` ; adresses source des retraits relevées par `serve` (migration 13, `agent_sources`, 30 jours) | Le veilleur ne connaît pas son adresse publique ; seule l'adresse d'un retrait signé est sûre, pas un UA déclaratif |
+| Un groupe d'UA repris du bloc en place n'est pas exigé « pas 403 » dans `-a` du bac à sable | Il y est déjà actif : le contrôle vise les groupes neufs |
+| Smoke-test d'après la bascule : au moins 10 s, même budget de 30 s épuisé | Ne jamais laisser une bascule sans contrôle faute de budget |
+| L'écriture passe par le canal de commandes, pas par FTP | Le canal de #10 ne stocke aucun accès (décision du 2026-10-16) |

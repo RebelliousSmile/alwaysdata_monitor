@@ -35,6 +35,12 @@ smtp_host = "smtp.example.org"
 # veilleur : sinon l'envoi est refusé avant toute connexion.
 password_file = "/home/vigie/vigie/smtp-password"
 
+# Analyse des logs, commune à tous les sites (docs/logs.md). protect_ips :
+# IP sortantes du veilleur, jamais visées par une règle d'IP de
+# `vigie site recommend` (docs/htaccess.md). Documentation : RFC 5737.
+# [logs]
+# protect_ips = ["192.0.2.1"]
+
 # Identifiant : [a-z0-9-], 64 caractères au plus. URL en https, finie par /
 # quand le site vit dans un sous-dossier (les chemins sondés y sont joints).
 [[sites]]
@@ -65,3 +71,7 @@ interval = 300
 # source = "alwaysdata"
 # hosts = ["www.example.org", "example.org"]
 # tz = "Europe/Paris"
+# tz est aussi le fuseau de %{TIME} des règles htaccess : sans lui,
+# `vigie site recommend` ne propose que robots.txt. protect_ips : IP jamais
+# visées par une règle d'IP (tâches planifiées, webhooks, bureau).
+# protect_ips = ["198.51.100.10"]
