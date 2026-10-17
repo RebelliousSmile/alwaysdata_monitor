@@ -152,6 +152,8 @@ fn private_dir(dir: &Path) -> Result<(), SyncError> {
             Ok(())
         }
         Err(err) if err.kind() == io::ErrorKind::NotFound => {
+            // `mut` ne sert qu'au mode Unix ci-dessous.
+            #[cfg_attr(not(unix), allow(unused_mut))]
             let mut builder = fs::DirBuilder::new();
             #[cfg(unix)]
             {
