@@ -32,7 +32,9 @@ pourtant rien à faire sous `~/www` : le script de déploiement refuse cette
 destination.
 
 Codes de retour : 0 succès, 1 envoi échoué, 2 configuration ou usage, 3 sodium
-absent. Un code différent de 0 fait échouer la tâche planifiée.
+absent. Un code différent de 0 fait échouer la tâche planifiée. Ordre d'un
+passage : rapport, commandes, inventaire, logs ; l'échec de l'un n'empêche pas
+les suivants.
 
 ## Pose
 
@@ -68,12 +70,13 @@ Les exemples visent le site A et le compte `<compte-site-a>`. Les commandes
    | `site` | Identifiant du site dans `config.toml` du veilleur |
    | `endpoint` | `https://<sous-domaine-du-veilleur>/r/v1/report` |
    | `root` | Racine absolue du site, par exemple `/home/<compte-site-a>/www` |
-   | `kind` | `wordpress` ou `generic` (défaut) ; ne règle que les contrôles de l'agent. Ce qui compte pour les commandes est le `runtime` déclaré dans `config.toml` **du veilleur** : un site PHP déclaré `generic` y pose `runtime = "php"`, sinon il n'admet aucune commande (`protocole-commandes.md`) |
+   | `kind` | `wordpress`, `prestashop` (agent 0.5.0) ou `generic` (défaut) ; ne règle que les contrôles et l'inventaire de l'agent. Ce qui compte pour les commandes est le `runtime` déclaré dans `config.toml` **du veilleur** : un site PHP déclaré `generic` y pose `runtime = "php"`, sinon il n'admet aucune commande (`protocole-commandes.md`) |
    | `critical` | 30 chemins relatifs au plus, présence et empreinte |
    | `must_contain` | 10 règles `{"file": …, "text": …}` au plus |
    | `uploads` | Dossier à parcourir, `wp-content/uploads` par défaut pour `wordpress`, `null` pour ne rien parcourir |
    | `commands` | Facultatif : canal de commandes, voir [Commandes du veilleur](#commandes-du-veilleur) |
    | `logs` | Facultatif : logs HTTP poussés au veilleur, voir [Logs HTTP](#logs-http) |
+   | `inventory` | Facultatif : inventaire des composants (agent 0.5.0), voir [Inventaire](#inventaire-agent-050-issue-19) |
 
 4. **Clé de signature** :
 
@@ -295,11 +298,146 @@ retrait, les lignes nouvelles du log HTTP d'Alwaysdata à `/r/v1/logs`
 - Avec une rotation de clé non accusée, l'agent essaie aussi la nouvelle clé,
   comme pour le rapport.
 
+## Inventaire (agent 0.5.0, issue #19)
+
+Facultatif. Avec une section `inventory`, l'agent relève les composants du
+site et les pousse au veilleur, signés, à `/r/v1/inventory`, en CycloneDX 1.7
+(contrat : [`protocole-agent.md`](./protocole-agent.md#inventaire-des-composants-issue-19),
+conventions purl : [`failles.md`](./failles.md#conventions-purl)). Le site ne
+connaît aucune base de failles : le rapprochement se fait sur le veilleur (F7).
+
+```json
+"inventory": {
+  "enabled": true,
+  "composer": ["app/composer.lock"],
+  "npm": ["theme/package-lock.json"]
+}
+```
+
+| Clé | Rôle |
+| --- | ---- |
+| `enabled` | Obligatoire, `true` ou `false`. Section absente ou `false` : aucun relevé, aucun fichier `inventory.*` |
+| `composer`, `npm` | Facultatifs : 10 chemins relatifs au plus chacun, segments de `[A-Za-z0-9._@+-]`, lus **en plus** de `composer.lock` et `package-lock.json` de la racine (lus s'ils existent) |
+
+- `endpoint` doit finir par `/r/v1/report` : l'inventaire part sur
+  `/r/v1/inventory` du même veilleur.
+- Côté veilleur, `config.toml` active la réception pour le site (sans elle,
+  tout inventaire est refusé avant même la lecture du corps) :
+
+  ```toml
+  [sites.inventory]
+  source = "agent-php"
+  ```
+
+### Ce qui est relevé
+
+Lecture seule, sans jamais exécuter ni inclure de PHP du site, ni analyseur
+XML : `file_get_contents` borné et `json_decode` seulement. Rien n'est deviné :
+le `kind` de `config.json` choisit les sources.
+
+| `kind` | Sources |
+| --- | --- |
+| `wordpress` | cœur (`wp-includes/version.php`) ; extensions (`wp-content/plugins/<slug>/`, en-tête `Plugin Name:` du `<slug>.php` puis des autres `.php` du premier niveau, 20 au plus ; fichier unique `plugins/<x>.php`) ; mu-plugins (`wp-content/mu-plugins/*.php` portant `Plugin Name:`, `vigie:scope = mu`) ; thèmes (`style.css` portant `Theme Name:`, `Template:` en `vigie:parent`) |
+| `prestashop` | noyau (`src/Core/Version.php` en 8.1 et suivantes dont 9, `app/AppKernel.php` en 1.7 et 8.0, `config/settings.inc.php` en 1.6, littéraux seulement) ; modules (`modules/<x>/<x>.php`) |
+| tous | `composer.lock` (`packages` → `required`, `packages-dev` → `dev`) et `package-lock.json` v2 et v3 |
+
+- **Version d'un module PrestaShop** : d'abord le littéral `$this->version` du
+  fichier principal (64 Kio), version qui tourne ; repli sur `config.xml`
+  (8 Kio), lu comme du texte (UTF-8 valide, sans NUL, sans `<!` autre que
+  `<![CDATA[`) ; les deux lus et différents → version du littéral et
+  `vigie:config-version` (cache régénéré par PrestaShop).
+- **Composer et CMS** : sur un site `prestashop`, un paquet `prestashop-module`
+  n'est jamais émis en `pkg:composer` (son module vient du relevé de
+  `modules/`, version d'installation périmée du lockfile ignorée, rien s'il
+  n'y est pas) ; sur un site `wordpress`, `wpackagist-plugin/<slug>` et
+  `wpackagist-theme/<slug>` (Bedrock) deviennent `pkg:wordpress/…`, le relevé
+  du disque l'emportant. **Sur un site `generic`, ils restent en
+  `pkg:composer` et ne sont jamais rapprochés** d'une faille WordPress.
+- **Registre** : un paquet de `composer.lock` compte s'il porte
+  `notification-url` (Packagist, dépôts Composer) ou si son nom est
+  `wpackagist-plugin/…` ou `wpackagist-theme/…` (WPackagist n'en écrit pas) ;
+  sinon (`path`, vcs, `package` en ligne) il est écarté et compté dans
+  `skipped`. Dans `package-lock.json`, `resolved` en `git+`, `git:`,
+  `github:`, `file:`, ou URL qui n'a pas la forme d'une archive de registre
+  (`…/-/<fichier>.tgz`) : écarté et compté. Les membres du projet (clé `""`,
+  workspaces, `link: true`) et les paquets `extraneous` ne sont ni émis ni
+  comptés. Même règle que l'outil d'inventaire (#20).
+- **Alias npm** : le nom est le champ `name` de l'entrée s'il existe (le vrai
+  paquet), sinon ce qui suit le dernier `node_modules/` de la clé ; casse
+  gardée ; `dev: true` → `dev`, `devOptional: true` → `required`.
+- **Doublons** : pour WordPress et PrestaShop, un composant par purl sans
+  version ; pour Composer et npm, un par (purl complet, `vigie:path`), deux
+  lockfiles pouvant porter deux versions réelles du même paquet.
+- **Grammaire** : la même que le veilleur (`purl.json` rejoué par les tests).
+  Aucune valeur n'est tronquée : une version de plus de 128 caractères, à `~`
+  ou piégée devient vide (purl sans `@`) ; un nom hors grammaire écarte le
+  composant, compté.
+
+### Bornes et inventaire partiel
+
+2 000 composants ; 8 Kio par en-tête, 64 Kio pour un fichier principal de
+module ; 500 entrées par dossier listé ; lockfiles de 4 Mio, profondeur JSON
+32 ; 20 s de relevé ; corps de 512 Kio, des composants étant retirés depuis
+la fin (cœur, extensions, mu, thèmes, noyau, modules, Composer, npm) au-delà.
+Un dossier ou un fichier en lien symbolique (même vers l'intérieur pour un
+dossier d'extension, de thème ou de module), hors racine, illisible, un
+lockfile trop gros, invalide ou en v1, une borne atteinte : `complete = false`
+et `skipped` compté. **Seul un inventaire complet vaut absence d'un
+composant** pour le rapprochement.
+
+### Envoi, relevé économe et état
+
+- Envoi quand l'empreinte de la liste change, et au moins toutes les 24 h
+  (le veilleur garde l'inventaire frais sans le réécrire). Après un refus ou
+  un échec réseau, pas de nouvel essai avant 1 h (code 1, raison dans
+  `journalctl -u vigie-serve`).
+- Relevé seulement si l'empreinte (chemin, mtime, taille) des dossiers listés
+  et des fichiers lus au relevé précédent a changé, si le dernier relevé date
+  d'une heure, ou si un renvoi est dû : un passage toutes les 5 minutes ne
+  relit pas 50 extensions pour rien.
+- État dans `inventory.json` (0600, à côté de la clé), sous `flock` de
+  `inventory.lock` : un passage concurrent saute l'inventaire (« un autre
+  passage relève l'inventaire : ce passage le saute »), jamais les commandes.
+  Un état illisible, ouvert ou en lien arrête l'inventaire (code 2), le
+  rapport part quand même ; le supprimer refait un relevé et un envoi.
+  `state.json` n'est jamais touché.
+- Avec une rotation de clé non accusée, l'agent essaie aussi la nouvelle clé.
+
+### Pose et relecture
+
+1. Veilleur d'abord : `[sites.inventory] source = "agent-php"`, puis
+   redémarrer `vigie-serve`.
+2. Agent 0.5.0 déployé, puis relecture sans rien signer, envoyer ni écrire :
+
+   ```sh
+   php ~/vigie-agent/vigie-agent.php --inventory
+   ```
+
+   `--inventory` est exclusif avec `--dry-run` et `--init`, et marche avant
+   l'activation.
+3. Ajouter `"inventory": {"enabled": true}` à `config.json`.
+
+### Limites V1
+
+Disposition Bedrock complète (lockfile hors de `web/`), `roots/wordpress` et
+`johnpbloch/wordpress` comme cœur, `vendor/composer/installed.json` sans
+`composer.lock`, `package-lock.json` v1, yarn et pnpm (outil d'inventaire,
+#20), drop-ins WordPress, thèmes PrestaShop, licences et hachages ne sont pas
+relevés. Une extension à fichier unique prend le nom du fichier : `hello.php`
+n'est pas `hello-dolly`.
+
+### Retour à 0.4
+
+Retirer **d'abord** `inventory` et `kind: "prestashop"` de `config.json`
+(revenir à `generic` pour une boutique), puis redéployer l'agent 0.4 : sinon
+l'agent 0.4 refuse la configuration (code 2), n'envoie plus de rapport, et le
+site tombe en silence (`heartbeat`).
+
 ## Retrait
 
 1. Supprimer la tâche planifiée dans le panneau du compte.
 2. Sur le veilleur : `~/vigie/bin/vigie site remove site-a`. La clé, l'état des
-   rapports et la référence des empreintes sont effacés ; les incidents
+   rapports, la référence des empreintes et les inventaires sont effacés ; les incidents
    `agent:` ouverts sont clos au `tick` suivant.
 3. Sur le compte du site : `rm -r ~/vigie-agent ~/.vigie-agent`.
 4. Retirer la cible de `vigie/deploy/targets.json` et, si la clé SSH était

@@ -1,0 +1,30 @@
+{
+    "_readme": [
+        "Fixture fictive."
+    ],
+    "content-hash": "00000000000000000000000000000000",
+    "packages": [
+        {
+            "name": "prestashop/decimal",
+            "version": "1.5.0",
+            "type": "library",
+            "notification-url": "https://packagist.org/downloads/"
+        },
+        {
+            "name": "prestashop/exemple-natif",
+            "version": "1.0.0",
+            "type": "prestashop-module",
+            "notification-url": "https://packagist.org/downloads/",
+            "extra": {
+                "installer-name": "exemple_natif"
+            }
+        },
+        {
+            "name": "prestashop/absent",
+            "version": "4.0.0",
+            "type": "prestashop-module",
+            "notification-url": "https://packagist.org/downloads/"
+        }
+    ],
+    "packages-dev": []
+}

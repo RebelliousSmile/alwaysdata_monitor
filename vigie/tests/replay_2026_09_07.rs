@@ -72,6 +72,7 @@ fn config(dir: &Path, base: &str) -> Config {
         api: None,
         commands: None,
         logs: Default::default(),
+        vulns: None,
         alerts: Alerts {
             to: "alertes@example.org".into(),
             from: "vigie@example.org".into(),
@@ -90,6 +91,7 @@ fn config(dir: &Path, base: &str) -> Config {
             interval: PERIOD.unsigned_abs(),
             agent_silence: 900,
             logs: None,
+            inventory: None,
         }],
     }
 }

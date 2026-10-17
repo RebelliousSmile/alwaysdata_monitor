@@ -1,0 +1,12 @@
+# Une synchronisation des failles par jour, en heure creuse, décalée au
+# hasard ; un VPS éteint à l'heure dite rattrape au démarrage.
+[Unit]
+Description=vigie vulns sync chaque jour
+
+[Timer]
+OnCalendar=*-*-* 03:40:00
+RandomizedDelaySec=45min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -22,5 +22,8 @@
   "logs": {
     "dir": "/home/<compte-site-a>/admin/logs/http",
     "hosts": ["site-a.example.org", "www.site-a.example.org"]
+  },
+  "inventory": {
+    "enabled": true
   }
 }

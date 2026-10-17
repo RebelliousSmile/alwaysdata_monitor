@@ -1,0 +1,6 @@
+<?xml version="1.0"?>
+<!DOCTYPE module [<!ENTITY v "9.9.9">]>
+<module>
+	<version>&v;</version>
+	<version>9.9.8</version>
+</module>

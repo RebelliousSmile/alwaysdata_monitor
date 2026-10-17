@@ -4639,6 +4639,7 @@ dependencies = [
  "dirs 6.0.0",
  "ed25519-dalek",
  "env_logger",
+ "flate2",
  "form_urlencoded",
  "getrandom 0.4.3",
  "http-body-util",

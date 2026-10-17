@@ -8,8 +8,8 @@ use vigie::vulns::advisory::{Reason, Tally};
 use vigie::vulns::purl::Purl;
 use vigie::vulns::range::{UnknownReason, Verdict};
 use vigie::vulns::store::{
-    LEASE, Load, LoadError, PURGE_BATCH, VULN_BATCH, active_count, active_generations, advisory,
-    available, candidates, generations, match_purl, purge, sources,
+    LEASE, Load, LoadError, PURGE_BATCH, SyncMeta, VULN_BATCH, active_count, active_generations,
+    advisory, available, candidates, generations, match_purl, purge, sources,
 };
 use vigie::vulns::version::SourceEcosystem;
 
@@ -28,10 +28,12 @@ fn setup() -> (tempfile::TempDir, std::path::PathBuf) {
 }
 
 fn load_all(store: &mut Store, clock: &dyn Clock, n: usize, tag: &str) -> i64 {
-    let mut load = Load::begin(store, SOURCE, clock).unwrap();
+    let mut load = Load::begin(store, SOURCE, clock, LEASE).unwrap();
     let batch: Vec<_> = (0..n).map(|i| fictive(i, tag)).collect();
     load.push(&batch).unwrap();
-    load.commit(None).unwrap().generation
+    load.commit(&Tally::default(), &SyncMeta::default())
+        .unwrap()
+        .generation
 }
 
 fn reader(path: &std::path::Path) -> Store {
@@ -47,7 +49,7 @@ fn a_reader_sees_the_old_set_or_the_new_one_never_a_mix() {
     let r = reader(&path);
     assert_eq!(active_count(&r, SOURCE).unwrap(), 1_200);
 
-    let mut load = Load::begin(&mut store, SOURCE, &clock).unwrap();
+    let mut load = Load::begin(&mut store, SOURCE, &clock, LEASE).unwrap();
     assert!(load.generation() > g1);
     let batch: Vec<_> = (0..1_700).map(|i| fictive(i, "b")).collect();
     load.push(&batch[..VULN_BATCH * 2]).unwrap();
@@ -57,7 +59,15 @@ fn a_reader_sees_the_old_set_or_the_new_one_never_a_mix() {
     assert_eq!(old.len(), 1);
     assert!(advisory(&r, "GHSA-b-000001").unwrap().is_empty());
     load.push(&batch[VULN_BATCH * 2..]).unwrap();
-    let committed = load.commit(Some(&"0".repeat(64))).unwrap();
+    let committed = load
+        .commit(
+            &Tally::default(),
+            &SyncMeta {
+                sha256: Some("0".repeat(64)),
+                ..SyncMeta::default()
+            },
+        )
+        .unwrap();
     assert_eq!(committed.entries, 1_700);
     assert_eq!(active_count(&r, SOURCE).unwrap(), 1_700);
     assert!(advisory(&r, "GHSA-a-000001").unwrap().is_empty());
@@ -75,16 +85,16 @@ fn a_second_load_is_refused_while_the_lease_runs_and_no_generation_is_reused() {
     let clock = FakeClock::new(T0);
     let mut a = Store::open(&path).unwrap();
     let mut b = Store::open(&path).unwrap();
-    let load = Load::begin(&mut a, SOURCE, &clock).unwrap();
+    let load = Load::begin(&mut a, SOURCE, &clock, LEASE).unwrap();
     let ga = load.generation();
     clock.advance(LEASE - 1);
-    match Load::begin(&mut b, SOURCE, &clock) {
+    match Load::begin(&mut b, SOURCE, &clock, LEASE) {
         Err(LoadError::Busy { since }) => assert_eq!(since, T0),
         other => panic!("{:?}", other.map(|l| l.generation())),
     }
     load.abandon("arrêt du test").unwrap();
     // Bail rendu : un nouveau chargement prend une génération neuve.
-    let load = Load::begin(&mut b, SOURCE, &clock).unwrap();
+    let load = Load::begin(&mut b, SOURCE, &clock, LEASE).unwrap();
     assert!(load.generation() > ga);
     let row = &sources(&reader(&path)).unwrap()[0];
     assert_eq!(row.last_error.as_deref(), Some("arrêt du test"));
@@ -99,11 +109,11 @@ fn an_expired_lease_is_taken_over_and_the_old_commit_fails_without_mixing() {
     let mut b = Store::open(&path).unwrap();
     let g0 = load_all(&mut a, &clock, 10, "zero");
 
-    let mut old = Load::begin(&mut a, SOURCE, &clock).unwrap();
+    let mut old = Load::begin(&mut a, SOURCE, &clock, LEASE).unwrap();
     let old_batch: Vec<_> = (0..600).map(|i| fictive(i, "old")).collect();
     old.push(&old_batch[..VULN_BATCH]).unwrap();
     clock.advance(LEASE);
-    let mut new = Load::begin(&mut b, SOURCE, &clock).unwrap();
+    let mut new = Load::begin(&mut b, SOURCE, &clock, LEASE).unwrap();
     assert!(new.generation() > old.generation());
     // Bail revérifié à chaque lot : l'ancien s'arrête.
     assert!(matches!(
@@ -112,8 +122,11 @@ fn an_expired_lease_is_taken_over_and_the_old_commit_fails_without_mixing() {
     ));
     let new_batch: Vec<_> = (0..30).map(|i| fictive(i, "new")).collect();
     new.push(&new_batch).unwrap();
-    assert!(matches!(old.commit(None), Err(LoadError::Supplanted)));
-    let committed = new.commit(None).unwrap();
+    assert!(matches!(
+        old.commit(&Tally::default(), &SyncMeta::default()),
+        Err(LoadError::Supplanted)
+    ));
+    let committed = new.commit(&Tally::default(), &SyncMeta::default()).unwrap();
     let r = reader(&path);
     assert_eq!(active_count(&r, SOURCE).unwrap(), 30);
     assert!(advisory(&r, "GHSA-old-000001").unwrap().is_empty());
@@ -127,10 +140,13 @@ fn an_expired_lease_cannot_commit_even_without_a_rival() {
     let (_dir, path) = setup();
     let clock = FakeClock::new(T0);
     let mut store = Store::open(&path).unwrap();
-    let mut load = Load::begin(&mut store, SOURCE, &clock).unwrap();
+    let mut load = Load::begin(&mut store, SOURCE, &clock, LEASE).unwrap();
     load.push(&[fictive(1, "x")]).unwrap();
     clock.advance(LEASE);
-    assert!(matches!(load.commit(None), Err(LoadError::LeaseExpired)));
+    assert!(matches!(
+        load.commit(&Tally::default(), &SyncMeta::default()),
+        Err(LoadError::LeaseExpired)
+    ));
 }
 
 #[test]
@@ -140,7 +156,7 @@ fn an_interrupted_load_leaves_the_active_set_and_its_orphan_is_purged_later() {
     let mut store = Store::open(&path).unwrap();
     let g1 = load_all(&mut store, &clock, 20, "actif");
     let orphan = {
-        let mut load = Load::begin(&mut store, SOURCE, &clock).unwrap();
+        let mut load = Load::begin(&mut store, SOURCE, &clock, LEASE).unwrap();
         let batch: Vec<_> = (0..VULN_BATCH + 5).map(|i| fictive(i, "coupe")).collect();
         load.push(&batch[..VULN_BATCH]).unwrap();
         load.generation()
@@ -151,11 +167,11 @@ fn an_interrupted_load_leaves_the_active_set_and_its_orphan_is_purged_later() {
     assert_eq!(generations(&r, SOURCE).unwrap(), [g1, orphan]);
     // Bail toujours détenu : refusé ; expiré : repris, orpheline purgée.
     assert!(matches!(
-        Load::begin(&mut store, SOURCE, &clock),
+        Load::begin(&mut store, SOURCE, &clock, LEASE),
         Err(LoadError::Busy { .. })
     ));
     clock.advance(LEASE);
-    let load = Load::begin(&mut store, SOURCE, &clock).unwrap();
+    let load = Load::begin(&mut store, SOURCE, &clock, LEASE).unwrap();
     let g3 = load.generation();
     assert!(g3 > orphan);
     assert_eq!(generations(&r, SOURCE).unwrap(), [g1]);
@@ -170,12 +186,12 @@ fn purge_spares_the_active_and_leased_generations_in_batches() {
     let g1 = load_all(&mut store, &clock, 10, "actif");
     // Orpheline de plus d'un lot de purge (lignes affected et alias).
     {
-        let mut load = Load::begin(&mut store, SOURCE, &clock).unwrap();
+        let mut load = Load::begin(&mut store, SOURCE, &clock, LEASE).unwrap();
         let batch: Vec<_> = (0..PURGE_BATCH + 100).map(|i| fictive(i, "orph")).collect();
         load.push(&batch).unwrap();
         load.abandon("coupure").unwrap();
     }
-    let mut leased = Load::begin(&mut store, SOURCE, &clock).unwrap();
+    let mut leased = Load::begin(&mut store, SOURCE, &clock, LEASE).unwrap();
     leased.push(&[fictive(1, "bail")]).unwrap();
     let g3 = leased.generation();
     drop(leased);
@@ -215,13 +231,15 @@ fn counters_and_reads() {
         SourceEcosystem::Packagist,
         &mut tally,
     );
-    let mut load = Load::begin(&mut store, SOURCE, &clock).unwrap();
+    let mut load = Load::begin(&mut store, SOURCE, &clock, LEASE).unwrap();
     load.tally_mut().merge(&tally);
     load.tally_mut().add(Reason::BadJson);
     load.tally_mut().add(Reason::Withdrawn);
     load.push(&[twig.clone(), module, uneval, zzz.clone(), twig.clone()])
         .unwrap();
-    let committed = load.commit(None).unwrap();
+    let committed = load
+        .commit(&Tally::default(), &SyncMeta::default())
+        .unwrap();
     assert_eq!(committed.entries, 4);
     assert_eq!(committed.tally.get(Reason::DuplicateId), 1);
 

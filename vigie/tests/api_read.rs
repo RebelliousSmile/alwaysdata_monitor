@@ -100,6 +100,7 @@ fn site(id: &str, kind: SiteKind, interval: u64) -> Site {
         interval,
         agent_silence: 900,
         logs: None,
+        inventory: None,
     }
 }
 
@@ -578,6 +579,49 @@ async fn an_acked_incident_gets_no_more_reminders() {
         store.incident(other).unwrap().unwrap().last_reminder_at,
         Some(later)
     );
+}
+
+#[tokio::test]
+async fn a_watcher_incident_is_readable_and_ackable_but_in_no_site_view() {
+    // Incident `vulns-sync` du pseudo-site du veilleur (#16) : lisible et
+    // acquittable par son numéro, absent des vues par site (F7 pour la vue
+    // « veilleur »).
+    let v = Veilleur::new();
+    let id = v.open(
+        "_veilleur",
+        "vulns-sync",
+        Severity::Warning,
+        "osv-npm",
+        T0 - 60,
+    );
+    let token = v.token("pc").await;
+    let detail = v.get(&format!("/api/v1/incidents/{id}"), &token).await;
+    assert_eq!(detail.status, StatusCode::OK);
+    let json = detail.json();
+    assert_eq!(json["site"], "_veilleur");
+    assert_eq!(json["check"], "vulns-sync");
+    let reply = v
+        .call(Method::POST, &format!("/api/v1/incidents/{id}/ack"), &token)
+        .await;
+    assert_eq!(reply.status, StatusCode::OK);
+    assert_eq!(reply.json()["state"], "acked");
+    let overview = v.get("/api/v1/overview", &token).await;
+    assert_eq!(overview.status, StatusCode::OK);
+    assert!(
+        !String::from_utf8_lossy(&overview.body).contains("_veilleur"),
+        "{}",
+        String::from_utf8_lossy(&overview.body)
+    );
+    for path in [
+        "/api/v1/sites/_veilleur",
+        "/api/v1/sites/_veilleur/incidents",
+    ] {
+        assert_eq!(
+            v.get(path, &token).await.status,
+            StatusCode::NOT_FOUND,
+            "{path}"
+        );
+    }
 }
 
 #[tokio::test]

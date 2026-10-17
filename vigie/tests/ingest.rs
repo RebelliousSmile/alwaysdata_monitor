@@ -39,6 +39,7 @@ fn site() -> Site {
         interval: 86_400,
         agent_silence: 900,
         logs: None,
+        inventory: None,
     }
 }
 
@@ -48,6 +49,7 @@ fn config(dir: &Path) -> Config {
         api: None,
         commands: None,
         logs: Default::default(),
+        vulns: None,
         alerts: Alerts {
             to: "alertes@example.org".into(),
             from: "vigie@example.org".into(),
