@@ -61,6 +61,10 @@ jobs:
           curl -sSfL -o osv-scanner "https://github.com/google/osv-scanner/releases/download/v${OSV_SCANNER_VERSION}/osv-scanner_linux_amd64"
           echo "${OSV_SCANNER_SHA256}  osv-scanner" | sha256sum -c -
           chmod +x osv-scanner
+      # Un composer.lock périmé ne reflète pas composer.json : le scanner ne
+      # prouverait rien (sortie 2 sur un lock périmé).
+      - name: composer.lock à jour
+        run: composer validate --no-check-publish
       # Lockfiles nommés : un lockfile absent sort en 127 au lieu d'être sauté.
       # Tout code non nul fait échouer le job (1 = faille, 127 = erreur,
       # 128 = aucun paquet). Exceptions : osv-scanner.toml du dossier du
