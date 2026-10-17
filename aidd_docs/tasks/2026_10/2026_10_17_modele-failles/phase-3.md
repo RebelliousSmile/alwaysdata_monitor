@@ -1,5 +1,5 @@
 ---
-status: pending
+status: done
 ---
 
 # Instruction: Stockage par générations, CLI vigie vulns et documentation
@@ -71,7 +71,7 @@ journey
    - `push(&[Advisory])` : une transaction IMMEDIATE par lot de `VULN_BATCH` failles (réglé par la mesure du test de contention), lignes de la génération `g` ; chaque transaction revérifie le bail (`loading_generation = g`, non expiré, `active_generation` inchangée) et abandonne tôt avec `Supplanted` ou `LeaseExpired` ;
    - `commit(tally, sha256)` : une transaction courte, `UPDATE vuln_sources SET active_generation = g, loading_generation = NULL, … WHERE id = ? AND active_generation = <attendue> AND loading_generation = g` ; zéro ligne → `Supplanted`, `g` reste orpheline ; puis purge et `PRAGMA wal_checkpoint(PASSIVE)` ;
    - `purge(source, now)` : par lots, `DELETE FROM <table> WHERE rowid IN (SELECT rowid FROM <table> WHERE source = ? AND generation NOT IN (active, bail en cours) LIMIT n)`, enfants d'abord ; appelée aussi par `begin` ;
-   - lectures : `sources()`, `advisory(id_ou_alias)` (alias normalisé), `candidates(&Purl)` en une requête jointe sur `active_generation`, puis `range::match_advisory` en mémoire.
+   - lectures : `sources()`, `advisory(id_ou_alias)` (alias normalisé), `candidates(&Purl) -> Vec<Candidate>` en une requête jointe sur `active_generation` (instruction préparée réutilisable, `prepare_cached`), `Candidate { source, generation, advisory, lines, corrected }` (faille complète : alias, score en dixièmes, `malicious`, `informational`, références, `source_url`, licence, attribution ; `corrected` à `false` en F1, rempli par F3), puis `range::match_advisory` en mémoire ; `active_generations() -> Vec<(String, i64)>` (`vuln_sources.id`, `active_generation`), lecture légère sans compteur pour l'« époque » de F7 (#21).
 3. **CLI** dans `main.rs` : `vigie vulns sources | show <id|alias> | match <purl>`, `Store::open_read`, schéma vérifié contre `SCHEMA_VULNS` ; `match` imprime une ligne par faille (`id`, verdict, version corrigée, score et origine, drapeaux `divergence`, `beyond_last_known`, « paquet malveillant », « informational »), « version inconnue » ou « plage inconnue » pour `Unknown` ; `show` n'imprime que des champs assainis et bornés, licence et attribution comprises. `UsageError` typée, mappée sur le code 2 comme `ConfigError`.
 4. **Tests** : migration depuis la version 14 (`MIGRATIONS[..14]`, comme les tests existants) ; mise à jour des tests de `store.rs` qui figent `SCHEMA_REGISTRY` comme dernière version et de l'instantané `migration_files_build_the_expected_schema` ; `vulns_store.rs` (cas « Générations », lecteur sur `Store::open_read`, horloge injectée pour le bail, taille du WAL avant et après checkpoint) ; `vulns_cli.rs` (cas `cli`, sortie sans caractère de contrôle) ; `store_concurrency.rs` étendu.
 5. **Documentation** :

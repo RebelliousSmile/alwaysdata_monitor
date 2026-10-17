@@ -35,6 +35,9 @@ Sur le veilleur, toujours appeler le binaire par son chemin complet.
 | `~/vigie/bin/vigie device pair --name <nom>` | Crée un code d'appairage de la console, valable 10 min et une seule fois : l'affiche en QR code (terminal à fond sombre) et en lien `vigie://pair` ; exige la section `[api]` |
 | `~/vigie/bin/vigie device list` | Appareils (actif, vu il y a…, révoqué) et codes en attente, sans aucun secret |
 | `~/vigie/bin/vigie device revoke <id>` | Révoque un appareil : son jeton est refusé dès la requête suivante |
+| `~/vigie/bin/vigie vulns sources` | Sources de failles connues : licence, âge du dernier chargement, entrées, failles écartées et compteurs par raison, hors périmètre, licence inconnue (`docs/failles.md`) |
+| `~/vigie/bin/vigie vulns show <id\|alias>` | Détail d'une faille (GHSA-…, RUSTSEC-…, ou alias CVE-…) : alias, résumé, score et origine, CWE, composants, références, licence et attribution |
+| `~/vigie/bin/vigie vulns match <purl>` | Failles d'un composant (`pkg:composer/vendor/nom@1.2.0`) : une ligne par faille, version corrigée, score ; « version inconnue » ou « plage inconnue », jamais « aucune faille » ; code 2 sur un purl mal formé |
 | `~/vigie/bin/vigie test-alert` | Envoie un e-mail de test par le relais SMTP configuré |
 
 `/health` répond 200 si le dernier `tick` date de moins de 3 minutes, sinon 503.
