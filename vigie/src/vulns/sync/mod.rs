@@ -113,6 +113,11 @@ pub enum SyncError {
     Deadline,
     #[error("zip refusé : {0}")]
     Zip(&'static str),
+    /// Flux ou archive d'une source F3 illisible (JSON Wordfence, tar
+    /// Friends-Of-Presta) : chargement abandonné. Le texte ne cite que la
+    /// cause et, pour le JSON, la ligne et la colonne.
+    #[error("format refusé : {0}")]
+    Format(String),
     #[error("espace disque insuffisant : {needed} o nécessaires, {available} o libres")]
     Disk { needed: u64, available: u64 },
     #[error("fichier : {0}")]

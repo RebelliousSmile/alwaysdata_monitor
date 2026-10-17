@@ -19,6 +19,13 @@
 //!   `bad_severity`, `bad_last_known`, `bad_alias`, `bad_cwe` ; écart entre
 //!   `package.purl` d'OSV et le purl calculé : `purl_mismatch` (le purl
 //!   calculé l'emporte).
+//!
+//! Raisons propres aux sources de F3 : `bad_record` (enregistrement Wordfence
+//! dont `id` ou `software[]` n'a pas la forme attendue, faille perdue) ;
+//! `bad_published` (date de publication illisible alors qu'un repli fournit
+//! `modified`, faille gardée) ; `empty_copyrights`, `no_copyrights`,
+//! `attribution_overflow` (mention Wordfence vide, absente ou trop longue,
+//! remplacée par la mention fixe, faille gardée).
 
 use std::collections::BTreeMap;
 
@@ -83,6 +90,17 @@ pub enum Reason {
     PurlMismatch,
     BadAlias,
     BadCwe,
+    /// Wordfence : `id`, `software[]` ou `software[].type` / `slug` d'une
+    /// forme inattendue.
+    BadRecord,
+    /// Date de publication illisible ; `modified` vient d'un repli.
+    BadPublished,
+    /// Wordfence : `copyrights` vide (`{}`), mention fixe.
+    EmptyCopyrights,
+    /// Wordfence : `copyrights` absent ou illisible, mention fixe.
+    NoCopyrights,
+    /// Wordfence : mention de plus de 2 000 caractères, mention fixe.
+    AttributionOverflow,
 }
 
 impl Reason {
@@ -108,6 +126,11 @@ impl Reason {
             Self::PurlMismatch => "purl_mismatch",
             Self::BadAlias => "bad_alias",
             Self::BadCwe => "bad_cwe",
+            Self::BadRecord => "bad_record",
+            Self::BadPublished => "bad_published",
+            Self::EmptyCopyrights => "empty_copyrights",
+            Self::NoCopyrights => "no_copyrights",
+            Self::AttributionOverflow => "attribution_overflow",
         }
     }
 
@@ -124,7 +147,8 @@ impl Reason {
             | Self::BadDate
             | Self::DuplicateId
             | Self::NoAffected
-            | Self::BadEntryName => true,
+            | Self::BadEntryName
+            | Self::BadRecord => true,
             Self::Withdrawn
             | Self::NoAffectedOutOfScope
             | Self::BadPurl
@@ -137,12 +161,16 @@ impl Reason {
             | Self::BadLastKnown
             | Self::PurlMismatch
             | Self::BadAlias
-            | Self::BadCwe => false,
+            | Self::BadCwe
+            | Self::BadPublished
+            | Self::EmptyCopyrights
+            | Self::NoCopyrights
+            | Self::AttributionOverflow => false,
         }
     }
 
     /// Toutes les raisons, dans l'ordre d'affichage.
-    pub const ALL: [Reason; 20] = [
+    pub const ALL: [Reason; 25] = [
         Self::TooLarge,
         Self::BadJson,
         Self::BadId,
@@ -163,6 +191,11 @@ impl Reason {
         Self::PurlMismatch,
         Self::BadAlias,
         Self::BadCwe,
+        Self::BadRecord,
+        Self::BadPublished,
+        Self::EmptyCopyrights,
+        Self::NoCopyrights,
+        Self::AttributionOverflow,
     ];
 }
 
@@ -1129,7 +1162,8 @@ mod tests {
                 "bad_date",
                 "duplicate_id",
                 "no_affected",
-                "bad_entry_name"
+                "bad_entry_name",
+                "bad_record"
             ]
         );
         for r in Reason::ALL {
