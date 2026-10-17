@@ -61,11 +61,12 @@ journey
     Version d'inventaire dev-main ou absente => Unknown(VersionUnknown): 1: lib
   section Edge case - hostile
     Entrée withdrawn => ignorée, comptée: 1: lib
-    Entrée de 5 Mio, id de 65 caractères, modified absent, préfixe ZZZ- => faille écartée, raison comptée: 1: lib
+    Entrée de 5 Mio, id de 65 caractères, modified absent => faille écartée, raison comptée: 1: lib
+    Préfixe ZZZ- => faille gardée, licence inconnue, comptée unknown_license, visible dans vulns sources et show: 1: lib
     Même id deux fois dans un chargement => seconde écartée, comptée duplicate_id: 1: lib
     Nom de paquet hors grammaire => affected écarté, compté bad_purl: 1: lib
-    Paquet identifié, événement à deux clés ou borne de 65 caractères => affected gardé unevaluable, Unknown(RangeUnknown): 1: lib
-    versions[] avec une entrée de 74 caractères => entrée ignorée seule, plage gardée: 1: lib
+    Paquet identifié, événement à deux clés ou borne de 129 caractères => affected gardé unevaluable, Unknown(RangeUnknown): 1: lib
+    versions[] avec une entrée de 129 caractères => entrée ignorée seule ; version npm de 74 caractères acceptée, plage gardée: 1: lib
     affected PyPI ou Packagist:https://packages.drupal.org/8 dans un dump Packagist => ignoré, compté out_of_scope: 1: lib
     Référence javascript:, user:pass@ ; vecteur CVSS à métrique répétée ; provided_score 11 => retirés seuls, comptés: 1: lib
     Résumé avec ESC, U+202E et 600 caractères ; alias cve-2026-1 => U+FFFD, 500 caractères ; CVE-2026-1: 1: lib
