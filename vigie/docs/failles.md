@@ -157,7 +157,9 @@ comparateur Composer et se sert de `versions[]` comme contrôle croisé.
 - [V] Format OSV ; Composer, npm et crates.io couverts. Tous les GHSA sont dans
   les exports OSV : le dépôt n'est pas téléchargé à part.
 - [V] Couvre le **noyau PrestaShop** : l'API Packagist renvoie 31 avis pour
-  `prestashop/prestashop`, tous de source « GitHub ».
+  `prestashop/prestashop`, tous de source « GitHub ». Les modules natifs
+  (`prestashop/<module>`) ont aussi des GHSA ; les modules tiers ne sont
+  couverts que par Friends-Of-Presta.
 
 #### FriendsOfPHP/security-advisories (non importé séparément)
 
@@ -230,7 +232,7 @@ n'étant pas joignable du conteneur [NV] :
 | URL | archive `https://github.com/friends-of-presta/security-advisories/archive/refs/heads/main.tar.gz` [NV] (URL standard de GitHub, refusée dans le conteneur par la politique de la session) |
 | Authentification | aucune |
 | Licence | avis : **CC BY-SA 4.0**, d'après `_layouts/post.html` et `search.json` (« *This advisory and patch is licensed under https://creativecommons.org/licenses/by-sa/4.0/* ») [V]. Ambiguïté : `LICENSE.txt` à la racine est la licence MIT du thème minima, déclarée pour tout le dépôt [V]. Vigie retient CC BY-SA 4.0 pour les avis |
-| Usage | interne, affiché avec attribution ; aucune redistribution au sens de [Redistribution, affichage et fixtures](#redistribution-affichage-et-fixtures) : un document destiné à un client ne reprend que des faits, jamais le texte de l'avis |
+| Usage | interne, affiché avec attribution ; texte des avis jamais redistribué au sens de [Redistribution, affichage et fixtures](#redistribution-affichage-et-fixtures) : un document destiné à un client ne reprend que des faits, jamais le texte de l'avis |
 | Attribution | « Friends-Of-Presta, CC BY-SA 4.0 », avec un lien vers l'avis sur https://security.friendsofpresta.org |
 | Format | Markdown avec en-tête YAML, un fichier `_posts/AAAA-MM-JJ-<module>.md` par avis [V] |
 | Taille | non mesurée [NV] |
@@ -249,7 +251,9 @@ Champs utiles [V] :
 
 Les versions affectées ne sont pas un champ machine : l'import analyse
 `Impacted release` avec prudence ; une formulation non reconnue donne une
-faille « plage inconnue » (`decisions.md`). `search.json` et `feed.xml` ne
+faille « plage inconnue » ([Modèle interne et versions](#modèle-interne-et-versions)).
+Les avis de catégorie `dependancies` sont écartés
+([Correspondance source → purl](#correspondance-source--purl)). `search.json` et `feed.xml` ne
 contiennent pas les versions [V] : ils ne servent pas.
 
 ### CISA KEV
@@ -312,10 +316,10 @@ comparateur de l'écosystème.
 | paquet Composer | `pkg:composer/<vendor>/<nom>@<v>` | vendor et nom en minuscules [V] |
 | paquet npm | `pkg:npm/<nom>@<v>`, `pkg:npm/%40<scope>/<nom>@<v>` | scope en namespace, `@` encodé ; sensible à la casse (`case_sensitive: true` dans la définition officielle) : comparé tel quel |
 | crate | `pkg:cargo/<nom>@<v>` | pas de namespace ; sensible à la casse (`case_sensitive: true`) : comparé tel quel |
-| extension WordPress | `pkg:wordpress/plugin/<slug>@<v>` | proposition purl-spec n° 347 ; slug du répertoire wordpress.org, en minuscules |
+| extension WordPress | `pkg:wordpress/plugin/<slug>@<v>` | proposition purl-spec n° 347 ; slug du répertoire wordpress.org, tel quel (nom du dossier) |
 | thème WordPress | `pkg:wordpress/theme/<slug>@<v>` | idem |
 | noyau WordPress | `pkg:wordpress/core/core@<v>` | forme suggérée par la n° 347 |
-| module PrestaShop | `pkg:prestashop/module/<nom_technique>@<v>` | par symétrie, aucune proposition ; nom technique du module (nom de son dossier), en minuscules |
+| module PrestaShop | `pkg:prestashop/module/<nom_technique>@<v>` | par symétrie, aucune proposition ; nom technique du module (nom de son dossier), tel quel |
 | noyau PrestaShop | `pkg:prestashop/core/prestashop@<v>` | par symétrie |
 
 Seul `composer` passe en minuscules ; `npm` et `cargo` sont comparés tels
@@ -337,7 +341,7 @@ avec celui d'une autre extension de wordpress.org.
 | --- | --- | --- |
 | OSV `Packagist` | `affected[].package.name` = `vendor/nom` (ou `package.purl`, déjà en `pkg:composer/…` [V]) | `pkg:composer/vendor/nom` |
 | OSV `Packagist`, `prestashop/prestashop` | idem | `pkg:prestashop/core/prestashop` (le noyau est déclaré ainsi par l'extension) |
-| OSV `Packagist`, `prestashop/<x>` avec x ≠ `prestashop` | idem | `pkg:prestashop/module/<x>` : les modules natifs ont des GHSA |
+| OSV `Packagist`, `prestashop/<x>` avec x ≠ `prestashop` | idem | indexé sous **les deux** purl `pkg:composer/prestashop/<x>` et `pkg:prestashop/module/<x>` : les modules natifs ont des GHSA, mais le vendor publie aussi des bibliothèques (`decimal`, `circuit-breaker`…) déclarées en `pkg:composer` ; F5 retire déjà le doublon Composer des vrais modules |
 | OSV `npm` | `affected[].package.name` (`@scope/nom` ou `nom`) | `pkg:npm/%40scope/nom` ou `pkg:npm/nom` |
 | OSV `crates.io` | `affected[].package.name` | `pkg:cargo/nom` |
 | Wordfence, `software[].type` = `plugin` | `software[].slug` | `pkg:wordpress/plugin/<slug>` |
@@ -345,7 +349,7 @@ avec celui d'une autre extension de wordpress.org.
 | Wordfence, `software[].type` = `core` | — | `pkg:wordpress/core/core` |
 | Friends-Of-Presta, catégorie `modules` | `**Product**` | `pkg:prestashop/module/<product>` |
 | Friends-Of-Presta, catégorie `core` | — | `pkg:prestashop/core/prestashop` |
-| Friends-Of-Presta, catégorie `dependancies` | `**Product**` | écartée à l'import et comptée (`out_of_scope`) : ces avis visent des bibliothèques tierces embarquées dans des modules, détectées par OSV sur les composants composer/npm de l'inventaire. Limite : une bibliothèque copiée dans un module sans `composer.lock` n'est pas vue |
+| Friends-Of-Presta, catégorie `dependancies` | — | aucun : écarté à l'import et compté (raison `out_of_scope`) |
 | CISA KEV | `cveID` | aucun : enrichit les failles par CVE |
 | FIRST EPSS | `cve` | aucun : enrichit les failles par CVE |
 
@@ -355,14 +359,19 @@ avec celui d'une autre extension de wordpress.org.
   type `prestashop-module` est remplacé par le module de même nom, avec la
   version lue dans `modules/<x>/config.xml`, celle qui tourne réellement.
 - Côté WordPress : voir Bedrock ci-dessus.
+- Les avis Friends-Of-Presta de catégorie `dependancies` visent des
+  bibliothèques tierces embarquées dans des modules. Ces bibliothèques sont
+  détectées par OSV, sur les composants `composer` et `npm` de l'inventaire.
+  Limite : une bibliothèque copiée dans un module sans `composer.lock` n'est
+  pas vue.
 
 ## Inventaire reçu (CycloneDX)
 
 Le veilleur accepte un sous-ensemble strict de CycloneDX 1.6 et 1.7, par
 liste blanche. Un inventaire qui porte `authors`, `supplier`, `licenses` ou
-une propriété hors de l'espace `vigie:*` est refusé en entier (404 muet, compté au journal),
-pas seulement le champ : ces champs n'aident pas au rapprochement et peuvent
-porter des données du client.
+une propriété hors de l'espace `vigie:*` est refusé en entier, pas seulement
+le champ, par le 404 muet du point d'entrée, et compté au journal : ces champs
+n'aident pas au rapprochement et peuvent porter des données du client.
 
 ## Modèle interne et versions
 
@@ -375,8 +384,10 @@ porter des données du client.
   est lu quand aucun événement ne ferme la plage.
 - Le comparateur est choisi selon l'écosystème de la source
   (`affected[].package.ecosystem`, ou le type de la source pour Wordfence et
-  Friends-Of-Presta), jamais selon le site : Composer, npm et Cargo selon
-  semver, WordPress et PrestaShop selon la sémantique de `version_compare`.
+  Friends-Of-Presta), jamais selon le site : Composer selon `composer/semver` (normalisation de `VersionParser` puis `version_compare`)
+  (pré-versions comprises), npm et Cargo selon semver, WordPress et PrestaShop
+  selon la sémantique de `version_compare`. Chaque comparateur est écrit et
+  testé par Vigie.
 - `versions[]` sert de contrôle croisé des `ranges`, toujours évaluées.
 - Une version non analysable donne le constat « version inconnue », une plage
   libre de Friends-Of-Presta non reconnue le constat « plage inconnue », signalé
@@ -397,10 +408,14 @@ Aucun score n'est jamais calculé depuis un vecteur CVSS v4.
 | Gravité | Condition |
 | --- | --- |
 | critique | un CVE de la faille est dans KEV, ou entrée `MAL-` (paquet malveillant), ou CVSS ≥ 9,0 |
-| avertissement | CVSS ≥ 7,0, ou EPSS ≥ 0,1, ou gravité inconnue |
-| information | tout le reste, les entrées Wordfence `informational: true`, « version inconnue » et « plage inconnue » |
+| avertissement | CVSS ≥ 7,0, ou EPSS ≥ 0,1, ou gravité inconnue (sauf une entrée Wordfence `informational: true` sans score, classée information) ; « version inconnue » d'un composant qui a une faille critique |
+| information | tout le reste |
 
-Les règles se lisent de haut en bas : une faille qui relève d'une règle critique ou d'avertissement garde ce niveau même si Wordfence la marque `informational: true` ; ce drapeau ne classe en information qu'une faille qu'aucune autre règle ne retient.
+Les règles se lisent de haut en bas ; la première qui s'applique fixe la
+gravité. Une faille qui relève d'une règle critique ou d'avertissement garde
+ce niveau même si Wordfence la marque `informational: true` : ce drapeau ne
+classe en information qu'une faille qu'aucune autre règle ne retient.
+« Version inconnue » et « plage inconnue » sont de gravité information.
 
 « Aucun correctif » est toujours affiché et ne fait jamais baisser la gravité.
 
@@ -462,8 +477,9 @@ En HTTPS (443), en sortie seulement :
 | `epss.empiricalsecurity.com`, `epss.cyentia.com` | CSV EPSS (redirection entre les deux) |
 | `www.cisa.gov` | URL canonique de KEV, en secours du miroir |
 
-Aucun autre hôte : en particulier ni `api.osv.dev`, ni `api.first.org`, qui
-s'interrogent par composant ou par CVE.
+Aucun autre hôte depuis le VPS : en particulier ni `api.osv.dev`, ni
+`api.first.org`, qui s'interrogent par composant ou par CVE. Le contrôle des
+lockfiles de Vigie (F8) appelle `api.osv.dev` depuis la CI, pas depuis le VPS.
 
 ## À vérifier depuis le VPS
 
