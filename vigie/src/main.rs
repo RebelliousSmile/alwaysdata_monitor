@@ -232,7 +232,16 @@ enum SiteAction {
         #[arg(long, requires = "verify")]
         head: Option<String>,
     },
-    /// Retire la clé de l'agent et l'état de ses rapports
+    /// Clé d'inventaire du site (vigie-inventory en CI, issue #20) : ne
+    /// vérifie que /r/v1/inventory ; exige `ci` dans [sites.inventory]
+    InventoryKey {
+        /// Identifiant du site
+        id: String,
+        #[command(subcommand)]
+        action: InventoryKeyAction,
+    },
+    /// Retire les clés du site (agent et inventaire), l'état de ses rapports
+    /// et tout ce qu'il a envoyé
     Remove {
         /// Identifiant du site
         id: String,
@@ -240,6 +249,45 @@ enum SiteAction {
         #[arg(long)]
         yes: bool,
     },
+}
+
+#[derive(Debug, Subcommand)]
+enum InventoryKeyAction {
+    /// Enregistre la clé publique d'inventaire (sortie de `vigie-inventory keygen`)
+    Add {
+        /// Clé publique Ed25519, 32 octets en base64
+        #[arg(long)]
+        pubkey: String,
+    },
+    /// Remplace la clé d'inventaire : l'ancienne est refusée, l'inventaire reste
+    Rotate {
+        /// Nouvelle clé publique Ed25519, 32 octets en base64
+        #[arg(long)]
+        pubkey: String,
+    },
+    /// Retire la clé d'inventaire ; l'inventaire reçu reste
+    Remove {
+        /// Sans confirmation (sinon, retaper l'identifiant)
+        #[arg(long)]
+        yes: bool,
+    },
+}
+
+/// Refus d'une écriture de clé (site sans `ci`, clé déjà enregistrée) :
+/// rendu avec le code 2, comme une erreur de configuration.
+#[derive(Debug, thiserror::Error)]
+#[error("{0}")]
+struct KeyRefused(String);
+
+/// Une clé publique ne sert qu'une fois, toutes tables et tous sites
+/// confondus : le message ne dit ni quel site ni quel usage.
+fn in_use() -> anyhow::Error {
+    KeyRefused(
+        "clé déjà enregistrée (agent ou inventaire d'un site) : une clé ne sert qu'un usage, \
+         en générer une autre"
+            .into(),
+    )
+    .into()
 }
 
 fn main() -> ExitCode {
@@ -251,6 +299,7 @@ fn main() -> ExitCode {
             eprintln!("erreur : {err:#}");
             if err.downcast_ref::<ConfigError>().is_some()
                 || err.downcast_ref::<vulns::UsageError>().is_some()
+                || err.downcast_ref::<KeyRefused>().is_some()
             {
                 ExitCode::from(EXIT_CONFIG)
             } else {
@@ -398,13 +447,19 @@ fn site(config: &config::Config, action: SiteAction, now: i64) -> anyhow::Result
     match action {
         SiteAction::List => {
             let agents = read_agents(config)?;
+            let keys = match Store::open_read(&config.database)? {
+                Some(store) => store.sites_with_keys()?,
+                None => Vec::new(),
+            };
             for site in &config.sites {
                 let agent = agents.iter().find(|a| a.site == site.id);
+                let keys = keys.iter().find(|k| k.site == site.id);
                 println!(
-                    "{}\t{}\t{}\t{}",
+                    "{}\t{}\t{}\tinventaire : {}\t{}",
                     site.id,
                     site.url,
                     agent_state(site, agent, now),
+                    inventory_state(site, keys),
                     site.effective_runtime().map_or("-", Runtime::as_str)
                 );
             }
@@ -418,6 +473,7 @@ fn site(config: &config::Config, action: SiteAction, now: i64) -> anyhow::Result
                 KeyOutcome::AlreadyPresent => {
                     bail!("{id} a déjà une clé : `vigie site rotate-key {id}` pour la remplacer")
                 }
+                KeyOutcome::InUse { .. } => return Err(in_use()),
                 other => bail!("issue inattendue : {other:?}"),
             }
         }
@@ -434,6 +490,7 @@ fn site(config: &config::Config, action: SiteAction, now: i64) -> anyhow::Result
                     bail!("{id} n'a pas de clé : `vigie site add {id}` pour en enregistrer une")
                 }
                 KeyOutcome::Unchanged => bail!("{id} : cette clé est déjà la clé actuelle"),
+                KeyOutcome::InUse { .. } => return Err(in_use()),
                 other => bail!("issue inattendue : {other:?}"),
             }
         }
@@ -496,30 +553,144 @@ fn site(config: &config::Config, action: SiteAction, now: i64) -> anyhow::Result
             }
         }
         SiteAction::Audit { id, verify, head } => audit(config, &id, verify, head.as_deref())?,
+        SiteAction::InventoryKey { id, action } => inventory_key(config, &id, action, now)?,
         SiteAction::Remove { id, yes } => {
             if !config.database.is_file() {
                 bail!("{id} n'a pas de clé (base absente)");
             }
             if !yes {
-                eprint!("retirer la clé de l'agent de {id} ? retaper « {id} » pour confirmer : ");
-                let mut line = String::new();
-                std::io::stdin()
-                    .lock()
-                    .read_line(&mut line)
-                    .context("lecture de la confirmation")?;
-                if line.trim() != id {
-                    bail!("confirmation différente : rien n'est retiré");
-                }
+                confirm(
+                    &format!(
+                        "retirer les clés et inventaires de {id} ? retaper « {id} » pour confirmer : "
+                    ),
+                    &id,
+                )?;
             }
             let mut store = Store::open(&config.database)?;
             store.reset_commands(&id, now, audit_key(config)?.as_ref(), "site remove")?;
             if !store.remove_key(&id)? {
                 bail!("{id} n'a pas de clé");
             }
-            println!("clé de l'agent de {id} retirée : ses incidents seront clos au prochain tick");
+            println!(
+                "clés et inventaires de {id} retirés : ses incidents seront clos au prochain tick"
+            );
         }
     }
     Ok(())
+}
+
+/// Confirmation par l'identifiant retapé ; sinon rien n'est retiré.
+fn confirm(prompt: &str, id: &str) -> anyhow::Result<()> {
+    eprint!("{prompt}");
+    let mut line = String::new();
+    std::io::stdin()
+        .lock()
+        .read_line(&mut line)
+        .context("lecture de la confirmation")?;
+    if line.trim() != id {
+        bail!("confirmation différente : rien n'est retiré");
+    }
+    Ok(())
+}
+
+/// Sources d'inventaire du site dont la clé est enregistrée, pour `site
+/// list` : `agent`, `ci`, `agent+ci` ou `—`.
+fn inventory_state(site: &config::Site, keys: Option<&vigie::store::SiteKeys>) -> String {
+    let ready: Vec<&str> = capability::inventory_sources(site)
+        .into_iter()
+        .filter(|source| match source {
+            config::InventorySource::AgentPhp => keys.is_some_and(|k| k.agent),
+            config::InventorySource::Ci => keys.is_some_and(|k| k.inventory),
+        })
+        .map(|source| vigie::inventory::Source::from(source).as_str())
+        .collect();
+    if ready.is_empty() {
+        "—".into()
+    } else {
+        ready.join("+")
+    }
+}
+
+/// `site inventory-key` : clé d'inventaire d'un site qui déclare `ci`.
+fn inventory_key(
+    config: &config::Config,
+    id: &str,
+    action: InventoryKeyAction,
+    now: i64,
+) -> anyhow::Result<()> {
+    let Some(site) = config.sites.iter().find(|s| s.id == id) else {
+        return Err(KeyRefused(format!(
+            "aucun site « {id} » dans la configuration : l'y ajouter d'abord"
+        ))
+        .into());
+    };
+    let ci = capability::inventory_sources(site).contains(&config::InventorySource::Ci);
+    let writes = matches!(
+        action,
+        InventoryKeyAction::Add { .. } | InventoryKeyAction::Rotate { .. }
+    );
+    if writes && !ci {
+        return Err(KeyRefused(format!(
+            "{id} ne déclare pas la source ci : ajouter `sources = [\"ci\"]` à \
+             [sites.inventory] dans config.toml, puis relancer serve"
+        ))
+        .into());
+    }
+    match action {
+        InventoryKeyAction::Add { pubkey } => {
+            let key = parse_pubkey(&pubkey)?;
+            let mut store = Store::open(&config.database)?;
+            match store.add_inventory_key(id, &key, now)? {
+                KeyOutcome::Done => {
+                    println!("clé d'inventaire de {id} enregistrée");
+                    Ok(())
+                }
+                KeyOutcome::AlreadyPresent => bail!(
+                    "{id} a déjà une clé d'inventaire : `vigie site inventory-key {id} rotate` pour la remplacer"
+                ),
+                KeyOutcome::InUse { .. } => Err(in_use()),
+                other => bail!("issue inattendue : {other:?}"),
+            }
+        }
+        InventoryKeyAction::Rotate { pubkey } => {
+            let key = parse_pubkey(&pubkey)?;
+            let mut store = Store::open(&config.database)?;
+            match store.rotate_inventory_key(id, &key, now)? {
+                KeyOutcome::Done => {
+                    println!(
+                        "clé d'inventaire de {id} remplacée : l'ancienne est refusée, l'inventaire reste"
+                    );
+                    Ok(())
+                }
+                KeyOutcome::Missing => bail!(
+                    "{id} n'a pas de clé d'inventaire : `vigie site inventory-key {id} add` pour en enregistrer une"
+                ),
+                KeyOutcome::Unchanged => {
+                    bail!("{id} : cette clé est déjà la clé d'inventaire actuelle")
+                }
+                KeyOutcome::InUse { .. } => Err(in_use()),
+                other => bail!("issue inattendue : {other:?}"),
+            }
+        }
+        InventoryKeyAction::Remove { yes } => {
+            if !config.database.is_file() {
+                bail!("{id} n'a pas de clé d'inventaire (base absente)");
+            }
+            if !yes {
+                confirm(
+                    &format!(
+                        "retirer la clé d'inventaire de {id} ? retaper « {id} » pour confirmer : "
+                    ),
+                    id,
+                )?;
+            }
+            if !Store::open(&config.database)?.remove_inventory_key(id)? {
+                bail!("{id} n'a pas de clé d'inventaire");
+            }
+            println!("clé d'inventaire de {id} retirée : l'inventaire reçu reste");
+            Ok(())
+        }
+    }
 }
 
 fn ack(config: &config::Config, id: i64, now: i64) -> anyhow::Result<()> {

@@ -3,7 +3,7 @@
 //! CycloneDX 1.6 et 1.7.
 //!
 //! ```text
-//! {"v":1,"type":"inventory","site","seq","sent_at","agent","complete","skipped",
+//! {"v":1,"type":"inventory","site","source"?,"seq","sent_at","agent","complete","skipped",
 //!  "bom":{"bomFormat":"CycloneDX","specVersion","serialNumber",
 //!         "metadata":{"timestamp","component":{"type":"application","name":<site>}},
 //!         "components":[{"type","name","version","purl","scope","properties"}]}}
@@ -24,7 +24,7 @@ use sha2::{Digest, Sha256};
 
 use super::{
     Component, ComponentType, Inventory, MAX_COMPONENTS, MAX_NAME_CHARS, MAX_PATH_CHARS,
-    MAX_SKIPPED, Scope,
+    MAX_SKIPPED, Scope, Source,
 };
 use crate::capability;
 use crate::command::printable;
@@ -55,6 +55,9 @@ struct Envelope {
     #[serde(rename = "type")]
     kind: String,
     site: String,
+    /// `agent` ou `ci` (#20) ; absent = `agent` (agents 0.5.0).
+    #[serde(default)]
+    source: Option<Source>,
     seq: i64,
     sent_at: i64,
     agent: String,
@@ -196,6 +199,7 @@ pub fn parse(body: &[u8], site: &str, kind: SiteKind) -> Result<Inventory, Schem
     let digest = digest(&components);
     Ok(Inventory {
         site: envelope.site,
+        source: envelope.source.unwrap_or(Source::Agent),
         seq: envelope.seq,
         sent_at: envelope.sent_at,
         agent: envelope.agent,

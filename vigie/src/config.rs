@@ -152,29 +152,97 @@ impl SiteLogs {
     }
 }
 
-/// `[sites.inventory]` : source de l'inventaire des composants du site
-/// (issue #19). Sans elle, `/r/v1/inventory` refuse le site avant de lire le
-/// corps, et le contrôle `vulns` (F7) n'existe pas : « surveillé » se lit
-/// dans la configuration du veilleur, jamais dans ce qu'un agent envoie.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
+/// `[sites.inventory]` : sources de l'inventaire des composants du site
+/// (issues #19 et #20). Sans elle, `/r/v1/inventory` refuse le site avant de
+/// lire le corps, et le contrôle `vulns` (F7) n'existe pas : « surveillé » se
+/// lit dans la configuration du veilleur, jamais dans ce qu'un agent envoie.
+///
+/// Deux formes, exclusives : `source = "agent-php"` (forme de F5, lue comme
+/// une liste d'un élément) ou `sources = ["agent-php", "ci"]` (1 ou 2 valeurs
+/// distinctes, vérifiées par `Config::validate`).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(try_from = "RawSiteInventory")]
 pub struct SiteInventory {
-    pub source: InventorySource,
+    pub sources: Vec<InventorySource>,
 }
 
-/// Source d'inventaire : liste fermée (#20 ajoutera la sienne).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+impl SiteInventory {
+    pub fn new(sources: &[InventorySource]) -> Self {
+        Self {
+            sources: sources.to_vec(),
+        }
+    }
+
+    /// 1 ou 2 sources distinctes ; `agent-php` seul exige le runtime
+    /// effectif `php` (règle de F5, message inchangé).
+    fn validate(&self, site: &Site) -> Result<(), String> {
+        if self.sources.is_empty() {
+            return Err("sources : une valeur au moins".into());
+        }
+        let mut seen = self.sources.clone();
+        seen.sort_unstable();
+        seen.dedup();
+        if seen.len() != self.sources.len() {
+            return Err("sources : valeur en double".into());
+        }
+        for source in &self.sources {
+            match source {
+                InventorySource::AgentPhp if site.effective_runtime() != Some(Runtime::Php) => {
+                    return Err(format!(
+                        "source = \"{}\" exige le runtime php (reçu : {})",
+                        source.as_str(),
+                        site.effective_runtime().map_or("-", Runtime::as_str)
+                    ));
+                }
+                InventorySource::AgentPhp | InventorySource::Ci => {}
+            }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawSiteInventory {
+    source: Option<InventorySource>,
+    sources: Option<Vec<InventorySource>>,
+}
+
+impl TryFrom<RawSiteInventory> for SiteInventory {
+    type Error = &'static str;
+
+    fn try_from(raw: RawSiteInventory) -> Result<Self, Self::Error> {
+        match (raw.source, raw.sources) {
+            (Some(source), None) => Ok(Self {
+                sources: vec![source],
+            }),
+            (None, Some(sources)) => Ok(Self { sources }),
+            (Some(_), Some(_)) => Err("source et sources ensemble : n'en garder qu'une"),
+            (None, None) => Err("source ou sources attendu"),
+        }
+    }
+}
+
+/// Source d'inventaire : liste fermée.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum InventorySource {
     /// L'agent PHP relève les composants du site (`docs/agent-php.md`) ;
     /// exige le runtime effectif `php`.
     AgentPhp,
+    /// `vigie-inventory` lit les lockfiles du projet au déploiement et pousse
+    /// l'inventaire sous la clé d'inventaire du site (`docs/inventaire.md`) ;
+    /// admis quel que soit le runtime, même absent.
+    Ci,
 }
 
 impl InventorySource {
+    pub const ALL: [Self; 2] = [Self::AgentPhp, Self::Ci];
+
     pub fn as_str(self) -> &'static str {
         match self {
             Self::AgentPhp => "agent-php",
+            Self::Ci => "ci",
         }
     }
 }
@@ -322,6 +390,14 @@ impl Site {
             SiteKind::Wordpress | SiteKind::Prestashop => Some(Runtime::Php),
             SiteKind::Generic => None,
         })
+    }
+
+    /// Sources d'inventaire déclarées (`[sites.inventory]`), dans l'ordre de
+    /// la configuration ; vide sans la section.
+    pub fn inventory_sources(&self) -> Vec<InventorySource> {
+        self.inventory
+            .as_ref()
+            .map_or_else(Vec::new, |inventory| inventory.sources.clone())
     }
 
     pub fn content_url(&self) -> &str {
@@ -609,17 +685,9 @@ impl Config {
                 ));
             }
             if let Some(inventory) = &site.inventory {
-                match inventory.source {
-                    InventorySource::AgentPhp if site.effective_runtime() != Some(Runtime::Php) => {
-                        return Err(format!(
-                            "inventory du site « {} » : source = \"{}\" exige le runtime php (reçu : {})",
-                            site.id,
-                            inventory.source.as_str(),
-                            site.effective_runtime().map_or("-", Runtime::as_str)
-                        ));
-                    }
-                    InventorySource::AgentPhp => {}
-                }
+                inventory
+                    .validate(site)
+                    .map_err(|err| format!("inventory du site « {} » : {err}", site.id))?;
             }
             if let Some(logs) = &site.logs {
                 logs.validate()

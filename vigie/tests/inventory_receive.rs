@@ -18,7 +18,7 @@ use vigie::clock::{Clock, FakeClock};
 use vigie::command::key::{self, DOMAIN_INVENTORY};
 use vigie::config::{Alerts, Config, InventorySource, Runtime, Site, SiteInventory, SiteKind};
 use vigie::ingest::{HEADER_SIGNATURE, HEADER_SITE};
-use vigie::inventory::{MAX_INVENTORY_BYTES, Scope, bom};
+use vigie::inventory::{MAX_INVENTORY_BYTES, Scope, Source, bom};
 use vigie::serve;
 use vigie::store::{InventoryHead, Store};
 use vigie::vulns::purl::PurlType;
@@ -72,9 +72,7 @@ fn site(id: &str, kind: SiteKind, inventory: bool) -> Site {
         interval: 300,
         agent_silence: 900,
         logs: None,
-        inventory: inventory.then_some(SiteInventory {
-            source: InventorySource::AgentPhp,
-        }),
+        inventory: inventory.then(|| SiteInventory::new(&[InventorySource::AgentPhp])),
     }
 }
 
@@ -126,11 +124,16 @@ impl Harness {
         let dir = tempfile::tempdir().expect("tempdir");
         let config = config(dir.path());
         let key = agent_key();
-        let mut store = Store::open(&config.database).expect("base");
+        Store::open(&config.database).expect("base");
+        // Une même clé pour les trois sites, posée en base comme dans une base
+        // d'avant #20 : `add_key` refuse désormais une clé déjà enregistrée.
+        let raw = rusqlite::Connection::open(&config.database).expect("sqlite");
         for id in ["site-a", "site-b", "site-c"] {
-            store
-                .add_key(id, &key.verifying_key().to_bytes(), now - 600)
-                .expect("add_key");
+            raw.execute(
+                "INSERT INTO site_keys (site, pubkey, added_at) VALUES (?1, ?2, ?3)",
+                rusqlite::params![id, key.verifying_key().to_bytes().as_slice(), now - 600],
+            )
+            .expect("clé");
         }
         Self {
             config,
@@ -208,7 +211,7 @@ impl Harness {
 
     fn last(&self, site: &str) -> InventoryHead {
         self.reader()
-            .last_inventory(site)
+            .last_inventory(site, Source::Agent)
             .expect("lecture")
             .expect("inventaire")
     }
@@ -233,6 +236,14 @@ impl Harness {
             )
             .expect("dropped")
     }
+}
+
+/// Sites dont la source `agent` est déclarée, pour `purge_inventory`.
+fn agent_sources(sites: &[&str]) -> Vec<(String, Source)> {
+    sites
+        .iter()
+        .map(|s| ((*s).to_owned(), Source::Agent))
+        .collect()
 }
 
 fn iso(secs: i64) -> String {
@@ -328,7 +339,10 @@ async fn an_inventory_is_stored_resent_unchanged_then_replaced() {
     components(&mut doc)[1]["version"] = json!("5.9.4");
     components(&mut doc)[1]["purl"] = json!("pkg:wordpress/plugin/exemple-formulaire@5.9.4");
     assert_eq!(h.send(&doc).await, StatusCode::NO_CONTENT);
-    let history = h.reader().inventory_history("site-a").expect("historique");
+    let history = h
+        .reader()
+        .inventory_history("site-a", Source::Agent)
+        .expect("historique");
     assert_eq!(history.len(), 2);
     assert!(history[0].id > history[1].id, "plus récent d'abord");
     assert_eq!(history[0], h.last("site-a"));
@@ -378,10 +392,15 @@ async fn heads_list_the_last_inventory_of_each_site_without_reading_components()
     );
     assert_eq!(heads[0], h.last("site-a"));
     assert_eq!(heads[1], h.last("site-b"));
-    assert_eq!(h.reader().last_inventory("site-c").expect("lecture"), None);
+    assert_eq!(
+        h.reader()
+            .last_inventory("site-c", Source::Agent)
+            .expect("lecture"),
+        None
+    );
     assert!(
         h.reader()
-            .inventory_history("site-c")
+            .inventory_history("site-c", Source::Agent)
             .expect("lecture")
             .is_empty()
     );
@@ -896,7 +915,7 @@ async fn remove_purges_and_rotate_keeps_the_inventory() {
     assert_eq!(seq, 0);
     assert!(
         h.reader()
-            .last_inventory("site-a")
+            .last_inventory("site-a", Source::Agent)
             .expect("lecture")
             .is_some()
     );
@@ -925,7 +944,7 @@ async fn tick_keeps_the_last_inventory_and_30_days_of_history() {
     let mut doc = h.site_a();
     components(&mut doc).pop();
     assert_eq!(h.send(&doc).await, StatusCode::NO_CONTENT);
-    let declared = ["site-a", "site-b"];
+    let declared = agent_sources(&["site-a", "site-b"]);
     // J+29 : rien ne part.
     assert_eq!(
         h.store()
@@ -938,7 +957,7 @@ async fn tick_keeps_the_last_inventory_and_30_days_of_history() {
     assert_eq!(h.store().purge_inventory(at, &declared).expect("purge"), 1);
     assert_eq!(
         h.reader()
-            .inventory_history("site-a")
+            .inventory_history("site-a", Source::Agent)
             .expect("historique")
             .len(),
         1
@@ -946,10 +965,17 @@ async fn tick_keeps_the_last_inventory_and_30_days_of_history() {
     assert_eq!(h.purls("site-a").len(), 11);
     // site-b ne déclare plus [sites.inventory] depuis 31 jours : purgé aussi.
     assert_eq!(
-        h.store().purge_inventory(at, &["site-a"]).expect("purge"),
+        h.store()
+            .purge_inventory(at, &agent_sources(&["site-a"]))
+            .expect("purge"),
         1
     );
-    assert_eq!(h.reader().last_inventory("site-b").expect("lecture"), None);
+    assert_eq!(
+        h.reader()
+            .last_inventory("site-b", Source::Agent)
+            .expect("lecture"),
+        None
+    );
     assert_eq!(
         h.count(
             "SELECT count(*) FROM site_inventory_components c
@@ -959,7 +985,7 @@ async fn tick_keeps_the_last_inventory_and_30_days_of_history() {
     );
     assert!(
         h.reader()
-            .last_inventory("site-a")
+            .last_inventory("site-a", Source::Agent)
             .expect("lecture")
             .is_some()
     );
@@ -975,5 +1001,10 @@ async fn tick_keeps_the_last_inventory_and_30_days_of_history() {
         &vigie::alert::MemoryNotifier::default(),
     );
     summary.expect("tick");
-    assert_eq!(h.reader().last_inventory("site-a").expect("lecture"), None);
+    assert_eq!(
+        h.reader()
+            .last_inventory("site-a", Source::Agent)
+            .expect("lecture"),
+        None
+    );
 }

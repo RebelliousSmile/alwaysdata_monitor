@@ -10,9 +10,9 @@
 //! - Chaque **commande** ([`CommandKind`]) déclare les runtimes qui
 //!   l'admettent ; un site sans runtime (`generic` non déclaré) n'en admet
 //!   aucune.
-//! - L'**inventaire** des composants (#19) : [`inventory_source`] ouvre
-//!   `/r/v1/inventory` et sera la condition d'existence du contrôle `vulns`
-//!   (F7) ; [`inventory_ecosystems`] fixe les écosystèmes purl admis selon le
+//! - L'**inventaire** des composants (#19, #20) : [`inventory_sources`]
+//!   ouvre `/r/v1/inventory` et sera la condition d'existence du contrôle
+//!   `vulns` (F7, [`Needs::InventorySource`]) ; [`inventory_ecosystems`] fixe les écosystèmes purl admis selon le
 //!   CMS du site.
 //!
 //! Les listes sont fermées et codées en dur, par des `match` sans joker : une
@@ -105,6 +105,9 @@ pub enum Needs {
     LogSource,
     /// Agent enregistré sur un site dont le runtime effectif n'est pas `php`.
     AgentWithoutPhp,
+    /// Au moins une source d'inventaire déclarée ([`inventory_sources`]) :
+    /// condition du contrôle `vulns` (F7). La clé d'inventaire n'y entre pas.
+    InventorySource,
 }
 
 /// Ce que le veilleur sait d'un site hors de sa configuration : lu en base
@@ -213,6 +216,7 @@ impl Control {
             Needs::PhpAgentAndBaseline => ctx.agent && php && ctx.baseline,
             Needs::LogSource => site.logs.as_ref().is_some_and(|l| l.source.is_some()),
             Needs::AgentWithoutPhp => ctx.agent && !php,
+            Needs::InventorySource => !inventory_sources(site).is_empty(),
         }
     }
 
@@ -274,11 +278,20 @@ pub fn typology_findings(site: &Site, ctx: &Ctx) -> Vec<Finding> {
     )]
 }
 
-/// Source d'inventaire déclarée du site (`[sites.inventory]`) : seule porte
-/// de `/r/v1/inventory`, et future condition `Needs::InventorySource` du
-/// contrôle `vulns` (F7). `None` : inventaire refusé avant lecture du corps.
-pub fn inventory_source(site: &Site) -> Option<InventorySource> {
-    site.inventory.map(|inventory| inventory.source)
+/// Sources d'inventaire déclarées du site (`[sites.inventory]`), dans l'ordre
+/// de la configuration : seule porte de `/r/v1/inventory` et condition
+/// [`Needs::InventorySource`] du contrôle `vulns` (F7). Vide : inventaire
+/// refusé avant lecture du corps. `agent-php` n'est admis qu'au runtime
+/// effectif `php` et `ci` pour tout runtime : `config.rs` l'a vérifié au
+/// chargement.
+pub fn inventory_sources(site: &Site) -> Vec<InventorySource> {
+    site.inventory_sources()
+        .into_iter()
+        .filter(|source| match source {
+            InventorySource::AgentPhp => site.effective_runtime() == Some(Runtime::Php),
+            InventorySource::Ci => true,
+        })
+        .collect()
 }
 
 /// Écosystèmes purl admis dans l'inventaire d'un site, selon son CMS (lu
