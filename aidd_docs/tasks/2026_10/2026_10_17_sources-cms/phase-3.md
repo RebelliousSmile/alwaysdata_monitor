@@ -18,10 +18,12 @@ Les deux convertisseurs deviennent des sources du cadre de synchronisation de F2
     │   ├── command/key.rs                 ✏️ utilise secret.rs (règles inchangées, tests existants verts)
     │   ├── config.rs                      ✏️ [vulns] de F2 : identifiants wordfence et friends-of-presta dans la liste fermée ; [vulns.wordfence] { token_file (absolu), terms_reviewed (AAAA-MM-JJ) } ; deny_unknown_fields
     │   └── vulns/
-    │       └── sources/
-    │           ├── wordfence.rs           ✏️ impl VulnSource : SourceMeta (intervalle minimal 30 min, max_dropped_ratio 1 %, Redistribution::Internal, plafonds) ; ready() (verrou) ; fetch() (verrou revérifié, Bearer en HeaderValue sensible, seul hôte www.wordfence.com, 401/403 par SyncError::Status)
-    │           ├── friends_of_presta.rs   ✏️ impl VulnSource : fetch() (archive, redirection github.com → codeload.github.com, conditionnel), plafonds
-    │           └── mod.rs                 ✏️ enregistrement des deux sources dans le registre de F2 (actives si déclarées dans [vulns] sources)
+    │       ├── sources/
+    │       │   ├── wordfence.rs           ✏️ impl VulnSource : SourceMeta (intervalle minimal 30 min, max_dropped_ratio 1 %, Redistribution::Internal, plafonds) ; ready() (verrou) ; fetch() (verrou revérifié, Bearer en HeaderValue sensible, seul hôte www.wordfence.com, 401/403 par SyncError::Status)
+    │       │   ├── friends_of_presta.rs   ✏️ impl VulnSource : fetch() (archive, redirection github.com → codeload.github.com, conditionnel), plafonds
+    │       │   └── mod.rs                 ✏️ enregistrement des deux sources dans le registre de F2 (actives si déclarées dans [vulns] sources)
+    │       └── sync/
+    │           └── registry.rs            ✏️ (F2) KNOWN += wordfence, friends-of-presta ; redistribution(source_id: &str) -> Option<Redistribution>
     └── tests/
         ├── vulns_cms_sync.rs              ✅ synchronisation par le serveur HTTPS de test de F2, sur fixtures fictives ; vigie vulns match de bout en bout
         └── config_edges.rs                ✏️ [vulns.wordfence] : chemin relatif, date invalide, clé inconnue
@@ -61,6 +63,7 @@ journey
     vigie vulns match pkg:prestashop/module/exemplemodule@1.5.0 => FOP-… touchée, corrigée en 1.5.1, « faits seulement »: 5: cli
     vigie vulns match pkg:prestashop/module/modulelibre@3.0.0 => « plage inconnue », jamais « aucune faille »: 1: cli
     vigie vulns sources => wordfence et friends-of-presta : licence, redistribution, révision, entrées, écartées par raison, out_of_scope, lignes unevaluable: 5: cli
+    registry::redistribution(wordfence | friends-of-presta | osv-packagist | kev) => Some(Internal | FactsOnly | Free | Free) ; chaque identifiant de KNOWN => Some ; identifiant inconnu ou vide => None: 1: lib
     Écartées au-delà de 1 % selon Reason::is_drop (bad_record en masse) => source en échec par max_dropped_ratio de F2, génération active intacte ; 50 % de empty_copyrights => synchronisée: 1: lib
   section Échecs
     Flux Wordfence tronqué, de 513 Mio, trop lent => source en échec, génération active intacte: 1: lib
@@ -76,7 +79,7 @@ journey
    - `ready()` : constante `None` → `NotReady::TermsNotReviewed` ; date différente → `NotReady::TermsMismatch { binaire, config }` ; jeton illisible → `NotReady::Token(raison)` ; chaque refus est enregistré dans `vuln_sources.last_error` (texte fixe, sans jeton) et visible dans `vulns sources` ; le débit n'est **pas** vérifié ici (F2 le fait pour toutes les sources) ;
    - `fetch()` : **revérifie** la constante et `terms_reviewed` (refus sans requête si `fetch` est appelé sans `ready`) ; GET `https://www.wordfence.com/api/intelligence/v3/vulnerabilities/production` par `Download`, `Authorization` en en-tête sensible, aucun `Content-Encoding` demandé (règle F2), conditionnel si F2 a gardé un ETag ou un Last-Modified ; statuts non 2xx/304 rendus par `SyncError::Status` de F2 (401 → `SyncError::Unauthorized`, 403 → `SyncError::Forbidden`, noms de F2, affichés « jeton refusé », sans corps ; 429 et `Retry-After` gérés par F2) ; puis `parse_feed` (phase 1) sur le fichier du dossier de travail, vers le `Sink` de F2.
 4. **`impl VulnSource for FriendsOfPresta`** : `SourceMeta` (URL du plan, hôtes `github.com` et `codeload.github.com`, licence `CC-BY-SA-4.0`, `Redistribution::FactsOnly`, `LOADER_VERSION = 1`, `max_dropped_ratio` 1 %, plafonds : archive 64 Mio, décompressé 512 Mio, 50 000 membres, avis 1 Mio, durée 10 min) ; conditionnel et SHA-256 par F2 ; `parse_archive` (phase 2) ; révision (commit) rendue pour `vuln_sources`.
-5. **Registre** : les deux sources enregistrées auprès de F2, actives si déclarées ; le niveau de redistribution d'un identifiant est un `match` **sans joker** sur toutes les sources connues, F4 comprises (`osv-packagist`, `osv-npm`, `osv-crates-io`, KEV, EPSS → `Free`) ; `vigie vulns sources` imprime aussi `redistribution` (`interne`, `faits seulement`, `libre`) et la révision.
+5. **Registre** : les deux sources enregistrées auprès de F2, actives si déclarées ; `pub fn redistribution(source_id: &str) -> Option<Redistribution>` dans `vulns/sync/registry.rs` (lu par F7 sous ce nom) : `match` avec un bras explicite par identifiant de `KNOWN`, F4 comprises (`wordfence` → `Internal`, `friends-of-presta` → `FactsOnly`, `osv-packagist`, `osv-npm`, `osv-crates-io`, `kev`, `epss` → `Free`), seul le bras final `_ => None` pour un identifiant inconnu (F7 le traite comme `Internal`) ; test `redistribution_covers_known` : `Some` pour chaque identifiant de `KNOWN`, égal au `SourceMeta.redistribution` de la source quand elle en a un, `None` pour `inconnue` et la chaîne vide ; `vigie vulns sources` imprime aussi `redistribution` (`interne`, `faits seulement`, `libre`) et la révision.
 6. **Tests** `vulns_cms_sync.rs` sur le serveur HTTPS de test de F2 (autorité de test, `Trust::Custom`) et l'horloge injectée : cas du Test Scope ; les URL de production sont remplacées par `SyncOptions::endpoint_override` de F2 (construit par le code, jamais par la configuration) ; le verrou se teste en passant la date de relecture en paramètre (`ready_with(reviewed: Option<&str>, …)`, que `ready()` appelle avec la constante), la constante réelle restant `None` : aucun `cfg(test)` ne modifie le verrou.
 
 ## Test acceptance criteria
@@ -87,5 +90,5 @@ journey
 | 2 | `config_edges.rs` vert ; une section `[vulns.wordfence]` avec un binaire à `None` n'empêche ni `serve` ni `tick` de démarrer |
 | 3 | Cas « Verrou », « Jeton » et « Débit » verts ; aucune requête n'atteint le serveur de test sans verrou ouvert, y compris par un appel direct de `fetch` ; débit et `Retry-After` tenus par le seul mécanisme de F2 (aucune colonne ni compteur ajouté par F3) |
 | 4 | Cas « Friends-Of-Presta » verts ; aucune requête hors des hôtes autorisés |
-| 5-6 | Cas « Bout en bout » et « Échecs » verts ; une source en échec laisse la génération active intacte ; « plage inconnue » jamais rendue comme « aucune faille » |
+| 5-6 | Cas « Bout en bout » et « Échecs » verts ; `redistribution_covers_known` vert, aucun identifiant de `KNOWN` sans niveau ; une source en échec laisse la génération active intacte ; « plage inconnue » jamais rendue comme « aucune faille » |
 | 1-6 | fmt, clippy, tests verts sur Linux et Windows ; musl vert ; `check-tls-deps.sh` vert ; `Cargo.lock` sans crate nouvelle |
