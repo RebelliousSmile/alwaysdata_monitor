@@ -419,6 +419,10 @@ Côté extension (agent PHP 0.5.0, `agent-php.md`) :
 - **Alias npm** : nom réel lu dans le champ `name` de l'entrée, sinon après le
   dernier `node_modules/` de la clé ; vecteurs communs à l'agent et à l'outil
   dans `tests/fixtures/inventory/npm-alias.json` (`[{key, entry, out, why}]`).
+- **Outil de CI** (`vigie-inventory`, #20, `inventaire.md`) : mêmes règles
+  de registre, d'alias et de doublons pour `composer.lock` et
+  `package-lock.json` (test de parité sur les fixtures de l'agent), plus
+  `pnpm-lock.yaml`, `yarn.lock` et `Cargo.lock` ; inventaire de source `ci`.
 - **Limites V1** : disposition Bedrock complète, `roots/wordpress` et
   `johnpbloch/wordpress` comme cœur, `vendor/composer/installed.json` seul,
   `package-lock.json` v1, yarn et pnpm (outil #20), drop-ins, thèmes
@@ -672,12 +676,25 @@ classe en information qu'une faille qu'aucune autre règle ne retient.
 ## Contrôle `vulns`
 
 - Déclaré dans le registre de capacités (#4).
-- Surveillé si le site a une source d'inventaire : agent PHP avec inventaire
-  activé, ou clé d'inventaire enregistrée (#20). Les sites `node` et `static`
-  sont donc couverts par la clé d'inventaire.
-- Sans inventaire reçu depuis plus de 7 jours : constat d'avertissement
-  « inventaire périmé ». Le contrôle reste surveillé : jamais de perte de
-  surveillance en silence.
+- Surveillé si le site déclare une source d'inventaire dans `[sites.inventory]`
+  (`capability::inventory_sources` non vide) : `agent-php` (agent PHP avec
+  inventaire, runtime `php`) ou `ci` (`vigie-inventory`, #20, tout runtime).
+  Les sites `node` et `static` sont donc couverts par la source `ci`. La clé
+  d'inventaire n'entre pas dans la condition : elle n'est admise que pour un
+  site qui déclare `ci`.
+- Péremption **par source** (`inventory::stale_after`) : sans inventaire
+  `agent` depuis plus de 7 jours, ou sans inventaire `ci` depuis plus de
+  35 jours (le job planifié hebdomadaire de la CI le renvoie), constat
+  d'avertissement « inventaire périmé ». Le contrôle reste surveillé : jamais
+  de perte de surveillance en silence.
+- **Règles pour F7 (#21)** : un inventaire `ci`, même complet, ne clôt jamais
+  un constat vu sur l'inventaire `agent` : il décrit ce qui va être déployé,
+  pas ce qui tourne (un déploiement raté laisse l'ancien code). L'absence d'un
+  composant se juge par source : seul un inventaire `complete` d'une source
+  vaut absence pour cette source. F7 dit d'où vient chaque composant.
+- Dépendances hors registre (git, `file:`, archive, chemin, autre registre ;
+  Composer sans `notification-url` hors WPackagist) : comptées dans `skipped`
+  par l'agent comme par l'outil, donc inventaire incomplet.
 - Sources consultées : Wordfence pour un site `wordpress`, Friends-Of-Presta
   pour un site `prestashop`, OSV pour tout composant `composer`, `npm` ou
   `cargo`, quel que soit le site.
