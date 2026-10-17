@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Known-vulnerability model (#15): per-ecosystem version comparators (Composer `VersionParser` then `version_compare`, strict semver for npm and Cargo, PHP `version_compare` for WordPress and PrestaShop) proven by vectors, fixed-seed fuzz and a differential test against PHP 8.1 in CI; the single shared purl module; a validated OSV 1.9 subset with measured bounds, per-record licence and attribution, CVSS 3.x scores in integer tenths; SQLite storage by reserved generations under lease, swapped atomically; read-only `vigie vulns sources | show | match` (no source wired yet)
 - Known-vulnerability groundwork (#14): verified sources (OSV.dev, GitHub Advisory, Wordfence v3, Friends-Of-Presta, CISA KEV, FIRST EPSS) and excluded ones, purl / CycloneDX 1.7 / OSV standards and conventions, severity, exemptions and confidentiality rules (`vigie/docs/failles.md`)
 - `osv-scanner` job in `garde-fous` (#22): Vigie's own Cargo, pnpm and Composer lockfiles scanned on every push and weekly, pinned binary checked by SHA-256, dated per-folder exceptions enforced by a script; `rqrr` 0.11 removes RUSTSEC-2026-0253
 - Vigie console (Tauri 2, Windows and Android): device pairing, authenticated read API and incident acknowledgement (3a6922d)

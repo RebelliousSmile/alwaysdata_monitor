@@ -1,0 +1,38 @@
+{
+  "cmp": [
+    {"a": "1.0.0-alpha", "b": "1.0.0-alpha.1", "order": -1, "why": "§11 : liste plus longue à préfixe égal"},
+    {"a": "1.0.0-alpha.1", "b": "1.0.0-alpha.beta", "order": -1, "why": "§11 : numérique < alphanumérique"},
+    {"a": "1.0.0-alpha.beta", "b": "1.0.0-beta.2", "order": -1, "why": "§11 : ordre ASCII"},
+    {"a": "1.0.0-beta.2", "b": "1.0.0-beta.11", "order": -1, "why": "§11 : numériques comparés comme nombres"},
+    {"a": "1.0.0-beta.11", "b": "1.0.0-rc.1", "order": -1, "why": "§11"},
+    {"a": "1.0.0-rc.1", "b": "1.0.0", "order": -1, "why": "§11 : préversion sous la version"},
+    {"a": "1.0.0+a", "b": "1.0.0+b", "order": 0, "why": "build ignoré (§10)"},
+    {"a": "1.0.0-rc.1+build.1", "b": "1.0.0-rc.1", "order": 0, "why": "build ignoré"},
+    {"a": "2.0.0-rc.1", "b": "2.0.0", "order": -1, "why": "préversion"},
+    {"a": "1.10.0", "b": "1.9.0", "order": 1, "why": "numérique"},
+    {"a": "1.0.0-99999999999999999999999", "b": "1.0.0-100000000000000000000000", "order": -1, "why": "préversion numérique longue : (longueur, lexical)"},
+    {"a": "1.0.0-99999999999999999999999", "b": "1.0.0-99999999999999999999998", "order": 1, "why": "même longueur : lexical"},
+    {"a": "1.0.0-Alpha", "b": "1.0.0-alpha", "order": -1, "why": "ASCII : majuscules avant minuscules"},
+    {"a": "1.0.0-x-y", "b": "1.0.0-x", "order": 1, "why": "tiret dans un identifiant"},
+    {"a": "0.0.0-0", "b": "0.0.0", "order": -1, "why": "plus petite version"},
+    {"a": "4.17.21", "b": "4.17.20", "order": 1, "why": "patch"},
+    {"a": "1.0.0-0.3.7", "b": "1.0.0-x.7.z.92", "order": -1, "why": "exemples de la §9"},
+    {"a": "1.0.0-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "b": "1.0.0", "order": -1, "why": "version de 74 caractères (mesure npm)"}
+  ],
+  "unparsable": [
+    {"v": "01.2.3", "why": "zéro initial"},
+    {"v": "1.02.3", "why": "zéro initial"},
+    {"v": "1.2.3-01", "why": "zéro initial en préversion numérique"},
+    {"v": "1.2", "why": "forme partielle"},
+    {"v": "v1.2.3", "why": "v refusé"},
+    {"v": "=1.2.3", "why": "= refusé"},
+    {"v": "1.2.3-", "why": "préversion vide"},
+    {"v": "1.2.3+", "why": "build vide"},
+    {"v": "1.2.3-a..b", "why": "identifiant vide"},
+    {"v": "1.2.3_1", "why": "_ hors semver"},
+    {"v": "1234567890123456789.0.0", "why": "19 chiffres dans le noyau"},
+    {"v": "0", "why": "0 n'est pas une version semver (plancher OSV)"},
+    {"v": "*", "why": "contrainte"},
+    {"v": "", "why": "vide"}
+  ]
+}

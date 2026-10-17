@@ -15,6 +15,12 @@ pub const MAX_PATH_CHARS: usize = 512;
 /// Longueur maximale d'un détail d'incident ou de passage servi, en
 /// caractères. Borne défensive : #8 écrit des détails bien plus courts.
 pub const MAX_DETAIL_CHARS: usize = 2048;
+/// Longueur maximale du résumé d'une faille connue, en caractères (mesure
+/// des exports OSV du 2026-10-17 : 241 au plus).
+pub const MAX_SUMMARY_CHARS: usize = 500;
+/// Longueur maximale de l'attribution d'une faille connue (mention
+/// `copyrights` de Wordfence, licence de la source), en caractères.
+pub const MAX_ATTRIBUTION_CHARS: usize = 2000;
 
 /// Texte d'origine log, assaini.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -77,6 +83,18 @@ impl LogText {
     /// Détail d'un incident ou d'un passage du contrôle `logs`.
     pub fn detail(raw: &str) -> Self {
         Self::new(raw, MAX_DETAIL_CHARS)
+    }
+
+    /// Résumé d'une faille connue (`summary` OSV, ou première ligne de
+    /// `details`).
+    pub fn summary(raw: &str) -> Self {
+        Self::new(raw, MAX_SUMMARY_CHARS)
+    }
+
+    /// Attribution d'une faille connue, reproduite partout où elle est
+    /// affichée.
+    pub fn attribution(raw: &str) -> Self {
+        Self::new(raw, MAX_ATTRIBUTION_CHARS)
     }
 
     pub fn as_str(&self) -> &str {

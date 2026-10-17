@@ -1,0 +1,34 @@
+Enregistrements OSV réels
+=========================
+
+Données publiques de tiers, redistribuées telles quelles, octet pour octet,
+comme fixtures de test du modèle des failles de Vigie (issue #15). Chaque
+enregistrement garde lui-même ses références (avis, correctif, dépôt), qui
+valent attribution minimale. Téléchargés le 2026-10-17 depuis
+https://osv-vulnerabilities.storage.googleapis.com/<Ecosystem>/<ID>.json.
+
+GHSA-2q52-x2ff-qgfr.json
+  Source : GitHub Advisory Database, via OSV.dev (écosystème Packagist,
+  paquet twig/twig).
+  Lien : https://github.com/advisories/GHSA-2q52-x2ff-qgfr
+  OSV : https://osv-vulnerabilities.storage.googleapis.com/Packagist/GHSA-2q52-x2ff-qgfr.json
+  Licence : CC-BY 4.0 (https://creativecommons.org/licenses/by/4.0/),
+  © GitHub, Inc. et contributeurs de github/advisory-database.
+  Modifications : aucune.
+
+GHSA-67hx-6x53-jw92.json
+  Source : GitHub Advisory Database, via OSV.dev (écosystème npm, paquets
+  @babel/traverse et babel-traverse).
+  Lien : https://github.com/advisories/GHSA-67hx-6x53-jw92
+  OSV : https://osv-vulnerabilities.storage.googleapis.com/npm/GHSA-67hx-6x53-jw92.json
+  Licence : CC-BY 4.0 (https://creativecommons.org/licenses/by/4.0/),
+  © GitHub, Inc. et contributeurs de github/advisory-database.
+  Modifications : aucune.
+
+RUSTSEC-2017-0004.json
+  Source : RustSec Advisory Database, via OSV.dev (écosystème crates.io,
+  crate base64).
+  Lien : https://rustsec.org/advisories/RUSTSEC-2017-0004.html
+  OSV : https://osv-vulnerabilities.storage.googleapis.com/crates.io/RUSTSEC-2017-0004.json
+  Licence : CC0 1.0 (https://creativecommons.org/publicdomain/zero/1.0/).
+  Modifications : aucune.

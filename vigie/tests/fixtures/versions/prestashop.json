@@ -1,0 +1,24 @@
+{
+  "cmp": [
+    {"a": "1.6.1.24", "b": "1.7.0.0", "order": -1, "why": "quatre composants"},
+    {"a": "1.7.0.0", "b": "8.0.0", "order": -1, "why": "passage de 1.7 à 8"},
+    {"a": "1.7.8.11", "b": "1.7.8.9", "order": 1, "why": "numérique, pas lexical"},
+    {"a": "8.1.0", "b": "8.1.0.0", "order": -1, "why": "composant restant numérique"},
+    {"a": "1.7.8.0-beta.1", "b": "1.7.8.0-rc.1", "order": -1, "why": "beta < rc"},
+    {"a": "1.7.8.0-rc.1", "b": "1.7.8.0", "order": -1, "why": "rc restant sous #"},
+    {"a": "8.0.0-beta.2", "b": "8.0.0-beta.10", "order": -1, "why": "numéro de préversion"},
+    {"a": "2.3.0", "b": "2.3.0", "order": 0, "why": "égalité"},
+    {"a": "2.3", "b": "2.3.0", "order": -1, "why": "longueurs différentes"},
+    {"a": "4.2.1", "b": "4.10.0", "order": -1, "why": "module : numérique"},
+    {"a": "1.0.0", "b": "1.0.0pl2", "order": -1, "why": "pl au-dessus"},
+    {"a": "3.0.0-dev", "b": "3.0.0-a", "order": -1, "why": "dev < a"}
+  ],
+  "unparsable": [
+    {"v": "1.7.8.x", "why": "x : mot inconnu"},
+    {"v": "v1.2.3", "why": "v : mot inconnu"},
+    {"v": "1.2.3-SNAPSHOT", "why": "mot inconnu"},
+    {"v": "1.2.3-Beta", "why": "casse"},
+    {"v": "<= 1.5.0", "why": "plage libre, hors grammaire"},
+    {"v": "1.2_", "why": "composant vide final"}
+  ]
+}
