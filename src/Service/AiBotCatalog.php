@@ -1,4 +1,5 @@
 <?php
+
 /**
  * SC Alwaysdata - PrestaShop 8 Module
  *
@@ -30,30 +31,30 @@ class AiBotCatalog
 
     /** name => [vendor, purpose, robotsOnly, honoursRobots] */
     private const BOTS = [
-        'GPTBot'                      => ['OpenAI', self::PURPOSE_TRAINING, false, true],
-        'ClaudeBot'                   => ['Anthropic', self::PURPOSE_TRAINING, false, true],
-        'anthropic-ai'                => ['Anthropic', self::PURPOSE_TRAINING, false, true],
-        'Google-Extended'             => ['Google', self::PURPOSE_TRAINING, true, true],
-        'Applebot-Extended'           => ['Apple', self::PURPOSE_TRAINING, true, true],
-        'meta-externalagent'          => ['Meta', self::PURPOSE_TRAINING, false, true],
-        'CCBot'                       => ['Common Crawl', self::PURPOSE_TRAINING, false, true],
-        'Bytespider'                  => ['ByteDance', self::PURPOSE_TRAINING, false, false],
-        'Amazonbot'                   => ['Amazon', self::PURPOSE_TRAINING, false, true],
-        'cohere-ai'                   => ['Cohere', self::PURPOSE_TRAINING, false, true],
+        'GPTBot' => ['OpenAI', self::PURPOSE_TRAINING, false, true],
+        'ClaudeBot' => ['Anthropic', self::PURPOSE_TRAINING, false, true],
+        'anthropic-ai' => ['Anthropic', self::PURPOSE_TRAINING, false, true],
+        'Google-Extended' => ['Google', self::PURPOSE_TRAINING, true, true],
+        'Applebot-Extended' => ['Apple', self::PURPOSE_TRAINING, true, true],
+        'meta-externalagent' => ['Meta', self::PURPOSE_TRAINING, false, true],
+        'CCBot' => ['Common Crawl', self::PURPOSE_TRAINING, false, true],
+        'Bytespider' => ['ByteDance', self::PURPOSE_TRAINING, false, false],
+        'Amazonbot' => ['Amazon', self::PURPOSE_TRAINING, false, true],
+        'cohere-ai' => ['Cohere', self::PURPOSE_TRAINING, false, true],
         'cohere-training-data-crawler' => ['Cohere', self::PURPOSE_TRAINING, false, true],
-        'AI2Bot'                      => ['Allen Institute', self::PURPOSE_TRAINING, false, true],
-        'Diffbot'                     => ['Diffbot', self::PURPOSE_TRAINING, false, true],
-        'PanguBot'                    => ['Huawei', self::PURPOSE_TRAINING, false, true],
-        'Timpibot'                    => ['Timpi', self::PURPOSE_TRAINING, false, true],
-        'ImagesiftBot'                => ['ImageSift', self::PURPOSE_TRAINING, false, true],
-        'omgili'                      => ['Webz.io', self::PURPOSE_TRAINING, false, true],
-        'OAI-SearchBot'               => ['OpenAI', self::PURPOSE_SEARCH, false, true],
-        'Claude-SearchBot'            => ['Anthropic', self::PURPOSE_SEARCH, false, true],
-        'PerplexityBot'               => ['Perplexity', self::PURPOSE_SEARCH, false, true],
-        'ChatGPT-User'                => ['OpenAI', self::PURPOSE_USER, false, false],
-        'Claude-User'                 => ['Anthropic', self::PURPOSE_USER, false, false],
-        'Perplexity-User'             => ['Perplexity', self::PURPOSE_USER, false, false],
-        'meta-externalfetcher'        => ['Meta', self::PURPOSE_USER, false, false],
+        'AI2Bot' => ['Allen Institute', self::PURPOSE_TRAINING, false, true],
+        'Diffbot' => ['Diffbot', self::PURPOSE_TRAINING, false, true],
+        'PanguBot' => ['Huawei', self::PURPOSE_TRAINING, false, true],
+        'Timpibot' => ['Timpi', self::PURPOSE_TRAINING, false, true],
+        'ImagesiftBot' => ['ImageSift', self::PURPOSE_TRAINING, false, true],
+        'omgili' => ['Webz.io', self::PURPOSE_TRAINING, false, true],
+        'OAI-SearchBot' => ['OpenAI', self::PURPOSE_SEARCH, false, true],
+        'Claude-SearchBot' => ['Anthropic', self::PURPOSE_SEARCH, false, true],
+        'PerplexityBot' => ['Perplexity', self::PURPOSE_SEARCH, false, true],
+        'ChatGPT-User' => ['OpenAI', self::PURPOSE_USER, false, false],
+        'Claude-User' => ['Anthropic', self::PURPOSE_USER, false, false],
+        'Perplexity-User' => ['Perplexity', self::PURPOSE_USER, false, false],
+        'meta-externalfetcher' => ['Meta', self::PURPOSE_USER, false, false],
     ];
 
     /**
@@ -64,10 +65,10 @@ class AiBotCatalog
         $list = [];
         foreach (self::BOTS as $name => [$vendor, $purpose, $robotsOnly, $honours]) {
             $list[] = [
-                'name'           => $name,
-                'vendor'         => $vendor,
-                'purpose'        => $purpose,
-                'robots_only'    => $robotsOnly,
+                'name' => $name,
+                'vendor' => $vendor,
+                'purpose' => $purpose,
+                'robots_only' => $robotsOnly,
                 'honours_robots' => $honours,
             ];
         }

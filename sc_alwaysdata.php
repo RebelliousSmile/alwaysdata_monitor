@@ -1,4 +1,5 @@
 <?php
+
 /**
  * SC Alwaysdata - PrestaShop 8 Module
  *
@@ -34,10 +35,10 @@ class sc_alwaysdata extends Module
     public const CONFIG_LOGS_PATH = 'SC_ALWAYSDATA_LOGS_PATH';
     public const CONFIG_HTACCESS_PATH = 'SC_ALWAYSDATA_HTACCESS_PATH';
     public const CONFIG_LINES_APACHE = 'SC_ALWAYSDATA_LINES_APACHE';
-    public const CONFIG_LINES_HTTP   = 'SC_ALWAYSDATA_LINES_HTTP';
-    public const CONFIG_LINES_PHP    = 'SC_ALWAYSDATA_LINES_PHP';
-    public const CONFIG_LINES_SITES  = 'SC_ALWAYSDATA_LINES_SITES';
-    public const CONFIG_CRON_TOKEN   = 'SC_ALWAYSDATA_CRON_TOKEN';
+    public const CONFIG_LINES_HTTP = 'SC_ALWAYSDATA_LINES_HTTP';
+    public const CONFIG_LINES_PHP = 'SC_ALWAYSDATA_LINES_PHP';
+    public const CONFIG_LINES_SITES = 'SC_ALWAYSDATA_LINES_SITES';
+    public const CONFIG_CRON_TOKEN = 'SC_ALWAYSDATA_CRON_TOKEN';
 
     public function __construct()
     {
@@ -69,12 +70,12 @@ class sc_alwaysdata extends Module
 
         // Only set defaults if not already configured (preserve values across reinstalls)
         $defaults = [
-            self::CONFIG_LOGS_PATH     => ($_SERVER['HOME'] ?? '') . '/admin/logs/',
+            self::CONFIG_LOGS_PATH => ($_SERVER['HOME'] ?? '') . '/admin/logs/',
             self::CONFIG_HTACCESS_PATH => _PS_ROOT_DIR_ . '/.htaccess',
-            self::CONFIG_LINES_APACHE  => 5000,
-            self::CONFIG_LINES_HTTP    => 10000,
-            self::CONFIG_LINES_PHP     => 5000,
-            self::CONFIG_LINES_SITES   => 2000,
+            self::CONFIG_LINES_APACHE => 5000,
+            self::CONFIG_LINES_HTTP => 10000,
+            self::CONFIG_LINES_PHP => 5000,
+            self::CONFIG_LINES_SITES => 2000,
         ];
 
         foreach ($defaults as $key => $value) {
@@ -99,7 +100,7 @@ class sc_alwaysdata extends Module
             && Configuration::deleteByName(self::CONFIG_LINES_PHP)
             && Configuration::deleteByName(self::CONFIG_LINES_SITES)
             && Configuration::deleteByName(self::CONFIG_CRON_TOKEN)
-            && Configuration::deleteByName(\ScAlwaysdata\Service\RobotsTxtService::CONFIG_KEY)
+            && Configuration::deleteByName(ScAlwaysdata\Service\RobotsTxtService::CONFIG_KEY)
             && $this->dropStatsTable()
             && $this->dropResourcesDailyTable()
             && $this->dropResourcesSamplesTable();
@@ -114,7 +115,7 @@ class sc_alwaysdata extends Module
             return;
         }
 
-        $block = (new \ScAlwaysdata\Service\RobotsTxtService())->buildConfiguredBlock();
+        $block = (new ScAlwaysdata\Service\RobotsTxtService())->buildConfiguredBlock();
         if ($block !== '') {
             fwrite($params['write_fd'], "\n" . $block);
         }
@@ -131,7 +132,7 @@ class sc_alwaysdata extends Module
     {
         require_once __DIR__ . '/src/Entity/DailyStat.php';
 
-        return Db::getInstance()->execute(\ScAlwaysdata\Entity\DailyStat::getCreateTableSql());
+        return Db::getInstance()->execute(ScAlwaysdata\Entity\DailyStat::getCreateTableSql());
     }
 
     private function dropStatsTable(): bool
@@ -145,7 +146,7 @@ class sc_alwaysdata extends Module
     {
         require_once __DIR__ . '/src/Entity/DailyResource.php';
 
-        return Db::getInstance()->execute(\ScAlwaysdata\Entity\DailyResource::getCreateTableSql());
+        return Db::getInstance()->execute(ScAlwaysdata\Entity\DailyResource::getCreateTableSql());
     }
 
     private function dropResourcesDailyTable(): bool
@@ -159,7 +160,7 @@ class sc_alwaysdata extends Module
     {
         require_once __DIR__ . '/src/Entity/ResourceSample.php';
 
-        return Db::getInstance()->execute(\ScAlwaysdata\Entity\ResourceSample::getCreateTableSql());
+        return Db::getInstance()->execute(ScAlwaysdata\Entity\ResourceSample::getCreateTableSql());
     }
 
     private function dropResourcesSamplesTable(): bool

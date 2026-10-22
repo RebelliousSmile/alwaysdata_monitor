@@ -1,4 +1,5 @@
 <?php
+
 /**
  * SC Alwaysdata - PrestaShop 8 Module
  *
@@ -85,41 +86,41 @@ class HttpLogParserService
         $scraperIps = $this->findScraperIps($logFilePath);
 
         $counters = [
-            'requests_total'              => 0,
-            'requests_human'              => 0,
-            'requests_scrapers'           => 0,
-            'mobile'                      => 0,
-            'desktop'                     => 0,
-            'views_product'               => 0,
-            'cart_adds'                   => 0,
-            'views_cart'                  => 0,
-            'views_checkout'              => 0,
-            'post_checkout'               => 0,
-            'errors_500_front'            => 0,
-            'errors_500_bo'               => 0,
-            'errors_500_checkout'         => 0,
-            'errors_500_checkout_detail'  => [],
-            'errors_500_front_pages'      => [],
-            'errors_500_bo_pages'         => [],
-            'hourly_product_views'               => array_fill(0, 24, 0),
-            'page_counts'                 => [],
-            'ip_counts'                   => [],
+            'requests_total' => 0,
+            'requests_human' => 0,
+            'requests_scrapers' => 0,
+            'mobile' => 0,
+            'desktop' => 0,
+            'views_product' => 0,
+            'cart_adds' => 0,
+            'views_cart' => 0,
+            'views_checkout' => 0,
+            'post_checkout' => 0,
+            'errors_500_front' => 0,
+            'errors_500_bo' => 0,
+            'errors_500_checkout' => 0,
+            'errors_500_checkout_detail' => [],
+            'errors_500_front_pages' => [],
+            'errors_500_bo_pages' => [],
+            'hourly_product_views' => array_fill(0, 24, 0),
+            'page_counts' => [],
+            'ip_counts' => [],
         ];
 
         $this->eachLine($logFilePath, function (string $line) use (&$counters, $scraperIps): void {
-            $counters['requests_total']++;
+            ++$counters['requests_total'];
 
             $r = $this->parseLine($line);
             if ($r === null) {
                 return;
             }
 
-            $ip     = $r['ip'];
-            $hour   = $r['hour'];
+            $ip = $r['ip'];
+            $hour = $r['hour'];
             $method = $r['method'];
-            $path   = $r['path'];
+            $path = $r['path'];
             $status = $r['status'];
-            $ua     = $r['ua'];
+            $ua = $r['ua'];
 
             $isAdmin = strpos($path, self::ADMIN_PATH) !== false;
 
@@ -127,20 +128,20 @@ class HttpLogParserService
             // Categories are mutually exclusive: BO | checkout | front
             if ($status === 500) {
                 if ($isAdmin) {
-                    $counters['errors_500_bo']++;
+                    ++$counters['errors_500_bo'];
                     $counters['errors_500_bo_pages'][$path] = ($counters['errors_500_bo_pages'][$path] ?? 0) + 1;
                 } elseif (strpos($path, '/commande') !== false || strpos($path, '/panier') !== false) {
-                    $counters['errors_500_checkout']++;
+                    ++$counters['errors_500_checkout'];
                     if (count($counters['errors_500_checkout_detail']) < self::CHECKOUT_DETAIL_LIMIT) {
                         $counters['errors_500_checkout_detail'][] = [
                             'path' => $path,
-                            'ip'   => $ip,
+                            'ip' => $ip,
                             'hour' => $hour,
                             'time' => $r['time'],
                         ];
                     }
                 } else {
-                    $counters['errors_500_front']++;
+                    ++$counters['errors_500_front'];
                     $counters['errors_500_front_pages'][$path] = ($counters['errors_500_front_pages'][$path] ?? 0) + 1;
                 }
             }
@@ -157,12 +158,12 @@ class HttpLogParserService
 
             // A refused request is not a visit; a scraper's pages are not audience
             if ($status === 403 || isset($scraperIps[$ip])) {
-                $counters['requests_scrapers']++;
+                ++$counters['requests_scrapers'];
 
                 return;
             }
 
-            $counters['requests_human']++;
+            ++$counters['requests_human'];
             $counters['ip_counts'][$ip] = ($counters['ip_counts'][$ip] ?? 0) + 1;
 
             // Mobile / Desktop detection
@@ -171,9 +172,9 @@ class HttpLogParserService
                 || stripos($ua, 'iphone') !== false
                 || stripos($ua, 'ipad') !== false
             ) {
-                $counters['mobile']++;
+                ++$counters['mobile'];
             } else {
-                $counters['desktop']++;
+                ++$counters['desktop'];
             }
 
             if ($isAdmin) {
@@ -186,26 +187,26 @@ class HttpLogParserService
 
                 // Product pages (.html)
                 if (str_ends_with($path, '.html')) {
-                    $counters['views_product']++;
-                    $counters['hourly_product_views'][$hour]++;
+                    ++$counters['views_product'];
+                    ++$counters['hourly_product_views'][$hour];
                 }
             }
 
             // Funnel
             if ($method === 'POST' && str_starts_with($path, '/panier')) {
-                $counters['cart_adds']++;
+                ++$counters['cart_adds'];
             }
 
             if ($method === 'GET' && str_starts_with($path, '/panier') && $status === 200) {
-                $counters['views_cart']++;
+                ++$counters['views_cart'];
             }
 
             if ($method === 'GET' && str_starts_with($path, '/commande') && $status === 200) {
-                $counters['views_checkout']++;
+                ++$counters['views_checkout'];
             }
 
             if ($method === 'POST' && str_starts_with($path, '/commande')) {
-                $counters['post_checkout']++;
+                ++$counters['post_checkout'];
             }
         });
 
@@ -303,14 +304,14 @@ class HttpLogParserService
         }
 
         return [
-            'ip'     => $m[1],
-            'hour'   => (int) $m[2],
-            'time'   => $m[2] . ':' . $m[3] . ':' . $m[4],
+            'ip' => $m[1],
+            'hour' => (int) $m[2],
+            'time' => $m[2] . ':' . $m[3] . ':' . $m[4],
             'method' => strtoupper($m[5]),
-            'path'   => $m[6],
-            'query'  => $m[7],
+            'path' => $m[6],
+            'query' => $m[7],
             'status' => (int) $m[8],
-            'ua'     => $m[9] ?? '',
+            'ua' => $m[9] ?? '',
         ];
     }
 

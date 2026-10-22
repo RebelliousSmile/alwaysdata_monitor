@@ -1,4 +1,5 @@
 <?php
+
 /**
  * SC Alwaysdata - PrestaShop 8 Module
  *
@@ -43,9 +44,9 @@ class IpSuspicionScorer
 
     /** Search engine => domains its genuine crawlers reverse-resolve to */
     private const SEARCH_ENGINES = [
-        'googlebot'   => ['googlebot.com', 'google.com'],
-        'bingbot'     => ['search.msn.com'],
-        'applebot'    => ['applebot.apple.com'],
+        'googlebot' => ['googlebot.com', 'google.com'],
+        'bingbot' => ['search.msn.com'],
+        'applebot' => ['applebot.apple.com'],
         'duckduckbot' => ['duckduckgo.com'],
     ];
 
@@ -57,7 +58,7 @@ class IpSuspicionScorer
      *     uas: array<string, int>, peak_minute: int
      * } $stats
      * @param string|null $rdns reverse DNS host, null when not resolved
-     * @param string|null $bot  declared bot name matched in the UA
+     * @param string|null $bot declared bot name matched in the UA
      *
      * @return array{score: int, level: string, network: string, reasons: array<int, array{points: int, label: string}>}
      */
@@ -78,8 +79,8 @@ class IpSuspicionScorer
             } else {
                 // Unresolved: benefit of the doubt, blocking a real crawler costs SEO
                 return [
-                    'score'   => 0,
-                    'level'   => 'moteur',
+                    'score' => 0,
+                    'level' => 'moteur',
                     'network' => $network,
                     'reasons' => [['points' => 0, 'label' => sprintf('moteur de recherche %s%s : ne pas bloquer', $bot, $rdns !== null ? ' (vérifié)' : '')]],
                 ];
@@ -137,8 +138,8 @@ class IpSuspicionScorer
         usort($reasons, static fn (array $a, array $b): int => $b['points'] <=> $a['points']);
 
         return [
-            'score'   => $score,
-            'level'   => $score >= self::LEVEL_HIGH ? 'eleve' : ($score >= self::LEVEL_MEDIUM ? 'moyen' : 'faible'),
+            'score' => $score,
+            'level' => $score >= self::LEVEL_HIGH ? 'eleve' : ($score >= self::LEVEL_MEDIUM ? 'moyen' : 'faible'),
             'network' => $network,
             'reasons' => $reasons,
         ];

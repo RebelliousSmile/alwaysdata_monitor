@@ -1,4 +1,5 @@
 <?php
+
 /**
  * SC Alwaysdata - PrestaShop 8 Module
  *
@@ -131,8 +132,8 @@ class CrawlerAnalyserService
 
         // Known bots grouped by bot name; high-frequency kept per IP
         /** @var array<string, array{ips: string[], user_agents: array<string,bool>, request_count: int}> $botGroups */
-        $botGroups      = [];
-        $highFreqByIp   = [];
+        $botGroups = [];
+        $highFreqByIp = [];
 
         foreach ($ipData as $ip => $data) {
             $matchedBot = null;
@@ -157,11 +158,11 @@ class CrawlerAnalyserService
                 }
             } elseif ($data['count'] >= self::HIGH_FREQ_THRESHOLD) {
                 $highFreqByIp[$ip] = [
-                    'ips'           => [$ip],
-                    'user_agents'   => array_keys($data['uas']),
+                    'ips' => [$ip],
+                    'user_agents' => array_keys($data['uas']),
                     'request_count' => $data['count'],
-                    'reason'        => 'high_frequency',
-                    'matched_bot'   => null,
+                    'reason' => 'high_frequency',
+                    'matched_bot' => null,
                 ];
             }
         }
@@ -170,11 +171,11 @@ class CrawlerAnalyserService
 
         foreach ($botGroups as $botName => $group) {
             $candidates[] = [
-                'ips'           => $group['ips'],
-                'user_agents'   => array_keys($group['user_agents']),
+                'ips' => $group['ips'],
+                'user_agents' => array_keys($group['user_agents']),
                 'request_count' => $group['request_count'],
-                'reason'        => 'known_bot',
-                'matched_bot'   => $botName,
+                'reason' => 'known_bot',
+                'matched_bot' => $botName,
             ];
         }
 
