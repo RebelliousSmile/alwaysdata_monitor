@@ -1,4 +1,5 @@
 <?php
+
 /**
  * SC Alwaysdata - PrestaShop 8 Module
  *
@@ -21,6 +22,6 @@ function upgrade_module_1_4_0(sc_alwaysdata $module): bool
     require_once __DIR__ . '/../src/Entity/ResourceSample.php';
 
     return (bool) Db::getInstance()->execute(
-        \ScAlwaysdata\Entity\ResourceSample::getCreateTableSql()
+        ScAlwaysdata\Entity\ResourceSample::getCreateTableSql()
     );
 }
