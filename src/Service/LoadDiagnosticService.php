@@ -1,4 +1,5 @@
 <?php
+
 /**
  * SC Alwaysdata - PrestaShop 8 Module
  *
@@ -84,12 +85,12 @@ class LoadDiagnosticService
     }
 
     /**
-     * @param string   $logFilePath plain or gzip HTTP log
-     * @param string[] $shopHosts   hostnames whose referers count as internal navigation
-     *
-     * @throws \RuntimeException if the file cannot be opened
+     * @param string $logFilePath plain or gzip HTTP log
+     * @param string[] $shopHosts hostnames whose referers count as internal navigation
      *
      * @return array<string, mixed>
+     *
+     * @throws \RuntimeException if the file cannot be opened
      */
     public function analyse(string $logFilePath, array $shopHosts): array
     {
@@ -196,29 +197,29 @@ class LoadDiagnosticService
         $profiledIps = array_values(array_unique(array_merge(array_column($topIps, 'value'), array_column($facetTopIps, 'value'))));
 
         return [
-            'total'       => $total,
-            'unparsed'    => $unparsed,
-            'static'      => $static,
-            'time_total'  => round($timeTotal, 1),
-            'bots'        => $this->toList($bots, count($bots)),
-            'top_urls'    => $this->toList($urls, 25),
-            'top_ips'     => $topIps,
+            'total' => $total,
+            'unparsed' => $unparsed,
+            'static' => $static,
+            'time_total' => round($timeTotal, 1),
+            'bots' => $this->toList($bots, count($bots)),
+            'top_urls' => $this->toList($urls, 25),
+            'top_ips' => $topIps,
             'ip_profiles' => $this->profileIps($logFilePath, $profiledIps, $botRegex, $botNames),
-            'top_uas'     => $this->toList($uas, 15),
-            'hourly'      => $hourly,
+            'top_uas' => $this->toList($uas, 15),
+            'hourly' => $hourly,
             'hourly_refused' => $hourlyRefused,
             'hourly_time' => array_map(static fn (float $t): float => round($t, 1), $hourlyTime),
-            'search'      => $search,
-            'login'       => $login,
-            'facets'      => [
-                'count'         => $facet['count'],
-                'time'          => round($facet['time'], 1),
-                'distinct_ips'  => count($facet['ips']),
-                'origin'        => $facet['origin'],
-                'statuses'      => $this->toList($facet['statuses'], count($facet['statuses'])),
-                'top_ips'       => $facetTopIps,
-                'top_referers'  => $this->toList($facet['referers'], 10),
-                'external_uas'  => $this->toList($facet['external_uas'], 10),
+            'search' => $search,
+            'login' => $login,
+            'facets' => [
+                'count' => $facet['count'],
+                'time' => round($facet['time'], 1),
+                'distinct_ips' => count($facet['ips']),
+                'origin' => $facet['origin'],
+                'statuses' => $this->toList($facet['statuses'], count($facet['statuses'])),
+                'top_ips' => $facetTopIps,
+                'top_referers' => $this->toList($facet['referers'], 10),
+                'external_uas' => $this->toList($facet['external_uas'], 10),
             ],
         ];
     }
@@ -236,16 +237,16 @@ class LoadDiagnosticService
         $url = $request[1] ?? '';
 
         return [
-            'ip'      => $m[1],
-            'hour'    => (int) $m[2],
-            'minute'  => (int) $m[3],
-            'method'  => strtoupper($request[0]),
-            'url'     => $url,
-            'path'    => explode('?', $url, 2)[0],
-            'status'  => $m[5],
+            'ip' => $m[1],
+            'hour' => (int) $m[2],
+            'minute' => (int) $m[3],
+            'method' => strtoupper($request[0]),
+            'url' => $url,
+            'path' => explode('?', $url, 2)[0],
+            'status' => $m[5],
             'referer' => $m[6] ?? '-',
-            'ua'      => $m[7] ?? '',
-            'time'    => $this->responseTime($m[8] ?? ''),
+            'ua' => $m[7] ?? '',
+            'time' => $this->responseTime($m[8] ?? ''),
         ];
     }
 
@@ -254,7 +255,7 @@ class LoadDiagnosticService
      * visitor of the day in the first pass would cost far more memory than
      * re-reading the file once.
      *
-     * @param string[]              $targets
+     * @param string[] $targets
      * @param array<string, string> $botNames
      *
      * @return array<int, array<string, mixed>>
@@ -318,13 +319,13 @@ class LoadDiagnosticService
             $s['peak_minute'] = $s['minutes'] === [] ? 0 : max($s['minutes']);
             $total = max(1, $s['requests']);
             $profiles[] = [
-                'ip'          => $ip,
-                'rdns'        => $rdns,
-                'requests'    => $s['requests'],
-                'static_pct'  => (int) round($s['static'] * 100 / $total),
-                'facet_pct'   => (int) round($s['facets'] * 100 / $total),
+                'ip' => $ip,
+                'rdns' => $rdns,
+                'requests' => $s['requests'],
+                'static_pct' => (int) round($s['static'] * 100 / $total),
+                'facet_pct' => (int) round($s['facets'] * 100 / $total),
                 'refused_pct' => (int) round($s['refused'] * 100 / $total),
-                'ua_count'    => count($s['uas']),
+                'ua_count' => count($s['uas']),
                 'peak_minute' => $s['peak_minute'],
             ] + $this->scorer->score($s, $rdns, $s['bot']);
         }
@@ -342,7 +343,7 @@ class LoadDiagnosticService
      * its referer, or to a shared IP: to check by hand.
      *
      * @param string[] $blockedIps values of the "Require not ip" rules (single IPs or CIDR)
-     * @param string[] $shopHosts  hostnames whose referers count as internal navigation
+     * @param string[] $shopHosts hostnames whose referers count as internal navigation
      *
      * @return array{seen: array<int, array<string, mixed>>, absent: string[]}
      */
@@ -425,25 +426,25 @@ class LoadDiagnosticService
             $verdict = $signals === 0 ? 'robot' : ($s['pages'] <= self::HUMAN_MAX_PAGES ? 'humain' : 'a_verifier');
             arsort($s['uas']);
             $seen[] = [
-                'ip'        => (string) $ip,
-                'rule'      => $s['rule'],
-                'verdict'   => $verdict,
-                'requests'  => $s['requests'],
-                'pages'     => $s['pages'],
-                'homepage'  => $s['homepage'],
-                'external'  => $s['external'],
+                'ip' => (string) $ip,
+                'rule' => $s['rule'],
+                'verdict' => $verdict,
+                'requests' => $s['requests'],
+                'pages' => $s['pages'],
+                'homepage' => $s['homepage'],
+                'external' => $s['external'],
                 'facet_pct' => $s['pages'] ? (int) round($s['facets'] * 100 / $s['pages']) : 0,
-                'referers'  => $this->toList($s['referers'], 5),
-                'ua'        => (string) array_key_first($s['uas']),
-                'ua_count'  => count($s['uas']),
-                'first'     => $s['first'],
-                'last'      => $s['last'],
+                'referers' => $this->toList($s['referers'], 5),
+                'ua' => (string) array_key_first($s['uas']),
+                'ua_count' => count($s['uas']),
+                'first' => $s['first'],
+                'last' => $s['last'],
             ];
         }
         usort($seen, static fn (array $a, array $b): int => [$rank[$a['verdict']], $b['requests']] <=> [$rank[$b['verdict']], $a['requests']]);
 
         return [
-            'seen'   => $seen,
+            'seen' => $seen,
             'absent' => array_values(array_filter($blockedIps, static fn (string $r): bool => !isset($matchedRules[$r]))),
         ];
     }

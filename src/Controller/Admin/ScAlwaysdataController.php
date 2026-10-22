@@ -1,4 +1,5 @@
 <?php
+
 /**
  * SC Alwaysdata - PrestaShop 8 Module
  *
@@ -11,7 +12,6 @@ declare(strict_types=1);
 
 namespace ScAlwaysdata\Controller\Admin;
 
-use Configuration;
 use Db;
 use PrestaShopBundle\Controller\Admin\FrameworkBundleAdminController;
 use PrestaShopBundle\Security\Annotation\AdminSecurity;
@@ -46,7 +46,7 @@ class ScAlwaysdataController extends FrameworkBundleAdminController
         PhpErrorAnalyserService $phpErrorAnalyserService,
         HtaccessService $htaccessService,
         RobotsTxtService $robotsTxtService,
-        LoadDiagnosticService $loadDiagnosticService
+        LoadDiagnosticService $loadDiagnosticService,
     ) {
         $this->logReaderService = $logReaderService;
         $this->crawlerAnalyserService = $crawlerAnalyserService;
@@ -84,11 +84,11 @@ class ScAlwaysdataController extends FrameworkBundleAdminController
                     $this->trans('Le chemin des logs ne peut pas être vide.', 'Modules.Scalwaysdata.Admin')
                 );
             } else {
-                Configuration::updateValue('SC_ALWAYSDATA_LOGS_PATH', $logsPath);
-                Configuration::updateValue('SC_ALWAYSDATA_HTACCESS_PATH', $htaccessPath);
+                \Configuration::updateValue('SC_ALWAYSDATA_LOGS_PATH', $logsPath);
+                \Configuration::updateValue('SC_ALWAYSDATA_HTACCESS_PATH', $htaccessPath);
                 foreach (['apache', 'http', 'php', 'sites'] as $dir) {
                     $val = max(100, (int) $request->request->get('lines_' . $dir, 5000));
-                    Configuration::updateValue('SC_ALWAYSDATA_LINES_' . strtoupper($dir), $val);
+                    \Configuration::updateValue('SC_ALWAYSDATA_LINES_' . strtoupper($dir), $val);
                 }
                 $this->addFlash(
                     'success',
@@ -97,22 +97,22 @@ class ScAlwaysdataController extends FrameworkBundleAdminController
             }
         }
 
-        $logsPath = (string) Configuration::get('SC_ALWAYSDATA_LOGS_PATH');
-        $htaccessPath = (string) Configuration::get('SC_ALWAYSDATA_HTACCESS_PATH');
+        $logsPath = (string) \Configuration::get('SC_ALWAYSDATA_LOGS_PATH');
+        $htaccessPath = (string) \Configuration::get('SC_ALWAYSDATA_HTACCESS_PATH');
         $logsPathHint = ($_SERVER['HOME'] ?? '') . '/admin/logs/';
         $defaults = ['apache' => 5000, 'http' => 10000, 'php' => 5000, 'sites' => 2000];
         $linesPerSource = [];
         foreach ($defaults as $dir => $default) {
-            $v = (int) Configuration::get('SC_ALWAYSDATA_LINES_' . strtoupper($dir));
+            $v = (int) \Configuration::get('SC_ALWAYSDATA_LINES_' . strtoupper($dir));
             $linesPerSource[$dir] = $v > 0 ? $v : $default;
         }
 
         $htaccessReadable = $htaccessPath !== '' && is_readable($htaccessPath);
 
-        $cronToken = (string) Configuration::get('SC_ALWAYSDATA_CRON_TOKEN');
+        $cronToken = (string) \Configuration::get('SC_ALWAYSDATA_CRON_TOKEN');
         if (!$cronToken) {
             $cronToken = \Tools::passwdGen(32);
-            Configuration::updateValue('SC_ALWAYSDATA_CRON_TOKEN', $cronToken);
+            \Configuration::updateValue('SC_ALWAYSDATA_CRON_TOKEN', $cronToken);
         }
         $baseUrl = (string) \Tools::getShopDomainSsl(true);
         $cronUrl = $baseUrl . '/module/sc_alwaysdata/cron?token=' . urlencode($cronToken);
@@ -122,31 +122,31 @@ class ScAlwaysdataController extends FrameworkBundleAdminController
         return $this->render(
             '@Modules/sc_alwaysdata/views/templates/admin/index.html.twig',
             [
-                'layoutTitle'            => $this->trans('Alwaysdata Log Viewer', 'Modules.Scalwaysdata.Admin'),
-                'enableSidebar'          => true,
-                'help_link'              => false,
-                'logsPath'               => $logsPath,
-                'htaccessPath'           => $htaccessPath,
-                'protection'             => $htaccessPath !== '' ? $this->htaccessService->readProtection() : null,
-                'shopDomains'            => $htaccessPath !== '' ? $this->fetchShopDomains() : [],
-                'robots'                 => $htaccessPath !== '' ? $this->robotsTxtService->readSettings() : null,
-                'robotsPath'             => $htaccessPath !== '' ? $this->robotsTxtService->getRobotsPath() : '',
-                'aiBots'                 => (new AiBotCatalog())->all(),
-                'facetMaxFiltersLimit'   => HtaccessService::FACET_MAX_FILTERS_LIMIT,
-                'htaccessHealth'         => $htaccessReadable ? $this->htaccessService->diagnose() : null,
-                'blockedIps'             => $htaccessReadable ? $this->htaccessService->readBlockedIps() : [],
-                'blockedUas'             => $htaccessReadable ? $this->htaccessService->readBlockedUAs() : [],
-                'htaccessBackups'        => $htaccessReadable ? $this->htaccessService->listBackups(15) : [],
-                'htaccessBackupCount'    => $htaccessReadable ? $this->htaccessService->countBackups() : 0,
-                'backupsKeptOnPurge'     => self::BACKUPS_KEPT_ON_PURGE,
-                'logsPathHint'           => $logsPathHint,
-                'linesPerSource'         => $linesPerSource,
-                'statsUrl'               => $this->generateUrl('sc_alwaysdata_stats'),
-                'conversionUrl'          => $this->generateUrl('sc_alwaysdata_conversion'),
-                'resourcesStatsUrl'      => $this->generateUrl('sc_alwaysdata_resources_stats'),
-                'diagnosticUrl'          => $this->generateUrl('sc_alwaysdata_diagnostic'),
-                'cronUrl'                => $cronUrl,
-                'cronResourcesUrl'       => $cronResourcesUrl,
+                'layoutTitle' => $this->trans('Alwaysdata Log Viewer', 'Modules.Scalwaysdata.Admin'),
+                'enableSidebar' => true,
+                'help_link' => false,
+                'logsPath' => $logsPath,
+                'htaccessPath' => $htaccessPath,
+                'protection' => $htaccessPath !== '' ? $this->htaccessService->readProtection() : null,
+                'shopDomains' => $htaccessPath !== '' ? $this->fetchShopDomains() : [],
+                'robots' => $htaccessPath !== '' ? $this->robotsTxtService->readSettings() : null,
+                'robotsPath' => $htaccessPath !== '' ? $this->robotsTxtService->getRobotsPath() : '',
+                'aiBots' => (new AiBotCatalog())->all(),
+                'facetMaxFiltersLimit' => HtaccessService::FACET_MAX_FILTERS_LIMIT,
+                'htaccessHealth' => $htaccessReadable ? $this->htaccessService->diagnose() : null,
+                'blockedIps' => $htaccessReadable ? $this->htaccessService->readBlockedIps() : [],
+                'blockedUas' => $htaccessReadable ? $this->htaccessService->readBlockedUAs() : [],
+                'htaccessBackups' => $htaccessReadable ? $this->htaccessService->listBackups(15) : [],
+                'htaccessBackupCount' => $htaccessReadable ? $this->htaccessService->countBackups() : 0,
+                'backupsKeptOnPurge' => self::BACKUPS_KEPT_ON_PURGE,
+                'logsPathHint' => $logsPathHint,
+                'linesPerSource' => $linesPerSource,
+                'statsUrl' => $this->generateUrl('sc_alwaysdata_stats'),
+                'conversionUrl' => $this->generateUrl('sc_alwaysdata_conversion'),
+                'resourcesStatsUrl' => $this->generateUrl('sc_alwaysdata_resources_stats'),
+                'diagnosticUrl' => $this->generateUrl('sc_alwaysdata_diagnostic'),
+                'cronUrl' => $cronUrl,
+                'cronResourcesUrl' => $cronResourcesUrl,
                 'cronResourcesSampleUrl' => $cronResourcesSampleUrl,
             ]
         );
@@ -202,18 +202,18 @@ class ScAlwaysdataController extends FrameworkBundleAdminController
                 $lines = $source['lines'] ?? [];
 
                 return [
-                    'source'     => $source['source'],
-                    'truncated'  => $source['truncated'] ?? false,
-                    'error'      => $source['error'],
+                    'source' => $source['source'],
+                    'truncated' => $source['truncated'] ?? false,
+                    'error' => $source['error'],
                     'line_count' => count($lines),
-                    'preview'    => array_slice($lines, -100),
+                    'preview' => array_slice($lines, -100),
                 ];
             }, $sources);
 
             return new JsonResponse([
-                'crawlers'    => $crawlers,
-                'php_errors'  => $phpErrors,
-                'sources'     => $sourcesInfo,
+                'crawlers' => $crawlers,
+                'php_errors' => $phpErrors,
+                'sources' => $sourcesInfo,
                 'blocked_ips' => $blockedIps,
                 'blocked_uas' => $blockedUAs,
             ]);
@@ -264,7 +264,7 @@ class ScAlwaysdataController extends FrameworkBundleAdminController
 
             $snapshot = DailyStat::getByDate($date);
 
-            $rows = Db::getInstance()->executeS(
+            $rows = \Db::getInstance()->executeS(
                 'SELECT stat_date, requests_human, views_product, errors_500_front, errors_500_bo, errors_500_checkout
                  FROM `' . _DB_PREFIX_ . 'sc_alwaysdata_stats_daily`
                  WHERE stat_date >= DATE_SUB(\'' . pSQL($date) . '\', INTERVAL ' . $period . ' DAY)
@@ -272,14 +272,14 @@ class ScAlwaysdataController extends FrameworkBundleAdminController
                  ORDER BY stat_date ASC'
             );
 
-            $cronToken = (string) Configuration::get('SC_ALWAYSDATA_CRON_TOKEN');
+            $cronToken = (string) \Configuration::get('SC_ALWAYSDATA_CRON_TOKEN');
             $baseUrl = (string) \Tools::getShopDomainSsl(true);
 
             return new JsonResponse([
-                'snapshot'  => $snapshot ? $this->serializeStat($snapshot) : null,
-                'period'    => $rows ?: [],
+                'snapshot' => $snapshot ? $this->serializeStat($snapshot) : null,
+                'period' => $rows ?: [],
                 'cronToken' => $cronToken,
-                'cronUrl'   => $baseUrl . '/module/sc_alwaysdata/cron?token=' . urlencode($cronToken),
+                'cronUrl' => $baseUrl . '/module/sc_alwaysdata/cron?token=' . urlencode($cronToken),
             ]);
         } catch (\Throwable $e) {
             return new JsonResponse(['error' => $e->getMessage(), 'trace' => $e->getFile() . ':' . $e->getLine()], 500);
@@ -301,7 +301,7 @@ class ScAlwaysdataController extends FrameworkBundleAdminController
 
             $snapshot = DailyStat::getByDate($date);
 
-            $rows = Db::getInstance()->executeS(
+            $rows = \Db::getInstance()->executeS(
                 'SELECT stat_date, views_product, cart_adds, views_cart, views_checkout, post_checkout, orders_confirmed
                  FROM `' . _DB_PREFIX_ . 'sc_alwaysdata_stats_daily`
                  WHERE stat_date >= DATE_SUB(\'' . pSQL($date) . '\', INTERVAL ' . $period . ' DAY)
@@ -311,7 +311,7 @@ class ScAlwaysdataController extends FrameworkBundleAdminController
 
             return new JsonResponse([
                 'snapshot' => $snapshot ? $this->serializeStat($snapshot) : null,
-                'period'   => $rows ?: [],
+                'period' => $rows ?: [],
             ]);
         } catch (\Throwable $e) {
             return new JsonResponse(['error' => $e->getMessage(), 'trace' => $e->getFile() . ':' . $e->getLine()], 500);
@@ -328,23 +328,23 @@ class ScAlwaysdataController extends FrameworkBundleAdminController
     public function resourcesStatsAction(Request $request): JsonResponse
     {
         try {
-            $date   = $this->resolveDate((string) $request->request->get('date', ''), true);
+            $date = $this->resolveDate((string) $request->request->get('date', ''), true);
             $period = $this->resolvePeriod((int) $request->request->get('period', 7));
 
-            $stats      = $this->fetchResourceStats($date, $period);
-            $series     = $this->fetchResourceSeries($date, $period);
-            $latest     = $this->fetchLatestSample();
-            $topPages   = $this->fetchMergedTopPages($date, $period);
-            $daily      = $this->fetchDailyStats($date, $period);
-            $report     = $this->buildHealthReport($stats, $latest, $period);
+            $stats = $this->fetchResourceStats($date, $period);
+            $series = $this->fetchResourceSeries($date, $period);
+            $latest = $this->fetchLatestSample();
+            $topPages = $this->fetchMergedTopPages($date, $period);
+            $daily = $this->fetchDailyStats($date, $period);
+            $report = $this->buildHealthReport($stats, $latest, $period);
 
             return new JsonResponse([
-                'stats'      => $stats,
-                'series'     => $series,
-                'latest'     => $latest,
-                'top_pages'  => $topPages,
-                'daily'      => $daily,
-                'report'     => $report,
+                'stats' => $stats,
+                'series' => $series,
+                'latest' => $latest,
+                'top_pages' => $topPages,
+                'daily' => $daily,
+                'report' => $report,
             ]);
         } catch (\Throwable $e) {
             return new JsonResponse(['error' => $e->getMessage(), 'trace' => $e->getFile() . ':' . $e->getLine()], 500);
@@ -409,8 +409,8 @@ class ScAlwaysdataController extends FrameworkBundleAdminController
             }
 
             return new JsonResponse([
-                'date'        => $date,
-                'diagnostic'  => $result,
+                'date' => $date,
+                'diagnostic' => $result,
                 'blocked_audit' => $audit,
                 'blocked_ips' => $blockedIps,
                 'blocked_uas' => $this->htaccessService->readBlockedUAs(),
@@ -425,7 +425,7 @@ class ScAlwaysdataController extends FrameworkBundleAdminController
      */
     private function fetchResourceStats(string $date, int $period): array
     {
-        $row = Db::getInstance()->getRow(
+        $row = \Db::getInstance()->getRow(
             'SELECT
                 COUNT(*) AS samples,
                 ROUND(AVG(ram_used_mb))  AS ram_avg_mb,
@@ -442,15 +442,15 @@ class ScAlwaysdataController extends FrameworkBundleAdminController
         );
 
         return [
-            'samples'      => (int) ($row['samples'] ?? 0),
-            'ram_avg_mb'   => (int) ($row['ram_avg_mb'] ?? 0),
-            'ram_peak_mb'  => (int) ($row['ram_peak_mb'] ?? 0),
+            'samples' => (int) ($row['samples'] ?? 0),
+            'ram_avg_mb' => (int) ($row['ram_avg_mb'] ?? 0),
+            'ram_peak_mb' => (int) ($row['ram_peak_mb'] ?? 0),
             'ram_total_mb' => (int) ($row['ram_total_mb'] ?? 0),
-            'peaks_95'     => (int) ($row['peaks_95'] ?? 0),
-            'peaks_80'     => (int) ($row['peaks_80'] ?? 0),
-            'cpu_avg'      => (float) ($row['cpu_avg'] ?? 0),
-            'cpu_peak'     => (float) ($row['cpu_peak'] ?? 0),
-            'opcache_avg'  => (float) ($row['opcache_avg'] ?? 0),
+            'peaks_95' => (int) ($row['peaks_95'] ?? 0),
+            'peaks_80' => (int) ($row['peaks_80'] ?? 0),
+            'cpu_avg' => (float) ($row['cpu_avg'] ?? 0),
+            'cpu_peak' => (float) ($row['cpu_peak'] ?? 0),
+            'opcache_avg' => (float) ($row['opcache_avg'] ?? 0),
         ];
     }
 
@@ -459,6 +459,7 @@ class ScAlwaysdataController extends FrameworkBundleAdminController
      * sur une tendance (utilisé quand on n'a pas assez de samples pour conclure).
      *
      * @param array<string, mixed> $latest
+     *
      * @return array<int, array<string, mixed>>
      */
     private function buildInstantSnapshotFindings(array $latest): array
@@ -467,7 +468,7 @@ class ScAlwaysdataController extends FrameworkBundleAdminController
 
         // RAM à l'instant
         $ramTotal = max(1, (int) $latest['ram_total_mb']);
-        $ramPct   = (int) round($latest['ram_used_mb'] * 100 / $ramTotal);
+        $ramPct = (int) round($latest['ram_used_mb'] * 100 / $ramTotal);
 
         if ($ramPct < 60) {
             $ramQualif = 'confortable';
@@ -481,8 +482,8 @@ class ScAlwaysdataController extends FrameworkBundleAdminController
         $findings[] = [
             'severity' => 'info',
             'category' => 'RAM',
-            'title'    => 'Mémoire vive à l\'instant',
-            'detail'   => sprintf(
+            'title' => 'Mémoire vive à l\'instant',
+            'detail' => sprintf(
                 'À l\'instant de la dernière mesure, la RAM utilisée est de %d%% (%d Mo sur %d Mo), soit %s. Pour savoir si c\'est votre niveau habituel ou un pic ponctuel, il faut attendre plusieurs heures de mesures.',
                 $ramPct,
                 (int) $latest['ram_used_mb'],
@@ -505,8 +506,8 @@ class ScAlwaysdataController extends FrameworkBundleAdminController
         $findings[] = [
             'severity' => 'info',
             'category' => 'CPU',
-            'title'    => 'Charge du processeur à l\'instant',
-            'detail'   => sprintf(
+            'title' => 'Charge du processeur à l\'instant',
+            'detail' => sprintf(
                 'La charge CPU instantanée est de %.2f (%s sur un serveur 2 cœurs). Attention : ce chiffre peut tomber pile pendant le passage d\'un robot de moteur de recherche ou un cron interne — il ne reflète pas forcément votre état habituel.',
                 $cpu,
                 $cpuQualif
@@ -519,8 +520,8 @@ class ScAlwaysdataController extends FrameworkBundleAdminController
             $findings[] = [
                 'severity' => 'info',
                 'category' => 'Disque',
-                'title'    => 'Espace disque occupé',
-                'detail'   => sprintf(
+                'title' => 'Espace disque occupé',
+                'detail' => sprintf(
                     'Votre site occupe %d%% de l\'espace disque disponible (%.1f Go sur %.1f Go). Cette valeur évolue très lentement, elle est donc fiable même avec peu de mesures.',
                     $diskPct,
                     (float) $latest['disk_used_gb'],
@@ -536,8 +537,8 @@ class ScAlwaysdataController extends FrameworkBundleAdminController
                 $findings[] = [
                     'severity' => 'info',
                     'category' => 'Processus',
-                    'title'    => 'Processus le plus gourmand à l\'instant',
-                    'detail'   => sprintf(
+                    'title' => 'Processus le plus gourmand à l\'instant',
+                    'detail' => sprintf(
                         'Le processus qui consomme le plus de mémoire en ce moment est "%s" avec %d Mo. C\'est généralement normal : PHP garde en mémoire le code compilé des pages consultées pour accélérer les suivantes.',
                         (string) $top['name'],
                         (int) $top['rss_mb']
@@ -558,10 +559,10 @@ class ScAlwaysdataController extends FrameworkBundleAdminController
                 }
                 if ((float) $module['size_mb'] >= 3.0) {
                     $findings[] = [
-                        'severity'       => 'info',
-                        'category'       => 'Modules',
-                        'title'          => 'Module le plus volumineux en mémoire',
-                        'detail'         => sprintf(
+                        'severity' => 'info',
+                        'category' => 'Modules',
+                        'title' => 'Module le plus volumineux en mémoire',
+                        'detail' => sprintf(
                             'Parmi vos modules installés, "%s" est actuellement le plus lourd dans la mémoire PHP (%.1f Mo). C\'est une observation factuelle, pas forcément un problème — les modules les plus gros ne sont pas toujours ceux qui consomment le plus de CPU.',
                             (string) $module['module'],
                             (float) $module['size_mb']
@@ -589,13 +590,15 @@ class ScAlwaysdataController extends FrameworkBundleAdminController
         }
         if ($minutes < 60 * 24) {
             $hours = (int) floor($minutes / 60);
-            $mins  = $minutes % 60;
+            $mins = $minutes % 60;
+
             return $mins > 0
                 ? sprintf('%dh%02d', $hours, $mins)
                 : sprintf('%d h', $hours);
         }
-        $days  = (int) floor($minutes / (60 * 24));
+        $days = (int) floor($minutes / (60 * 24));
         $hours = (int) floor(($minutes % (60 * 24)) / 60);
+
         return $hours > 0
             ? sprintf('%d j %d h', $days, $hours)
             : sprintf('%d j', $days);
@@ -605,8 +608,9 @@ class ScAlwaysdataController extends FrameworkBundleAdminController
      * Construit un rapport d'état lisible par un admin non-technicien :
      * verdict global + constats + recommandations actionables.
      *
-     * @param array<string, mixed>      $stats
+     * @param array<string, mixed> $stats
      * @param array<string, mixed>|null $latest
+     *
      * @return array<string, mixed>
      */
     private function buildHealthReport(array $stats, ?array $latest, int $period): array
@@ -616,14 +620,14 @@ class ScAlwaysdataController extends FrameworkBundleAdminController
         // --- Aucune donnée ---
         if ((int) $stats['samples'] === 0) {
             return [
-                'overall'       => 'info',
+                'overall' => 'info',
                 'overall_label' => 'Aucune donnée collectée',
-                'overall_icon'  => 'hourglass_empty',
-                'findings'      => [[
-                    'severity'       => 'info',
-                    'category'       => 'Collecte',
-                    'title'          => 'Aucun sample enregistré',
-                    'detail'         => 'Aucune donnée n\'a encore été collectée pour la période sélectionnée.',
+                'overall_icon' => 'hourglass_empty',
+                'findings' => [[
+                    'severity' => 'info',
+                    'category' => 'Collecte',
+                    'title' => 'Aucun sample enregistré',
+                    'detail' => 'Aucune donnée n\'a encore été collectée pour la période sélectionnée.',
                     'recommendation' => 'Configurez la tâche planifiée Alwaysdata (toutes les 15 min) ou cliquez sur « Sample now » pour démarrer la collecte.',
                 ]],
             ];
@@ -631,16 +635,16 @@ class ScAlwaysdataController extends FrameworkBundleAdminController
 
         // --- Couverture des samples ---
         $expectedSamples = $period * 96; // 96 samples/jour à 15 min
-        $samplesCount    = (int) $stats['samples'];
-        $minutesOfData   = $samplesCount * 15; // 1 sample = 15 minutes de mesure
-        $confidenceLow   = $samplesCount < 10; // moins de 2h30 de données → pas assez pour conclure
+        $samplesCount = (int) $stats['samples'];
+        $minutesOfData = $samplesCount * 15; // 1 sample = 15 minutes de mesure
+        $confidenceLow = $samplesCount < 10; // moins de 2h30 de données → pas assez pour conclure
 
         if ($confidenceLow) {
             $findings[] = [
-                'severity'       => 'info',
-                'category'       => 'Patience',
-                'title'          => 'Données insuffisantes pour un diagnostic fiable',
-                'detail'         => sprintf(
+                'severity' => 'info',
+                'category' => 'Patience',
+                'title' => 'Données insuffisantes pour un diagnostic fiable',
+                'detail' => sprintf(
                     '%s de mesures disponibles sur les %d jour(s) visé(s). C\'est trop peu pour distinguer un vrai problème d\'un instant exceptionnel (ex: un crawler qui passe pile au moment de la mesure).',
                     $this->formatDuration($minutesOfData),
                     $period
@@ -654,19 +658,19 @@ class ScAlwaysdataController extends FrameworkBundleAdminController
             }
 
             return [
-                'overall'       => 'info',
+                'overall' => 'info',
                 'overall_label' => 'Diagnostic en cours — photo instantanée ci-dessous',
-                'overall_icon'  => 'hourglass_bottom',
-                'findings'      => $findings,
+                'overall_icon' => 'hourglass_bottom',
+                'findings' => $findings,
             ];
         }
 
         if ($samplesCount < ($expectedSamples * 0.5)) {
             $findings[] = [
-                'severity'       => 'info',
-                'category'       => 'Données',
-                'title'          => 'Analyse basée sur des mesures partielles',
-                'detail'         => sprintf(
+                'severity' => 'info',
+                'category' => 'Données',
+                'title' => 'Analyse basée sur des mesures partielles',
+                'detail' => sprintf(
                     '%s de mesures disponibles sur les %d jour(s) visé(s). Les tendances ci-dessous sont fiables mais gagneront en précision dans les prochains jours.',
                     $this->formatDuration($minutesOfData),
                     $period
@@ -675,16 +679,16 @@ class ScAlwaysdataController extends FrameworkBundleAdminController
         }
 
         // --- Analyse RAM ---
-        $ramTotal   = max(1, (int) $stats['ram_total_mb']);
-        $ramAvgPct  = (int) round($stats['ram_avg_mb']  * 100 / $ramTotal);
+        $ramTotal = max(1, (int) $stats['ram_total_mb']);
+        $ramAvgPct = (int) round($stats['ram_avg_mb'] * 100 / $ramTotal);
         $ramPeakPct = (int) round($stats['ram_peak_mb'] * 100 / $ramTotal);
 
         if ($ramPeakPct > 100) {
             $findings[] = [
-                'severity'       => 'critical',
-                'category'       => 'RAM',
-                'title'          => 'Dépassement de la limite RAM du plan',
-                'detail'         => sprintf(
+                'severity' => 'critical',
+                'category' => 'RAM',
+                'title' => 'Dépassement de la limite RAM du plan',
+                'detail' => sprintf(
                     'Un ou plusieurs samples montrent une RAM utilisée supérieure au plafond (%d Mo sur %d Mo autorisés). Cela peut provoquer des erreurs 500 aléatoires et des kills de processus.',
                     (int) $stats['ram_peak_mb'],
                     $ramTotal
@@ -693,10 +697,10 @@ class ScAlwaysdataController extends FrameworkBundleAdminController
             ];
         } elseif ($ramAvgPct > 85) {
             $findings[] = [
-                'severity'       => 'critical',
-                'category'       => 'RAM',
-                'title'          => 'RAM très sollicitée en moyenne',
-                'detail'         => sprintf(
+                'severity' => 'critical',
+                'category' => 'RAM',
+                'title' => 'RAM très sollicitée en moyenne',
+                'detail' => sprintf(
                     'La RAM utilisée est en moyenne à %d%% de la capacité (%d Mo sur %d Mo). Le serveur n\'a plus de marge pour absorber un pic de trafic.',
                     $ramAvgPct,
                     (int) $stats['ram_avg_mb'],
@@ -706,10 +710,10 @@ class ScAlwaysdataController extends FrameworkBundleAdminController
             ];
         } elseif ($ramAvgPct > 70) {
             $findings[] = [
-                'severity'       => 'warning',
-                'category'       => 'RAM',
-                'title'          => 'RAM bien remplie',
-                'detail'         => sprintf(
+                'severity' => 'warning',
+                'category' => 'RAM',
+                'title' => 'RAM bien remplie',
+                'detail' => sprintf(
                     'Moyenne d\'utilisation RAM à %d%%. Le serveur fonctionne mais a peu de marge en cas d\'afflux de visiteurs.',
                     $ramAvgPct
                 ),
@@ -719,8 +723,8 @@ class ScAlwaysdataController extends FrameworkBundleAdminController
             $findings[] = [
                 'severity' => 'ok',
                 'category' => 'RAM',
-                'title'    => 'Utilisation RAM confortable',
-                'detail'   => sprintf(
+                'title' => 'Utilisation RAM confortable',
+                'detail' => sprintf(
                     'Moyenne à %d%% (%d Mo sur %d Mo). Marge suffisante pour absorber les pics de trafic.',
                     $ramAvgPct,
                     (int) $stats['ram_avg_mb'],
@@ -733,10 +737,10 @@ class ScAlwaysdataController extends FrameworkBundleAdminController
         $peaks95 = (int) $stats['peaks_95'];
         if ($peaks95 > 5) {
             $findings[] = [
-                'severity'       => 'critical',
-                'category'       => 'RAM',
-                'title'          => 'Pics de saturation fréquents',
-                'detail'         => sprintf(
+                'severity' => 'critical',
+                'category' => 'RAM',
+                'title' => 'Pics de saturation fréquents',
+                'detail' => sprintf(
                     '%d samples ont atteint ou dépassé 95%% de RAM utilisée sur la période. Le serveur est régulièrement saturé.',
                     $peaks95
                 ),
@@ -744,24 +748,24 @@ class ScAlwaysdataController extends FrameworkBundleAdminController
             ];
         } elseif ($peaks95 > 0) {
             $findings[] = [
-                'severity'       => 'warning',
-                'category'       => 'RAM',
-                'title'          => 'Pics ponctuels à 95%',
-                'detail'         => sprintf('%d samples ponctuels à ≥95%% de RAM.', $peaks95),
+                'severity' => 'warning',
+                'category' => 'RAM',
+                'title' => 'Pics ponctuels à 95%',
+                'detail' => sprintf('%d samples ponctuels à ≥95%% de RAM.', $peaks95),
                 'recommendation' => 'Vérifier si ces pics correspondent à des moments de forte activité normale (flux produits, imports) ou à une anomalie.',
             ];
         }
 
         // --- Analyse CPU (Alwaysdata Medium = 2 vCPU, load ~2.0 = saturation) ---
-        $cpuAvg  = (float) $stats['cpu_avg'];
+        $cpuAvg = (float) $stats['cpu_avg'];
         $cpuPeak = (float) $stats['cpu_peak'];
 
         if ($cpuAvg > 1.8) {
             $findings[] = [
-                'severity'       => 'critical',
-                'category'       => 'CPU',
-                'title'          => 'CPU proche de la saturation',
-                'detail'         => sprintf(
+                'severity' => 'critical',
+                'category' => 'CPU',
+                'title' => 'CPU proche de la saturation',
+                'detail' => sprintf(
                     'Charge CPU moyenne à %.2f (pic %.2f). Sur un serveur 2 cœurs, une moyenne au-delà de 1.8 indique une saturation permanente.',
                     $cpuAvg,
                     $cpuPeak
@@ -772,8 +776,8 @@ class ScAlwaysdataController extends FrameworkBundleAdminController
             $findings[] = [
                 'severity' => 'warning',
                 'category' => 'CPU',
-                'title'    => 'CPU modérément chargé',
-                'detail'   => sprintf(
+                'title' => 'CPU modérément chargé',
+                'detail' => sprintf(
                     'Charge CPU moyenne %.2f, pic %.2f. Le serveur travaille bien mais reste sous contrôle.',
                     $cpuAvg,
                     $cpuPeak
@@ -783,8 +787,8 @@ class ScAlwaysdataController extends FrameworkBundleAdminController
             $findings[] = [
                 'severity' => 'ok',
                 'category' => 'CPU',
-                'title'    => 'CPU peu sollicité',
-                'detail'   => sprintf('Charge CPU moyenne %.2f — aucun problème de performance côté processeur.', $cpuAvg),
+                'title' => 'CPU peu sollicité',
+                'detail' => sprintf('Charge CPU moyenne %.2f — aucun problème de performance côté processeur.', $cpuAvg),
             ];
         }
 
@@ -794,10 +798,10 @@ class ScAlwaysdataController extends FrameworkBundleAdminController
 
             if ($diskPct > 90) {
                 $findings[] = [
-                    'severity'       => 'critical',
-                    'category'       => 'Disque',
-                    'title'          => 'Espace disque critique',
-                    'detail'         => sprintf(
+                    'severity' => 'critical',
+                    'category' => 'Disque',
+                    'title' => 'Espace disque critique',
+                    'detail' => sprintf(
                         '%d%% d\'occupation (%.1f Go sur %.1f Go). Risque de blocage des uploads, des logs et de la base de données.',
                         $diskPct,
                         $latest['disk_used_gb'],
@@ -807,10 +811,10 @@ class ScAlwaysdataController extends FrameworkBundleAdminController
                 ];
             } elseif ($diskPct > 80) {
                 $findings[] = [
-                    'severity'       => 'warning',
-                    'category'       => 'Disque',
-                    'title'          => 'Espace disque à surveiller',
-                    'detail'         => sprintf('%d%% d\'occupation disque.', $diskPct),
+                    'severity' => 'warning',
+                    'category' => 'Disque',
+                    'title' => 'Espace disque à surveiller',
+                    'detail' => sprintf('%d%% d\'occupation disque.', $diskPct),
                     'recommendation' => 'Prévoir un nettoyage des logs et caches dans les prochains jours.',
                 ];
             }
@@ -828,10 +832,10 @@ class ScAlwaysdataController extends FrameworkBundleAdminController
                 }
                 if ((float) $module['size_mb'] >= 5.0) {
                     $findings[] = [
-                        'severity'       => 'info',
-                        'category'       => 'Modules',
-                        'title'          => 'Module volumineux dans OPcache',
-                        'detail'         => sprintf(
+                        'severity' => 'info',
+                        'category' => 'Modules',
+                        'title' => 'Module volumineux dans OPcache',
+                        'detail' => sprintf(
                             'Le module "%s" occupe %.1f Mo d\'OPcache (%d scripts cachés). Ce module est chargé en mémoire en permanence.',
                             $module['module'],
                             $module['size_mb'],
@@ -848,28 +852,28 @@ class ScAlwaysdataController extends FrameworkBundleAdminController
         }
 
         // --- Verdict global ---
-        $overall      = 'ok';
+        $overall = 'ok';
         $overallLabel = 'Serveur en bonne santé';
-        $overallIcon  = 'check_circle';
+        $overallIcon = 'check_circle';
         foreach ($findings as $f) {
             if ($f['severity'] === 'critical') {
-                $overall      = 'critical';
+                $overall = 'critical';
                 $overallLabel = 'Action requise rapidement';
-                $overallIcon  = 'error';
+                $overallIcon = 'error';
                 break;
             }
             if ($f['severity'] === 'warning' && $overall !== 'critical') {
-                $overall      = 'warning';
+                $overall = 'warning';
                 $overallLabel = 'Points de vigilance';
-                $overallIcon  = 'warning';
+                $overallIcon = 'warning';
             }
         }
 
         return [
-            'overall'       => $overall,
+            'overall' => $overall,
             'overall_label' => $overallLabel,
-            'overall_icon'  => $overallIcon,
-            'findings'      => $findings,
+            'overall_icon' => $overallIcon,
+            'findings' => $findings,
         ];
     }
 
@@ -880,7 +884,7 @@ class ScAlwaysdataController extends FrameworkBundleAdminController
      */
     private function fetchDailyStats(string $date, int $period): array
     {
-        $rows = Db::getInstance()->executeS(
+        $rows = \Db::getInstance()->executeS(
             'SELECT
                 DATE(sampled_at) AS day,
                 COUNT(*)                 AS samples,
@@ -902,16 +906,16 @@ class ScAlwaysdataController extends FrameworkBundleAdminController
         $result = [];
         foreach ($rows ?: [] as $row) {
             $result[] = [
-                'day'          => (string) $row['day'],
-                'samples'      => (int) $row['samples'],
-                'ram_avg_mb'   => (int) $row['ram_avg_mb'],
-                'ram_peak_mb'  => (int) $row['ram_peak_mb'],
+                'day' => (string) $row['day'],
+                'samples' => (int) $row['samples'],
+                'ram_avg_mb' => (int) $row['ram_avg_mb'],
+                'ram_peak_mb' => (int) $row['ram_peak_mb'],
                 'ram_total_mb' => (int) $row['ram_total_mb'],
-                'peaks_95'     => (int) $row['peaks_95'],
-                'peaks_80'     => (int) $row['peaks_80'],
-                'cpu_avg'      => (float) $row['cpu_avg'],
-                'cpu_peak'     => (float) $row['cpu_peak'],
-                'opcache_avg'  => (float) $row['opcache_avg'],
+                'peaks_95' => (int) $row['peaks_95'],
+                'peaks_80' => (int) $row['peaks_80'],
+                'cpu_avg' => (float) $row['cpu_avg'],
+                'cpu_peak' => (float) $row['cpu_peak'],
+                'opcache_avg' => (float) $row['opcache_avg'],
             ];
         }
 
@@ -929,17 +933,18 @@ class ScAlwaysdataController extends FrameworkBundleAdminController
         $bucketSeconds = $period >= 30 ? 7200 : 0;
 
         if ($bucketSeconds === 0) {
-            $rows = Db::getInstance()->executeS(
+            $rows = \Db::getInstance()->executeS(
                 'SELECT sampled_at, ram_used_mb, ram_total_mb, cpu_load_1
                  FROM `' . _DB_PREFIX_ . 'sc_alwaysdata_resources_samples`
                  WHERE sampled_at >= DATE_SUB(\'' . pSQL($date) . '\', INTERVAL ' . $period . ' DAY)
                    AND sampled_at <  DATE_ADD(\'' . pSQL($date) . '\', INTERVAL 1 DAY)
                  ORDER BY sampled_at ASC'
             );
+
             return $rows ?: [];
         }
 
-        $rows = Db::getInstance()->executeS(
+        $rows = \Db::getInstance()->executeS(
             'SELECT
                 MIN(sampled_at)           AS sampled_at,
                 ROUND(AVG(ram_used_mb))   AS ram_used_mb,
@@ -962,7 +967,7 @@ class ScAlwaysdataController extends FrameworkBundleAdminController
     private function fetchLatestSample(): ?array
     {
         // Note: Db::getRow() adds LIMIT 1 automatically — do not append it manually.
-        $row = Db::getInstance()->getRow(
+        $row = \Db::getInstance()->getRow(
             'SELECT sampled_at, ram_used_mb, ram_total_mb,
                     cpu_load_1, cpu_load_5, cpu_load_15,
                     disk_used_gb, disk_total_gb, opcache_used_mb,
@@ -975,18 +980,18 @@ class ScAlwaysdataController extends FrameworkBundleAdminController
             return null;
         }
 
-        $row['ram_used_mb']         = (int) $row['ram_used_mb'];
-        $row['ram_total_mb']        = (int) $row['ram_total_mb'];
-        $row['cpu_load_1']          = (float) $row['cpu_load_1'];
-        $row['cpu_load_5']          = (float) $row['cpu_load_5'];
-        $row['cpu_load_15']         = (float) $row['cpu_load_15'];
-        $row['disk_used_gb']        = (float) $row['disk_used_gb'];
-        $row['disk_total_gb']       = (float) $row['disk_total_gb'];
-        $row['opcache_used_mb']     = (float) $row['opcache_used_mb'];
-        $row['top_processes']       = json_decode($row['top_processes'] ?: '[]', true) ?: [];
+        $row['ram_used_mb'] = (int) $row['ram_used_mb'];
+        $row['ram_total_mb'] = (int) $row['ram_total_mb'];
+        $row['cpu_load_1'] = (float) $row['cpu_load_1'];
+        $row['cpu_load_5'] = (float) $row['cpu_load_5'];
+        $row['cpu_load_15'] = (float) $row['cpu_load_15'];
+        $row['disk_used_gb'] = (float) $row['disk_used_gb'];
+        $row['disk_total_gb'] = (float) $row['disk_total_gb'];
+        $row['opcache_used_mb'] = (float) $row['opcache_used_mb'];
+        $row['top_processes'] = json_decode($row['top_processes'] ?: '[]', true) ?: [];
         $row['top_modules_opcache'] = json_decode($row['top_modules_opcache'] ?: '[]', true) ?: [];
         // Column added in 1.5.0 — a sample stored before the upgrade has NULL here.
-        $row['process_summary']     = json_decode($row['process_summary'] ?? '[]' ?: '[]', true) ?: [];
+        $row['process_summary'] = json_decode($row['process_summary'] ?? '[]' ?: '[]', true) ?: [];
 
         return $row;
     }
@@ -1000,7 +1005,7 @@ class ScAlwaysdataController extends FrameworkBundleAdminController
     {
         $cappedPeriod = min($period, 7);
 
-        $rows = Db::getInstance()->executeS(
+        $rows = \Db::getInstance()->executeS(
             'SELECT top_pages
              FROM `' . _DB_PREFIX_ . 'sc_alwaysdata_stats_daily`
              WHERE stat_date >= DATE_SUB(\'' . pSQL($date) . '\', INTERVAL ' . $cappedPeriod . ' DAY)
@@ -1317,7 +1322,7 @@ class ScAlwaysdataController extends FrameworkBundleAdminController
      */
     private function fetchShopDomains(): array
     {
-        $rows = Db::getInstance()->executeS(
+        $rows = \Db::getInstance()->executeS(
             'SELECT domain, domain_ssl FROM `' . _DB_PREFIX_ . 'shop_url` WHERE active = 1'
         ) ?: [];
 
@@ -1352,40 +1357,40 @@ class ScAlwaysdataController extends FrameworkBundleAdminController
     private function serializeStat(DailyStat $stat): array
     {
         return [
-            'stat_date'                  => $stat->stat_date,
-            'requests_total'             => (int) $stat->requests_total,
-            'requests_human'             => (int) $stat->requests_human,
-            'requests_scrapers'          => (int) $stat->requests_scrapers,
-            'mobile'                     => (int) $stat->mobile,
-            'desktop'                    => (int) $stat->desktop,
-            'views_product'              => (int) $stat->views_product,
-            'cart_adds'                  => (int) $stat->cart_adds,
-            'views_cart'                 => (int) $stat->views_cart,
-            'views_checkout'             => (int) $stat->views_checkout,
-            'post_checkout'              => (int) $stat->post_checkout,
-            'orders_confirmed'           => (int) $stat->orders_confirmed,
-            'errors_500_front'           => (int) $stat->errors_500_front,
-            'errors_500_bo'              => (int) $stat->errors_500_bo,
-            'errors_500_checkout'        => (int) $stat->errors_500_checkout,
+            'stat_date' => $stat->stat_date,
+            'requests_total' => (int) $stat->requests_total,
+            'requests_human' => (int) $stat->requests_human,
+            'requests_scrapers' => (int) $stat->requests_scrapers,
+            'mobile' => (int) $stat->mobile,
+            'desktop' => (int) $stat->desktop,
+            'views_product' => (int) $stat->views_product,
+            'cart_adds' => (int) $stat->cart_adds,
+            'views_cart' => (int) $stat->views_cart,
+            'views_checkout' => (int) $stat->views_checkout,
+            'post_checkout' => (int) $stat->post_checkout,
+            'orders_confirmed' => (int) $stat->orders_confirmed,
+            'errors_500_front' => (int) $stat->errors_500_front,
+            'errors_500_bo' => (int) $stat->errors_500_bo,
+            'errors_500_checkout' => (int) $stat->errors_500_checkout,
             'errors_500_checkout_detail' => json_decode($stat->errors_500_checkout_detail ?: '[]', true),
-            'errors_500_pages'           => json_decode($stat->errors_500_pages ?: '{}', true),
-            'top_pages'                  => json_decode($stat->top_pages ?: '[]', true),
-            'top_ips'                    => json_decode($stat->top_ips ?: '[]', true),
-            'hourly_breakdown'           => json_decode($stat->hourly_breakdown ?: '{}', true),
-            'php_errors'                 => json_decode($stat->php_errors ?: '[]', true),
+            'errors_500_pages' => json_decode($stat->errors_500_pages ?: '{}', true),
+            'top_pages' => json_decode($stat->top_pages ?: '[]', true),
+            'top_ips' => json_decode($stat->top_ips ?: '[]', true),
+            'hourly_breakdown' => json_decode($stat->hourly_breakdown ?: '{}', true),
+            'php_errors' => json_decode($stat->php_errors ?: '[]', true),
         ];
     }
 
     private function ensureStatsTable(): void
     {
-        $tableExists = (bool) Db::getInstance()->getValue(
+        $tableExists = (bool) \Db::getInstance()->getValue(
             'SELECT COUNT(*) FROM information_schema.TABLES
              WHERE TABLE_SCHEMA = DATABASE()
              AND TABLE_NAME = \'' . _DB_PREFIX_ . 'sc_alwaysdata_stats_daily\''
         );
 
         if (!$tableExists) {
-            Db::getInstance()->execute(DailyStat::getCreateTableSql());
+            \Db::getInstance()->execute(DailyStat::getCreateTableSql());
 
             return;
         }
@@ -1395,24 +1400,24 @@ class ScAlwaysdataController extends FrameworkBundleAdminController
 
     private function ensureResourcesTable(): void
     {
-        $dailyExists = (bool) Db::getInstance()->getValue(
+        $dailyExists = (bool) \Db::getInstance()->getValue(
             'SELECT COUNT(*) FROM information_schema.TABLES
              WHERE TABLE_SCHEMA = DATABASE()
              AND TABLE_NAME = \'' . _DB_PREFIX_ . 'sc_alwaysdata_resources_daily\''
         );
 
         if (!$dailyExists) {
-            Db::getInstance()->execute(DailyResource::getCreateTableSql());
+            \Db::getInstance()->execute(DailyResource::getCreateTableSql());
         }
 
-        $samplesExists = (bool) Db::getInstance()->getValue(
+        $samplesExists = (bool) \Db::getInstance()->getValue(
             'SELECT COUNT(*) FROM information_schema.TABLES
              WHERE TABLE_SCHEMA = DATABASE()
              AND TABLE_NAME = \'' . _DB_PREFIX_ . 'sc_alwaysdata_resources_samples\''
         );
 
         if (!$samplesExists) {
-            Db::getInstance()->execute(ResourceSample::getCreateTableSql());
+            \Db::getInstance()->execute(ResourceSample::getCreateTableSql());
 
             return;
         }
@@ -1420,7 +1425,7 @@ class ScAlwaysdataController extends FrameworkBundleAdminController
         // Defensive migration: a module deployed over FTP without the upgrade
         // script running would keep a samples table missing the newer column,
         // and every cron insert would fail.
-        $summaryColumnExists = (bool) Db::getInstance()->getValue(
+        $summaryColumnExists = (bool) \Db::getInstance()->getValue(
             'SELECT COUNT(*) FROM information_schema.COLUMNS
              WHERE TABLE_SCHEMA = DATABASE()
              AND TABLE_NAME = \'' . _DB_PREFIX_ . 'sc_alwaysdata_resources_samples\'
@@ -1428,7 +1433,7 @@ class ScAlwaysdataController extends FrameworkBundleAdminController
         );
 
         if (!$summaryColumnExists) {
-            Db::getInstance()->execute(
+            \Db::getInstance()->execute(
                 'ALTER TABLE `' . _DB_PREFIX_ . 'sc_alwaysdata_resources_samples`
                  ADD COLUMN `process_summary` text NULL AFTER `top_modules_opcache`'
             );

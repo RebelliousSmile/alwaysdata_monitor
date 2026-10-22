@@ -1,4 +1,5 @@
 <?php
+
 /**
  * SC Alwaysdata - PrestaShop 8 Module
  *
@@ -35,18 +36,18 @@ class ResourceCollectorService
      */
     public function collect(): array
     {
-        $cpuLoad   = $this->collectCpuLoad();
+        $cpuLoad = $this->collectCpuLoad();
         $diskStats = $this->collectDiskStats();
         $cgroupInfo = $this->discoverCgroupInfo();
         [$ramUsed, $ramTotal] = $this->collectRamMb($cgroupInfo);
 
         return [
-            'ram_used_mb'   => $ramUsed,
-            'ram_total_mb'  => $ramTotal,
-            'cpu_load_1'    => $cpuLoad[0],
-            'cpu_load_5'    => $cpuLoad[1],
-            'cpu_load_15'   => $cpuLoad[2],
-            'disk_used_gb'  => $diskStats['used'],
+            'ram_used_mb' => $ramUsed,
+            'ram_total_mb' => $ramTotal,
+            'cpu_load_1' => $cpuLoad[0],
+            'cpu_load_5' => $cpuLoad[1],
+            'cpu_load_15' => $cpuLoad[2],
+            'disk_used_gb' => $diskStats['used'],
             'disk_total_gb' => $diskStats['total'],
         ];
     }
@@ -59,13 +60,13 @@ class ResourceCollectorService
      */
     public function collectSample(): array
     {
-        $base    = $this->collect();
+        $base = $this->collect();
         $opcache = $this->collectOpcache();
 
         return array_merge($base, [
-            'opcache_used_mb'     => $opcache['used_mb'],
-            'top_processes'       => $this->collectTopProcesses(10),
-            'process_summary'     => $this->collectProcessSummary(),
+            'opcache_used_mb' => $opcache['used_mb'],
+            'top_processes' => $this->collectTopProcesses(10),
+            'process_summary' => $this->collectProcessSummary(),
             'top_modules_opcache' => $this->collectTopModulesOpcache(10),
         ]);
     }
@@ -77,11 +78,11 @@ class ResourceCollectorService
      */
     public function collectLive(): array
     {
-        $base       = $this->collect();
+        $base = $this->collect();
         $cgroupInfo = $this->discoverCgroupInfo();
-        $ramDetail  = $this->collectRamDetail($cgroupInfo);
-        $opcache    = $this->collectOpcache();
-        $topProcs   = $this->collectTopProcesses(10);
+        $ramDetail = $this->collectRamDetail($cgroupInfo);
+        $opcache = $this->collectOpcache();
+        $topProcs = $this->collectTopProcesses(10);
 
         // Fallback RSS : si pas de cgroup exploitable, on utilise la somme VmRSS de /proc/<pid>/status
         // (déjà calculée par collectRamMb → base['ram_used_mb'] en l'absence de cgroup)
@@ -90,18 +91,18 @@ class ResourceCollectorService
         }
 
         return array_merge($base, [
-            'ram_rss_mb'         => $ramDetail['rss_mb'],
-            'ram_cache_mb'       => $ramDetail['cache_mb'],
-            'opcache_enabled'    => $opcache['enabled'],
-            'opcache_used_mb'    => $opcache['used_mb'],
-            'opcache_free_mb'    => $opcache['free_mb'],
-            'opcache_total_mb'   => $opcache['total_mb'],
+            'ram_rss_mb' => $ramDetail['rss_mb'],
+            'ram_cache_mb' => $ramDetail['cache_mb'],
+            'opcache_enabled' => $opcache['enabled'],
+            'opcache_used_mb' => $opcache['used_mb'],
+            'opcache_free_mb' => $opcache['free_mb'],
+            'opcache_total_mb' => $opcache['total_mb'],
             'opcache_strings_mb' => $opcache['strings_mb'],
-            'top_processes'      => $topProcs,
-            'process_summary'    => $this->collectProcessSummary(),
-            'cgroup_version'     => $cgroupInfo['version'],
-            'cgroup_path'        => isset($cgroupInfo['path']) ? (string) $cgroupInfo['path'] : '',
-            'collected_at'       => date('Y-m-d H:i:s'),
+            'top_processes' => $topProcs,
+            'process_summary' => $this->collectProcessSummary(),
+            'cgroup_version' => $cgroupInfo['version'],
+            'cgroup_path' => isset($cgroupInfo['path']) ? (string) $cgroupInfo['path'] : '',
+            'collected_at' => date('Y-m-d H:i:s'),
         ]);
     }
 
@@ -140,11 +141,11 @@ class ResourceCollectorService
             $name = $process['name'];
             if (!isset($byName[$name])) {
                 $byName[$name] = [
-                    'name'         => $name,
-                    'count'        => 0,
+                    'name' => $name,
+                    'count' => 0,
                     'rss_total_mb' => 0,
-                    'rss_max_mb'   => 0,
-                    'rss_avg_mb'   => 0,
+                    'rss_max_mb' => 0,
+                    'rss_avg_mb' => 0,
                 ];
             }
 
@@ -213,8 +214,8 @@ class ResourceCollectorService
 
             $pid = (int) basename(dirname($statusFile));
             $processes[] = [
-                'name'   => trim($nameMatch[1]),
-                'pid'    => $pid,
+                'name' => trim($nameMatch[1]),
+                'pid' => $pid,
                 'rss_mb' => (int) round((int) $rssMatch[1] / 1024),
             ];
         }
@@ -233,11 +234,12 @@ class ResourceCollectorService
      *   3. /proc/meminfo (valeurs host, fallback ultime)
      *
      * @param array{version: int, path: string|null} $cgroupInfo
+     *
      * @return array{int, int}
      */
     private function collectRamMb(array $cgroupInfo): array
     {
-        $path    = $cgroupInfo['path'];
+        $path = $cgroupInfo['path'];
         $version = $cgroupInfo['version'];
 
         if ($path !== null) {
@@ -249,7 +251,7 @@ class ResourceCollectorService
                 $limitFile = $path . '/memory.limit_in_bytes';
             }
 
-            $usedMb  = $this->readBytesFileMb($usageFile);
+            $usedMb = $this->readBytesFileMb($usageFile);
             $limitMb = $this->readBytesFileMb($limitFile);
 
             // Accepter le cgroup uniquement si la limite est plausible (ni "max", ni hôte)
@@ -314,11 +316,12 @@ class ResourceCollectorService
      * Retourne [rss_mb, cache_mb] depuis memory.stat du cgroup.
      *
      * @param array{version: int, path: string|null} $cgroupInfo
+     *
      * @return array{rss_mb: int, cache_mb: int}
      */
     private function collectRamDetail(array $cgroupInfo): array
     {
-        $path    = $cgroupInfo['path'];
+        $path = $cgroupInfo['path'];
         $version = $cgroupInfo['version'];
 
         if ($path !== null) {
@@ -338,7 +341,7 @@ class ResourceCollectorService
                 }
 
                 return [
-                    'rss_mb'   => isset($rssMatch[1])   ? (int) round((int) $rssMatch[1]   / (1024 * 1024)) : 0,
+                    'rss_mb' => isset($rssMatch[1]) ? (int) round((int) $rssMatch[1] / (1024 * 1024)) : 0,
                     'cache_mb' => isset($cacheMatch[1]) ? (int) round((int) $cacheMatch[1] / (1024 * 1024)) : 0,
                 ];
             }
@@ -365,7 +368,7 @@ class ResourceCollectorService
         }
 
         $totalMb = (int) round((int) $totalMatch[1] / 1024);
-        $usedMb  = (int) round(((int) $totalMatch[1] - (int) $availMatch[1]) / 1024);
+        $usedMb = (int) round(((int) $totalMatch[1] - (int) $availMatch[1]) / 1024);
 
         return [$usedMb, $totalMb];
     }
@@ -466,16 +469,16 @@ class ResourceCollectorService
      */
     private function collectDiskStats(): array
     {
-        $path  = $_SERVER['HOME'] ?? '/';
+        $path = $_SERVER['HOME'] ?? '/';
         $total = disk_total_space($path);
-        $free  = disk_free_space($path);
+        $free = disk_free_space($path);
 
         if ($total === false || $free === false) {
             return ['used' => 0.0, 'total' => 100.0];
         }
 
         return [
-            'used'  => round(($total - $free) / (1024 ** 3), 2),
+            'used' => round(($total - $free) / (1024 ** 3), 2),
             'total' => round($total / (1024 ** 3), 2),
         ];
     }
@@ -501,21 +504,21 @@ class ResourceCollectorService
             return $empty;
         }
 
-        $mem     = $opcacheStatus['memory_usage'];
+        $mem = $opcacheStatus['memory_usage'];
         $strings = isset($opcacheStatus['interned_strings_usage']) ? $opcacheStatus['interned_strings_usage'] : [];
 
-        $usedBytes   = isset($mem['used_memory'])   ? (int) $mem['used_memory']   : 0;
-        $freeBytes   = isset($mem['free_memory'])   ? (int) $mem['free_memory']   : 0;
+        $usedBytes = isset($mem['used_memory']) ? (int) $mem['used_memory'] : 0;
+        $freeBytes = isset($mem['free_memory']) ? (int) $mem['free_memory'] : 0;
         $wastedBytes = isset($mem['wasted_memory']) ? (int) $mem['wasted_memory'] : 0;
-        $strBytes    = isset($strings['used_memory']) ? (int) $strings['used_memory'] : 0;
+        $strBytes = isset($strings['used_memory']) ? (int) $strings['used_memory'] : 0;
 
         $oneMb = 1024 * 1024;
 
         return [
-            'enabled'    => true,
-            'used_mb'    => round(($usedBytes + $wastedBytes) / $oneMb, 1),
-            'free_mb'    => round($freeBytes / $oneMb, 1),
-            'total_mb'   => round(($usedBytes + $freeBytes + $wastedBytes) / $oneMb, 1),
+            'enabled' => true,
+            'used_mb' => round(($usedBytes + $wastedBytes) / $oneMb, 1),
+            'free_mb' => round($freeBytes / $oneMb, 1),
+            'total_mb' => round(($usedBytes + $freeBytes + $wastedBytes) / $oneMb, 1),
             'strings_mb' => round($strBytes / $oneMb, 1),
         ];
     }
@@ -538,29 +541,29 @@ class ResourceCollectorService
         }
 
         $moduleDir = defined('_PS_MODULE_DIR_') ? rtrim(_PS_MODULE_DIR_, '/') . '/' : '';
-        $rootDir   = defined('_PS_ROOT_DIR_')   ? rtrim(_PS_ROOT_DIR_, '/')   . '/' : '';
-        $buckets   = [];
+        $rootDir = defined('_PS_ROOT_DIR_') ? rtrim(_PS_ROOT_DIR_, '/') . '/' : '';
+        $buckets = [];
 
         foreach ($opcacheStatus['scripts'] as $path => $info) {
             if (!is_array($info) || !isset($info['memory_consumption'])) {
                 continue;
             }
             $bytes = (int) $info['memory_consumption'];
-            $name  = $this->classifyOpcachePath((string) $path, $moduleDir, $rootDir);
+            $name = $this->classifyOpcachePath((string) $path, $moduleDir, $rootDir);
 
             if (!isset($buckets[$name])) {
                 $buckets[$name] = ['bytes' => 0, 'count' => 0];
             }
             $buckets[$name]['bytes'] += $bytes;
-            $buckets[$name]['count'] += 1;
+            ++$buckets[$name]['count'];
         }
 
-        $oneMb  = 1024 * 1024;
+        $oneMb = 1024 * 1024;
         $result = [];
         foreach ($buckets as $name => $data) {
             $result[] = [
-                'module'       => $name,
-                'size_mb'      => round($data['bytes'] / $oneMb, 1),
+                'module' => $name,
+                'size_mb' => round($data['bytes'] / $oneMb, 1),
                 'script_count' => $data['count'],
             ];
         }
@@ -578,7 +581,7 @@ class ResourceCollectorService
     private function classifyOpcachePath(string $path, string $moduleDir, string $rootDir): string
     {
         if ($moduleDir !== '' && strpos($path, $moduleDir) === 0) {
-            $rest    = substr($path, strlen($moduleDir));
+            $rest = substr($path, strlen($moduleDir));
             $segment = strstr($rest, '/', true);
 
             return $segment !== false ? $segment : ($rest !== '' ? $rest : '[modules-root]');
