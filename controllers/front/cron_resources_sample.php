@@ -6,7 +6,7 @@
  * Alwaysdata. Il stocke un sample des ressources en base pour produire des stats
  * (moyennes, pics, séries temporelles) consultables depuis l'onglet Ressources.
  *
- * URL: https://kelenaya.fr/module/sc_alwaysdata/cron_resources_sample?token={SC_ALWAYSDATA_CRON_TOKEN}
+ * URL: https://site-a.example/module/sc_alwaysdata/cron_resources_sample?token={SC_ALWAYSDATA_CRON_TOKEN}
  *
  * @author    Scriptami
  * @copyright Scriptami

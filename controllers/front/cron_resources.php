@@ -9,7 +9,7 @@
  *
  * Fréquence recommandée : 1 fois par jour à 02h15 (après le cron stats).
  *
- * URL: https://kelenaya.fr/module/sc_alwaysdata/cron_resources?token={SC_ALWAYSDATA_CRON_TOKEN}
+ * URL: https://site-a.example/module/sc_alwaysdata/cron_resources?token={SC_ALWAYSDATA_CRON_TOKEN}
  *
  * @author    Scriptami
  * @copyright Scriptami

@@ -3,7 +3,7 @@
  * SC Alwaysdata - PrestaShop 8 Module — Cron front controller
  *
  * Called nightly by Alwaysdata cron:
- *   https://kelenaya.fr/module/sc_alwaysdata/cron?token={SC_ALWAYSDATA_CRON_TOKEN}
+ *   https://site-a.example/module/sc_alwaysdata/cron?token={SC_ALWAYSDATA_CRON_TOKEN}
  *
  * @author    Scriptami
  * @copyright Scriptami

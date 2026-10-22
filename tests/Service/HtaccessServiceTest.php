@@ -45,12 +45,12 @@ class HtaccessServiceTest extends TestCase
 
     public function testReadBlockedIpsApache24Format(): void
     {
-        $this->write("Require all granted\nRequire not ip 1.2.3.4\nRequire not ip 5.6.7.8\n");
+        $this->write("Require all granted\nRequire not ip 203.0.113.14\nRequire not ip 203.0.113.15\n");
 
         $ips = $this->service()->readBlockedIps();
 
-        $this->assertContains('1.2.3.4', $ips);
-        $this->assertContains('5.6.7.8', $ips);
+        $this->assertContains('203.0.113.14', $ips);
+        $this->assertContains('203.0.113.15', $ips);
     }
 
     public function testReadBlockedIpsApache22Format(): void
@@ -64,7 +64,7 @@ class HtaccessServiceTest extends TestCase
 
     public function testReadBlockedIpsDeduplicates(): void
     {
-        $this->write("Require not ip 1.2.3.4\nRequire not ip 1.2.3.4\n");
+        $this->write("Require not ip 203.0.113.14\nRequire not ip 203.0.113.14\n");
 
         $ips = $this->service()->readBlockedIps();
 
@@ -160,17 +160,17 @@ class HtaccessServiceTest extends TestCase
     {
         $this->write("Options -Indexes\n");
 
-        $this->service()->blockIp('1.2.3.4');
+        $this->service()->blockIp('203.0.113.14');
 
         $content = file_get_contents($this->tmpFile);
-        $this->assertStringContainsString('Require not ip 1.2.3.4', $content);
+        $this->assertStringContainsString('Require not ip 203.0.113.14', $content);
     }
 
     public function testBlockIpCreatesBackup(): void
     {
         $this->write("Options -Indexes\n");
 
-        $this->service()->blockIp('1.2.3.4');
+        $this->service()->blockIp('203.0.113.14');
 
         $backups = glob($this->tmpFile . '.*.bak');
         $this->assertNotEmpty($backups, 'A dated backup must be created');
@@ -188,10 +188,10 @@ class HtaccessServiceTest extends TestCase
     {
         $this->write('');
 
-        $this->service()->blockIp('9.9.9.9');
+        $this->service()->blockIp('203.0.113.9');
 
         $ips = $this->service()->readBlockedIps();
-        $this->assertContains('9.9.9.9', $ips);
+        $this->assertContains('203.0.113.9', $ips);
     }
 
     // -----------------------------------------------------------------
@@ -274,22 +274,22 @@ class HtaccessServiceTest extends TestCase
     public function testUnblockIpRemovesModuleBlock(): void
     {
         $this->write("Options -Indexes\n");
-        $this->service()->blockIp('1.2.3.4');
-        $this->assertContains('1.2.3.4', $this->service()->readBlockedIps());
+        $this->service()->blockIp('203.0.113.14');
+        $this->assertContains('203.0.113.14', $this->service()->readBlockedIps());
 
-        $this->service()->unblockIp('1.2.3.4');
+        $this->service()->unblockIp('203.0.113.14');
 
-        $this->assertNotContains('1.2.3.4', $this->service()->readBlockedIps());
+        $this->assertNotContains('203.0.113.14', $this->service()->readBlockedIps());
     }
 
     public function testUnblockIpRemovesLooseRequireNotIp(): void
     {
-        $this->write("\nRequire not ip 5.5.5.5\n");
+        $this->write("\nRequire not ip 203.0.113.5\n");
 
-        $this->service()->unblockIp('5.5.5.5');
+        $this->service()->unblockIp('203.0.113.5');
 
         $content = file_get_contents($this->tmpFile);
-        $this->assertStringNotContainsString('5.5.5.5', $content);
+        $this->assertStringNotContainsString('203.0.113.5', $content);
     }
 
     public function testUnblockIpRejectsInvalidIp(): void
@@ -302,9 +302,9 @@ class HtaccessServiceTest extends TestCase
 
     public function testUnblockIpCreatesBackup(): void
     {
-        $this->write("\nRequire not ip 9.9.9.9\n");
+        $this->write("\nRequire not ip 203.0.113.9\n");
 
-        $this->service()->unblockIp('9.9.9.9');
+        $this->service()->unblockIp('203.0.113.9');
 
         $backups = glob($this->tmpFile . '.*.bak');
         $this->assertNotEmpty($backups);
@@ -355,7 +355,7 @@ class HtaccessServiceTest extends TestCase
     // Protection block
     // -----------------------------------------------------------------
 
-    private const DOMAINS = ['www.kelenaya.fr', 'www.kelenaya.com'];
+    private const DOMAINS = ['www.site-a.example', 'www.site-a.test'];
 
     public function testApplyProtectionPrependsBlockBeforeExistingRules(): void
     {
@@ -376,7 +376,7 @@ class HtaccessServiceTest extends TestCase
 
         $content = file_get_contents($this->tmpFile);
         $this->assertStringContainsString(
-            'RewriteCond %{HTTP_REFERER} !^https?://(www\.kelenaya\.fr|www\.kelenaya\.com)(:\d+)?/ [NC]',
+            'RewriteCond %{HTTP_REFERER} !^https?://(www\.site-a\.example|www\.site-a\.test)(:\d+)?/ [NC]',
             $content
         );
         $this->assertStringNotContainsString('(/|%2F)', $content);

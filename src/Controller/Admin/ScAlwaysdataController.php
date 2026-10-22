@@ -352,7 +352,7 @@ class ScAlwaysdataController extends FrameworkBundleAdminController
     }
 
     /**
-     * Load diagnostic of one day of HTTP logs (port of diag-kelenaya.sh).
+     * Load diagnostic of one day of HTTP logs (port of diag-site-a.sh).
      *
      * A past day's log no longer changes: its result is cached on disk, keyed by
      * the file's size and mtime, so re-opening the tab during an incident does

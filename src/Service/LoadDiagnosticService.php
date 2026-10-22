@@ -14,7 +14,7 @@ namespace ScAlwaysdata\Service;
 /**
  * HTTP load diagnostic for one day of Alwaysdata logs.
  *
- * PHP port of the diag-kelenaya.sh investigation script (CPU saturation / 503
+ * PHP port of the diag-site-a.sh investigation script (CPU saturation / 503
  * caused by facet scrapers). The shell script re-reads the log once per
  * section; this service computes every section in a single streaming pass so it
  * can run inside a back-office request without holding a FastCGI worker for
