@@ -15,7 +15,7 @@ class HtaccessDoctorTest extends TestCase
         . "<IfModule mod_rewrite.c>\n"
         . "RewriteEngine on\n"
         . "RewriteCond %{QUERY_STRING} (^|&)q= [NC]\n"
-        . "RewriteCond %{HTTP_REFERER} !^https?://(www\\.site-a\\.fr)(:\\d+)?/ [NC]\n"
+        . "RewriteCond %{HTTP_REFERER} !^https?://(www\\.site-a\\.example)(:\\d+)?/ [NC]\n"
         . "RewriteRule .* - [F,L]\n"
         . "</IfModule>\n"
         . "# END sc_alwaysdata protection\n";
