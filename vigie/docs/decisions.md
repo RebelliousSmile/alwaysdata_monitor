@@ -419,6 +419,45 @@ règles détaillées dans [`failles.md`](./failles.md#rapprochement-f7).
 | Lecture par l'API (curseurs figés sur les runs actifs, 409 au basculement), la CLI (`site components`, `site vulns`, `vulns report`, `status`) et deux écrans de console **sans action d'écriture** ; seule écriture : `site vulns-ack` (aperçu puis `--apply`) | Contrat de #5 ; l'exploitant décide sur le VPS |
 | Migration en fichier `0021.sql` (F6 a pris `0020.sql`), `SCHEMA_VULNS_MATCH` calculé par sa place | Une migration publiée ne se modifie jamais |
 
+## Écritures depuis la console (issue #35) — proposition à valider
+
+**Non tranché.** Cette section propose ; seul l'exploitant décide. Contexte : la
+console n'écrit aujourd'hui que par `POST /api/v1/incidents/{id}/ack` ; un test
+du client (`ack_is_the_only_write_besides_pairing`) verrouille cette surface.
+Trois écrans des maquettes et deux fonctionnalités en demandent davantage
+(issues #33 et #35).
+
+La question utile n'est pas « écrire ou non » mais **ce que perd l'exploitant si
+le téléphone ou le poste est volé**. Le jeton d'appareil ne donne aujourd'hui que
+de la lecture et l'acquittement ; chaque écriture ajoutée le change.
+
+| Écriture demandée | Classe | Proposition | Raison |
+| --- | --- | --- | --- |
+| Acquitter (existe) | état du veilleur | Garder | Arrête des relances, réversible par la fermeture |
+| **Sourdine** (24 h, 7 jours, jusqu'à un changement du constat) | état du veilleur | **Admettre**, sous les mêmes gardes que `ack` : durées bornées et fermées, aucun effet sur un site, journalisée comme `ack`, test du client mis à jour (« `ack` et `snooze` sont les seules écritures ») | Même portée que l'acquittement : elle ne fait que retarder un e-mail. Pire cas d'un jeton volé : alertes retardées de 7 jours au plus, visible dans le journal |
+| Blocage manuel, liste blanche, file d'écriture (`.htaccess`, `robots.txt`) | écriture **sur un site** | **Pas depuis la console.** Garder les propositions (« Décider… ») qui donnent la commande du VPS | Un jeton volé permettrait de réécrire le `.htaccess` d'un site en production ou d'y bloquer des visiteurs. Aujourd'hui il faut un accès SSH au VPS. Si le besoin se confirme : la console *propose*, l'exploitant *approuve sur le VPS* (`vigie command approve`), deux canaux distincts |
+| Ajouter un site | accord de confiance | **Pas depuis la console** | Ajouter un site change ce que le veilleur croit et peut commander ; reste dans `config.toml` puis `vigie site add` |
+| Ressources du compte | lecture | **Pas une écriture** : voir ci-dessous | — |
+
+### Ressources du compte : aucun accès à l'hébergeur nécessaire
+
+Le module PrestaShop relève déjà RAM, processeur et disque **depuis le compte**
+(`ResourceCollectorService` : limite cgroup, `/proc`), sans API ni secret de
+l'hébergeur. Le principe « aucun accès n'est conservé chez l'hébergeur » est
+donc tenu si le même relevé est fait par l'agent PHP : une famille de rapports
+`agent:resources` (protocole signé existant), lue par la console comme les
+autres. C'est une extension du protocole de l'agent (version, bornes, rétention),
+pas un secret à stocker.
+
+### Conséquences si la proposition est retenue
+
+- #33 : la sourdine devient réalisable (migration `snoozed_until`, filtre dans
+  `due_reminders`, route, écran) ; « Ressources du compte » devient une famille
+  d'agent.
+- #35 : se ferme par cette décision consignée.
+- Le test du client est mis à jour dans la PR de la sourdine, jamais assoupli
+  seul.
+
 ## Dépendances (issue #22)
 
 Plan : `aidd_docs/tasks/2026_10/2026_10_17_osv-scanner/plan.md`. Job `deps`
