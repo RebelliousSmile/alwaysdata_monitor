@@ -26,6 +26,10 @@ est public.
 | Synchronisation des failles (migration 0017, issue #16) | **Non déployée** : timer installé par `provision.sh`, relevé de la première synchronisation réelle à faire après déploiement, voir [Synchronisation des failles](#synchronisation-des-failles-issue-16) |
 | Priorisation KEV et EPSS (migration `0019.sql`, issue #18) | **Non déployée** : relevé KEV et EPSS (dont `Content-Encoding` d'EPSS) à faire après déploiement, voir [Relevé de la synchronisation réelle](#relevé-de-la-synchronisation-réelle) |
 | Registre des capacités (schéma 14, issue #4) | **Non déployé** : relevés de la cible (binaire de la CI, `tick` à blanc) et de la configuration (aucune clé d'agent sur un site sans runtime `php`) à faire avant, voir [`audit-chemin-critique.md`](./audit-chemin-critique.md) |
+| Sources CMS (Wordfence, Friends-Of-Presta, migration 18, issue #17) | **Déploiement non consigné** : Wordfence reste verrouillé tant que `terms_reviewed` n'est pas posé (issue #37) ; relevé à faire, voir [Relevé des sources CMS](#relevé-des-sources-cms) |
+| Inventaire de l'agent PHP (agent 0.5.0, migration 16, issue #19) | **Déploiement non consigné** : le watcher accepte `/r/v1/inventory` pour les sites qui déclarent `[sites.inventory]` ; agent à redéployer sur chaque site |
+| Outil `vigie-inventory` (migration 20, issue #20) | **Déploiement non consigné** : binaire publié par le workflow `inventory-release` ; clé d'inventaire par site (`vigie site inventory-key`) |
+| Rapprochement des failles (migration `0021.sql`, issue #21) | **Déploiement non consigné** : relevé du premier rapprochement à faire, voir [Relevé du premier rapprochement](#relevé-du-premier-rapprochement) |
 
 ## Installation
 
