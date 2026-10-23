@@ -147,6 +147,10 @@ impl Veilleur {
     }
 
     fn with(edit: impl FnOnce(&mut Config)) -> Self {
+        // Le logger de capture doit exister avant la première requête : installé
+        // à la première lecture, il perdait les lignes d'un test qui passait avant
+        // tout autre appel de `journal()` (flaky sous Windows).
+        journal();
         let dir = tempfile::tempdir().expect("tempdir");
         let mut config = veilleur::config(dir.path().join("vigie.db"));
         edit(&mut config);
