@@ -481,13 +481,14 @@ réglages sont retirés.
   aperçus autonomes ; le second est l'e-mail d'ouverture de l'incident
   `heartbeat`, visible sur son écran Alerte.
 
-## Erreurs des sites (issue #52) — veilleur livré, agent et console à suivre
+## Erreurs des sites (issue #52) — veilleur et console livrés, agent à suivre
 
 Décision prise le 2026-10-23 sur le plan de l'issue : la console montre les
 erreurs d'un site **regroupées par message**, jamais une ligne brute. Le
 chantier se livre en trois PR (protocole et agent, veilleur et API, console).
 Cette section fixe le contrat. La deuxième PR (veilleur et API) est livrée :
-voir « Livré côté veilleur » plus bas.
+voir « Livré côté veilleur » plus bas ; la troisième (console), voir « Livré
+côté console ».
 
 **Ce qui sort du compte (liste fermée).** Par site et par jour UTC, au plus 50
 groupes `(message normalisé, compteur, première vue, dernière vue)`. Ni ligne
@@ -535,6 +536,23 @@ refuse un lot dont un message contient encore une adresse.
   (`Cafe::add`) refuse parfois un message légitime : faux positif accepté.
 - Rétention : 14 jours UTC, aujourd'hui compris (aujourd'hui moins 13 jours),
   purge dans `tick`.
+
+**Livré côté console (PR 3).** Commande Tauri `site_errors`, écran `Erreurs.vue`
+(route `/s/:site/erreurs`), entrée `erreurs` retirée de `features.ts`.
+Précisions :
+
+- Lecture seule, une seule lecture par affichage ; aucune écriture, donc aucune
+  sourdine par groupe (hors chantier, voir plus haut).
+- Le message est interpolé en texte, jamais en HTML : il vient des logs du
+  site. Le `#` est affiché tel quel, avec un rappel qu'il masque un nombre.
+- Liste vide : « aucune erreur reçue sur les 14 derniers jours », état à part
+  de l'échec de lecture (hors ligne, 404). La console ne distingue pas
+  « aucune erreur » de « agent muet » (l'API ne le permet pas) : le texte
+  renvoie au constat `heartbeat`, dans les points à traiter.
+- 404 : « introuvable », site absent de la configuration ou veilleur antérieur
+  à la route.
+- Pas de pastille de nombre sur l'onglet Erreurs : la barre n'en porte que
+  pour les points ouverts.
 
 **Reste ouvert (bloquant pour la PR de l'agent).** L'existence et
 l'emplacement du journal d'erreurs PHP ou Apache de chaque compte Alwaysdata :

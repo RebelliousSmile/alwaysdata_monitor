@@ -303,6 +303,26 @@ pub struct SiteLogs {
     pub analysis: Option<Analysis>,
 }
 
+/// Un groupe d'erreurs d'un site : message normalisé par l'agent, jamais une
+/// ligne brute, ni IP, ni chemin, ni requête.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ErrorGroup {
+    pub message: String,
+    pub count: i64,
+    pub first_seen: i64,
+    pub last_seen: i64,
+    pub days_seen: i64,
+}
+
+/// Réponse de `GET /api/v1/sites/{id}/errors` : les groupes des `days`
+/// derniers jours, du plus fréquent au moins fréquent.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SiteErrors {
+    pub site: String,
+    pub days: i64,
+    pub groups: Vec<ErrorGroup>,
+}
+
 /// Verdict d'une IP : codes de raison, jamais de user-agent ni de chemin.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Verdict {
@@ -715,6 +735,13 @@ impl Client {
     /// ou veilleur antérieur à cette route.
     pub async fn logs(&self, site: &str) -> Result<SiteLogs, ApiError> {
         self.read(Method::GET, &["sites", site, "logs"], None).await
+    }
+
+    /// Erreurs du site groupées par message, sur 14 jours. 404 : site absent
+    /// de la configuration, ou veilleur antérieur à cette route.
+    pub async fn site_errors(&self, site: &str) -> Result<SiteErrors, ApiError> {
+        self.read(Method::GET, &["sites", site, "errors"], None)
+            .await
     }
 
     /// Une page des verdicts d'IP. `CursorExpired` : l'instantané du

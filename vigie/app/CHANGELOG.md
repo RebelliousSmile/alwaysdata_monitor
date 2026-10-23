@@ -6,6 +6,7 @@ Le veilleur a son propre historique.
 ## Non publiée
 
 - Aperçu des e-mails (#53) : l'écran Alerte liste les e-mails réellement envoyés pour l'incident (ouverture, relances, clôture), à déplier. Texte recomposé par le veilleur (route `incidents/{id}/mails`) ; l'écran « Modèles d'e-mail » réservé disparaît.
+- Erreurs (#52) : l'écran Erreurs liste les erreurs du site groupées par message sur 14 jours (compteur, première et dernière vue, jours de présence), du plus fréquent au moins fréquent, en lecture seule. Une liste vide dit « aucune erreur reçue », distinct d'un échec de lecture. Route `sites/{id}/errors` du veilleur ; face à un veilleur qui ne la sert pas encore, l'écran dit « introuvable » (404). L'écran réservé « pas encore disponible » disparaît.
 
 Prérequis de publication : le veilleur du VPS sert les routes `components`,
 `vulns` et `vulns/sources` de l'API (#21, phase 4). Face à un veilleur en

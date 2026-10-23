@@ -7,7 +7,6 @@ export type FeatureKey =
   | 'visiteurs'
   | 'journal'
   | 'blocages'
-  | 'erreurs'
   | 'ressources'
   | 'htaccess'
   | 'compte'
@@ -52,12 +51,6 @@ export const FEATURES: Record<FeatureKey, Feature> = {
     shows: 'Les robots vus sur la dernière journée et les règles de l’analyse, dépassées ou non.',
     missing: LOGS,
     link: { label: 'Voir les contrôles', name: 'controles' },
-  },
-  erreurs: {
-    title: 'Erreurs',
-    shows: 'Les erreurs regroupées par message, avec une sourdine limitée dans le temps.',
-    missing: 'Les logs d’erreurs du site. L’agent ne pousse au veilleur que les logs HTTP, analysés dans Trafic.',
-    link: { label: 'Voir les points à traiter', name: 'a-traiter' },
   },
   ressources: {
     title: 'Charge du site',

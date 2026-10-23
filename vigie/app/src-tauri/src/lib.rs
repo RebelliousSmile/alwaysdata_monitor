@@ -240,6 +240,16 @@ async fn logs(console: State<'_, Console>, site: String) -> Result<SiteLogs, Api
         .await
 }
 
+#[tauri::command]
+async fn site_errors(
+    console: State<'_, Console>,
+    site: String,
+) -> Result<client::SiteErrors, ApiError> {
+    console
+        .call(|client| async move { client.site_errors(&site).await })
+        .await
+}
+
 /// Une page des verdicts d'IP ; `cursor` absent pour la première.
 #[tauri::command]
 async fn log_ips(
@@ -342,6 +352,7 @@ pub fn run() {
             site,
             incidents,
             logs,
+            site_errors,
             log_ips,
             components,
             vulns,
@@ -451,6 +462,7 @@ mod tests {
                 "site",
                 "incidents",
                 "logs",
+                "site_errors",
                 "log_ips",
                 "components",
                 "vulns",
