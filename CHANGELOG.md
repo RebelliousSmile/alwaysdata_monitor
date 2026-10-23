@@ -35,6 +35,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Vigie console 0.2.0 (#12): Trafic view (visitors, blocks, load) fed by the logs API, paginated lists, typed API errors, write actions shown as non-executable proposals; publication requires #5, #8 and #13 deployed on the VPS
 - Console API security (#5): per-device and per-IP (/64) rate limits with 429 and `Retry-After`, call log without tokens or raw paths, strict headers and no CORS, 415 only for typed bodies, sanitized log text, JSON key snapshot test, keyset pagination (`limit`, `cursor`, `next_cursor`), `GET /api/v1/sites/{id}/logs` and `/logs/ips` (medium and high verdicts only, 48 h), 200 sites at most
 
+### Changed
+- `.htaccess` write validation runs `apachectl -t` / `apache2ctl -t` without a shell: the command is looked up in the `PATH` (`ExecutableFinder`) and started with an argument array, instead of `which` and `exec` through `sh`; behaviour is unchanged, and validation is still skipped when no such command exists
+
 ## [v1.11.2] - 2026-10-16
 
 ### Added
