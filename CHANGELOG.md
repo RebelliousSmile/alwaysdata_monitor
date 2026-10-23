@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+- `rustls-webpki` 0.103.16, `webpki-roots` and `webpki-root-certs` 1.0.10 in `vigie/Cargo.lock` and `vigie/app/src-tauri/Cargo.lock` (RUSTSEC-2026-0381, -0382, -0383)
+
 ### Added
 - PHPUnit 10.5 as a dev dependency of the module (`composer.lock` resolved against PHP 8.1) and a `module` workflow running the suite on PHP 8.1 and 8.4, plus a php-cs-fixer style check (`src/` reformatted to match `.php-cs-fixer.dist.php`)
 - Matching inventories against known vulnerabilities (#21): `tick` matches each site's latest inventories (agent and CI) against the vulnerability base in bounded, resumable runs (global sequence, cursor compare-and-swap, budget with a reserve kept for sending alerts) on a read-only connection, groups advisories by alias (union-find), assesses each group with the F4 severity rule (KEV, EPSS) and writes one `vulns` finding per (site, component, group) with per-source provenance, a stale-inventory warning per source and a matching-error finding; migration file `0021.sql` adds runs, state, components, items, provenance, keys and waivers; audited waivers (90 days at most, reason required, SHA-256 of the reason in the signed `_veilleur` audit chain) through `vigie site vulns-ack` with a dry-run preview; grouped emails above five new findings, closed findings masked after 30 days; `vigie site components | vulns` and `vigie vulns report`; API routes `GET /api/v1/sites/{id}/components`, `/sites/{id}/vulns` and `/vulns/sources` paginated on a pinned run; console Failles and Sources de failles screens; volume test (#[ignore], release) and fictional fixtures only
