@@ -3,18 +3,20 @@ import { getVersion } from '@tauri-apps/api/app'
 import { computed, onMounted, ref } from 'vue'
 import AppIcon from '@/components/AppIcon.vue'
 import DataGate from '@/components/DataGate.vue'
-import NotYet from '@/components/NotYet.vue'
 import StatusChip from '@/components/StatusChip.vue'
 import type { Device, TokenStorage } from '@/lib/api'
 import { now } from '@/lib/clock'
+import { THEMES } from '@/lib/theme'
 import { formatSpan, formatWhen } from '@/lib/time'
 import { asApiError, useConnection } from '@/stores/connection'
 import { useSites } from '@/stores/sites'
+import { useTheme } from '@/stores/theme'
 
 // Réglages globaux, en lecture, et la seule action sur l'appareil : son
 // retrait. La version vient du binaire (tauri.conf.json).
 const connection = useConnection()
 const sites = useSites()
+const theme = useTheme()
 const settings = computed(() => sites.settings?.data)
 
 const version = ref<string | null>(null)
@@ -237,10 +239,39 @@ async function remove(): Promise<void> {
       :size="18"
     /></span>
   </RouterLink>
-  <NotYet
-    feature="theme"
-    compact
-  />
+  <section
+    aria-labelledby="theme"
+    class="flex flex-col gap-1"
+    data-theme-choice
+  >
+    <h2
+      id="theme"
+      class="text-xs uppercase tracking-wider text-text-3"
+    >
+      Thème
+    </h2>
+    <div
+      role="radiogroup"
+      aria-labelledby="theme"
+      class="grid grid-cols-2 rounded-control border border-line bg-surface p-[3px]"
+    >
+      <label
+        v-for="choice in THEMES"
+        :key="choice.value"
+        class="flex min-h-tap cursor-pointer items-center justify-center rounded-sym text-md text-text-2 has-[:checked]:bg-surface-3 has-[:checked]:font-semibold has-[:checked]:text-text has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-ok"
+      >
+        <input
+          type="radio"
+          name="theme"
+          class="sr-only"
+          :value="choice.value"
+          :checked="theme.theme === choice.value"
+          @change="theme.set(choice.value)"
+        >
+        {{ choice.label }}
+      </label>
+    </div>
+  </section>
   <p
     class="text-center text-xs text-text-3"
     data-version

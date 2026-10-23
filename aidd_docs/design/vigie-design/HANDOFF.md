@@ -107,7 +107,7 @@ Débloquer, restaurer, désactiver une protection : confirmation, puis passage p
 
 ## 7. Non dessiné, à faire
 
-- Thème clair (le réglage existe, les jetons sont à décliner)
+- ~~Thème clair~~ : fait (#34), jetons dans `vigie/app/src/styles/tokens-light.css`
 - Mise en page large (> 900 px)
 - Appairage d'un appareil (QR code + jeton)
 - Jeu de contrôles WordPress détaillé
