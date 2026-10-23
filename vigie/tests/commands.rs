@@ -539,12 +539,13 @@ async fn rotate_key_needs_a_proof_and_switches_atomically() {
         .unwrap();
     assert_eq!(refused, 2, "site B, puis clé d'inventaire");
 
-    // Bonne preuve : bascule, séquences remises à zéro (logs et inventaire
-    // compris).
+    // Bonne preuve : bascule, séquences remises à zéro (logs, inventaire et
+    // erreurs compris).
     rusqlite::Connection::open(&v.config().database)
         .unwrap()
         .execute(
-            "UPDATE site_keys SET last_logs_seq = 7, last_inventory_seq = 9 WHERE site = 'site-a'",
+            "UPDATE site_keys SET last_logs_seq = 7, last_inventory_seq = 9, last_errors_seq = 4
+             WHERE site = 'site-a'",
             [],
         )
         .unwrap();
@@ -566,15 +567,16 @@ async fn rotate_key_needs_a_proof_and_switches_atomically() {
         store.agent("site-a").unwrap().unwrap().pubkey,
         new.verifying_key().to_bytes()
     );
-    let seqs: (i64, i64) = rusqlite::Connection::open(&v.config().database)
+    let seqs: (i64, i64, i64) = rusqlite::Connection::open(&v.config().database)
         .unwrap()
         .query_row(
-            "SELECT last_logs_seq, last_inventory_seq FROM site_keys WHERE site = 'site-a'",
+            "SELECT last_logs_seq, last_inventory_seq, last_errors_seq FROM site_keys
+             WHERE site = 'site-a'",
             [],
-            |row| Ok((row.get(0)?, row.get(1)?)),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
         .unwrap();
-    assert_eq!(seqs, (0, 0));
+    assert_eq!(seqs, (0, 0, 0));
     // L'ancienne clé ne retire plus rien.
     v.advance(30);
     assert_eq!(v.pull(None).await.status, StatusCode::NOT_FOUND);

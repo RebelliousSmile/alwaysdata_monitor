@@ -12,6 +12,7 @@ pub mod command;
 pub mod config;
 pub mod device;
 pub mod error;
+pub mod errors;
 pub mod facts;
 pub mod finding;
 pub mod http;
@@ -47,6 +48,13 @@ pub fn iso_utc(secs: i64) -> String {
         rest % 3600 / 60,
         rest % 60
     )
+}
+
+/// `2026-10-15` : jour UTC d'un instant, forme triable des jours des erreurs
+/// de site (issue #52).
+pub fn utc_day(secs: i64) -> String {
+    let (y, m, d) = civil_from_days(secs.div_euclid(86_400));
+    format!("{y:04}-{m:02}-{d:02}")
 }
 
 /// Jours depuis 1970-01-01 → (année, mois, jour), d'après l'algorithme

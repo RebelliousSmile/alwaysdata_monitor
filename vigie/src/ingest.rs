@@ -57,6 +57,8 @@ pub enum Reason {
     },
     /// Lot de logs pour un site sans `[sites.logs] source`.
     LogsClosed,
+    /// Lot d'erreurs pour un site sans agent PHP surveillé (#52).
+    ErrorsClosed,
     /// Lot de logs qui commence sous la limite haute et finit au-delà.
     Overlap {
         start: i64,
@@ -101,6 +103,9 @@ impl fmt::Display for Reason {
             ),
             Self::LogsClosed => {
                 f.write_str("réception des logs fermée ([sites.logs] source absent)")
+            }
+            Self::ErrorsClosed => {
+                f.write_str("réception des erreurs fermée (site sans agent PHP surveillé)")
             }
             Self::Overlap { start, end, high } => write!(
                 f,

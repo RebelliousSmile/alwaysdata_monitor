@@ -179,7 +179,7 @@ async fn the_ingestion_accepts_the_php_inventory_as_is() {
     let database = dir.path().join("vigie.db");
     let router = inventory_router(&database);
     // Refus croisés : l'inventaire sur les autres routes, le rapport ici.
-    for route in ["/r/v1/report", "/r/v1/logs"] {
+    for route in ["/r/v1/report", "/r/v1/logs", "/r/v1/errors"] {
         assert_eq!(
             post(router.clone(), route, &fixture.signature, &fixture.body).await,
             StatusCode::NOT_FOUND,

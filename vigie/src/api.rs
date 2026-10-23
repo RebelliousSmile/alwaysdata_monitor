@@ -54,7 +54,7 @@ use crate::request_id;
 use crate::serve::AppState;
 use crate::store::{
     AckOutcome, Agent, CheckRun, Device, Incident, RevokeOutcome, RunResult, SCHEMA_CHECK_RESULTS,
-    SCHEMA_FINDINGS, SNOOZE_7D, SNOOZE_24H, SnoozeOutcome, Store,
+    SCHEMA_ERRORS, SCHEMA_FINDINGS, SNOOZE_7D, SNOOZE_24H, SnoozeOutcome, Store,
 };
 
 use limit::{IpKey, Limiter};
@@ -100,6 +100,10 @@ pub(crate) fn routes() -> Router<Arc<AppState>> {
         .route(
             "/api/v1/sites/{id}/logs/ips",
             get(site_log_ips_handler).fallback(not_found),
+        )
+        .route(
+            "/api/v1/sites/{id}/errors",
+            get(site_errors_handler).fallback(not_found),
         )
         .route(
             "/api/v1/sites/{id}/components",
@@ -998,6 +1002,7 @@ async fn site_handler(
                 }
                 Control::Integrity
                 | Control::Agent(_)
+                | Control::Errors
                 | Control::Logs
                 | Control::Typology
                 | Control::VulnsSync
@@ -1251,6 +1256,67 @@ async fn site_logs_handler(
         };
         Ok(json(&SiteLogs {
             analysis: analysis.map(AnalysisJson::from),
+        }))
+    })
+    .await
+}
+
+/// Groupe d'erreurs d'un site fusionné sur les jours conservés (#52).
+#[derive(Serialize)]
+struct ErrorGroupJson {
+    message: LogText,
+    count: i64,
+    first_seen: i64,
+    last_seen: i64,
+    /// Jours, sur la fenêtre, où le groupe a été vu.
+    days_seen: i64,
+}
+
+#[derive(Serialize)]
+struct SiteErrors {
+    site: String,
+    /// Fenêtre lue, en jours, aujourd'hui compris.
+    days: i64,
+    groups: Vec<ErrorGroupJson>,
+}
+
+/// Erreurs d'un site sur 14 jours, fusionnées par empreinte, de la plus
+/// fréquente à la moins fréquente, 50 au plus. Un site connu sans lot
+/// reçu (ou une base d'avant `0023`) rend une liste vide ; 404 commun pour un
+/// site inconnu.
+async fn site_errors_handler(
+    State(state): State<Arc<AppState>>,
+    Authenticated(_device): Authenticated,
+    id: Result<Path<String>, PathRejection>,
+) -> Response {
+    let Some(index) = site_index(&state, id) else {
+        return ApiError::NOT_FOUND.into_response();
+    };
+    let now = state.clock.unix();
+    with_store(&state, "/api/v1/sites/errors", move |state, store| {
+        let site = &state.site_ids[index];
+        let groups = if store.schema_version()? >= SCHEMA_ERRORS {
+            store.error_groups_merged(
+                site,
+                &crate::errors::first_kept_day(now),
+                crate::errors::MAX_GROUPS,
+            )?
+        } else {
+            Vec::new()
+        };
+        Ok(json(&SiteErrors {
+            site: site.clone(),
+            days: crate::errors::RETENTION_DAYS,
+            groups: groups
+                .into_iter()
+                .map(|g| ErrorGroupJson {
+                    message: LogText::error_message(&g.message),
+                    count: g.count,
+                    first_seen: g.first_seen,
+                    last_seen: g.last_seen,
+                    days_seen: g.days_seen,
+                })
+                .collect(),
         }))
     })
     .await
@@ -2037,6 +2103,7 @@ async fn settings_handler(
                         Control::Heartbeat
                         | Control::Integrity
                         | Control::Agent(_)
+                        | Control::Errors
                         | Control::Logs
                         | Control::Typology
                         | Control::VulnsSync

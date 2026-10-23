@@ -301,6 +301,91 @@ signature, et un inventaire envoyé à `/r/v1/report` ou `/r/v1/logs` aussi.
 Aucune lecture de l'inventaire par l'API, la console ou la CLI (F7) ; aucun
 gzip ; les limites de relevé de l'agent sont dans `agent-php.md`.
 
+## Erreurs des sites (issue #52)
+
+`POST /r/v1/errors` reçoit les erreurs d'un site, déjà groupées par message
+par l'agent PHP, un lot par (site, jour UTC). Contrat décidé dans
+`decisions.md`, « Erreurs des sites (issue #52) » ; code :
+`vigie/src/errors/` ; tests : `vigie/tests/errors_receive.rs`. **Côté
+veilleur seulement** : l'agent ne l'émet pas encore (sa source est à
+confirmer, `decisions.md`).
+
+- Mêmes en-têtes que le rapport. `X-Vigie-Signature` signe
+  `vigie-errors-v1\n` suivi des octets bruts du corps, avec la clé de rapport
+  de l'agent (`sodium_crypto_sign_detached(DOMAIN_ERRORS . $body, $secret)`).
+- Corps de 64 Kio au plus, reçu en 10 s, sans gzip. `seq` propre au site
+  (`site_keys.last_errors_seq`), strictement croissant, indépendant de celui
+  des rapports, des logs et des inventaires.
+- Ouvert pour un site au runtime effectif `php` doté d'une clé d'agent
+  (capacité `agent:errors`, `capability.rs`) ; sinon 404 commun.
+
+```json
+{"v":1,"type":"errors","site":"site-a","seq":1792079580123,"sent_at":1792079580,
+ "agent":"vigie-agent-php/0.6.0","day":"2026-10-16",
+ "groups":[{"message":"Undefined array key #","count":12,
+            "first_seen":1792070000,"last_seen":1792079000}]}
+```
+
+### Vérifications
+
+Dans l'ordre, arrêt au premier échec, 404 commun sans corps (la raison va au
+journal, jamais le texte reçu) :
+
+1. site connu, runtime php, clé enregistrée ; signature valide sur
+   `vigie-errors-v1\n` + corps ;
+2. JSON strict : `deny_unknown_fields` à la racine et dans chaque groupe ;
+   `v` = 1, `type` = `errors`, `site` égal à `X-Vigie-Site`, `seq` ≥ 1,
+   `agent` de 1 à 64 caractères imprimables ;
+3. `day` : date `AAAA-MM-JJ` du calendrier, comprise entre le plus ancien
+   jour conservé (aujourd'hui UTC moins 13 jours) et la date de
+   `now + 300 s` ; un jour déjà purgé ou à venir est refusé ;
+4. au plus 50 groupes ; par groupe, `message` de 1 à 200 caractères sans
+   caractère de contrôle ni adresse IP, `count` de 1 à 10^9,
+   `0 ≤ first_seen ≤ last_seen` ; un lot vide (`groups: []`) est accepté et
+   vide le jour ;
+5. `sent_at` à ±300 s de l'heure du veilleur ;
+6. `seq` strictement supérieur au dernier accepté, vérifié sous le verrou
+   d'écriture.
+
+**Refus d'adresse.** Un message qui contient encore une adresse IPv4 ou IPv6
+(brute, entre crochets, avec port ou zone, ou une suite de quatre nombres de
+1 à 3 chiffres ≤ 255 séparés par des points) fait refuser le **lot entier**.
+`::` seul n'est pas une adresse (opérateur PHP, `Foo::bar`). La détection
+porte sur le message **reçu**, avant renormalisation : l'agent remplace donc
+les adresses par `<ip>` avant d'envoyer. Un jeton hexadécimal qui se lit
+comme une adresse IPv6 valide (`Cafe::add`) est refusé à tort, faux positif
+accepté pour ne jamais laisser entrer une adresse.
+
+### Renormalisation et empreinte
+
+Pour chaque groupe retenu, le veilleur applique la même normalisation que
+l'agent, dans cet ordre, puis calcule l'empreinte :
+
+1. les UUID (8-4-4-4-12 chiffres hexadécimaux) deviennent `<uuid>` ;
+2. toute suite de chiffres ASCII devient `#` ;
+3. `fingerprint` = SHA-256 hexadécimal en minuscules du message ainsi
+   normalisé (UTF-8).
+
+La normalisation est idempotente : un message déjà normalisé ne change pas.
+Le veilleur ne retire ni chemin ni requête : c'est le travail de l'agent
+(`decisions.md`). Deux groupes d'un lot qui se confondent après la
+renormalisation sont fusionnés (somme des compteurs, première vue la plus
+ancienne, dernière vue la plus récente).
+
+### Effets
+
+- Table `error_groups(site, day, fingerprint, message, count, first_seen,
+  last_seen)`, migration `0023.sql`. Le lot **remplace** les groupes du
+  (site, jour) en une transaction : renvoyer le même jour est idempotent, et
+  les autres jours ne bougent pas.
+- Conservation de 14 jours UTC, aujourd'hui compris ; `tick` supprime les
+  jours plus anciens.
+- Le corps reçu n'est jamais stocké. Pas une preuve de vie : un lot d'erreurs
+  ne touche ni au dernier rapport, ni au silence, ni aux incidents.
+- `site rotate-key` (et la rotation par commande) remet `last_errors_seq` à
+  zéro ; `site remove` supprime les groupes du site.
+- Lecture : `GET /api/v1/sites/{id}/errors` (`api-console.md`).
+
 ## Clés
 
 ```console
@@ -319,12 +404,12 @@ $ ~/vigie/bin/vigie site remove site-a
   `php` (issue #4) : déclarer `runtime = "php"` pour un site `generic` en PHP.
   Une clé déjà en base sur un tel site ouvre l'avertissement `typology`.
 - `site rotate-key` remplace la clé : un rapport signé avec l'ancienne est
-  refusé dès la rotation. La séquence repart de zéro (celles des lots de logs
-  et des inventaires aussi), puisque l'ancienne clé ne
+  refusé dès la rotation. La séquence repart de zéro (celles des lots de logs,
+  d'erreurs et des inventaires aussi), puisque l'ancienne clé ne
   peut plus rien faire accepter ; le silence reste mesuré depuis le dernier
   rapport accepté.
 - `site remove` retire la clé, l'état des rapports, la référence
-  d'empreintes, les logs et les inventaires reçus du site, après confirmation (taper
+  d'empreintes, les logs, les erreurs et les inventaires reçus du site, après confirmation (taper
   l'identifiant du site) ou avec `--yes`. Les incidents de l'agent sont clos au
   passage suivant de `tick`.
 
@@ -338,6 +423,7 @@ ne vérifie jamais ce qu'une autre a signé.
 | Rapports | l'agent | le veilleur, avec la clé publique de `site add` | sur le site, hors webroot, 0600 vérifié par l'agent |
 | Retraits de commandes | l'agent, préfixe `vigie-pull-v1\n` | le veilleur, même clé que les rapports | idem rapports ; le préfixe sépare les deux usages |
 | Lots de logs (`/r/v1/logs`) | l'agent, préfixe `vigie-logs-v1\n` | le veilleur, même clé que les rapports | idem rapports ; le préfixe sépare les usages |
+| Lots d'erreurs (`/r/v1/errors`) | l'agent, préfixe `vigie-errors-v1\n` | le veilleur, même clé que les rapports | idem rapports ; le préfixe sépare les usages |
 | Inventaires (`/r/v1/inventory`) | l'agent, préfixe `vigie-inventory-v1\n` | le veilleur, même clé que les rapports | idem rapports ; le préfixe sépare les usages |
 | Inventaires de CI (`/r/v1/inventory`, #20) | `vigie-inventory`, clé d'inventaire, préfixe `vigie-inventory-v1\n` | le veilleur, clé de `vigie site inventory-key` (`site_inventory_keys`), jamais consultée par `/r/v1/report`, `/r/v1/logs` ni `/r/v1/commands` | secret d'environnement de déploiement de la CI (`docs/inventaire.md`) |
 | Commandes | le veilleur (`[commands] key_file`) | l'agent, avec la clé publique épinglée | sur le VPS, lue par `serve` seul (`protocole-commandes.md`) |

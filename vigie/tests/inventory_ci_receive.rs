@@ -470,6 +470,7 @@ async fn an_inventory_key_signs_nothing_else() {
     for (uri, domain) in [
         ("/r/v1/report", b"".as_slice()),
         ("/r/v1/logs", DOMAIN_LOGS),
+        ("/r/v1/errors", key::DOMAIN_ERRORS),
         ("/r/v1/commands", DOMAIN_PULL),
     ] {
         let signature = key::sign(&inventory_key, domain, &[&body]);

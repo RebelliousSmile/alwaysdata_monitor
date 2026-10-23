@@ -18,7 +18,7 @@ Sur le veilleur, toujours appeler le binaire par son chemin complet.
 
 | Commande | Rôle |
 | -------- | ---- |
-| `~/vigie/bin/vigie serve` | Service `vigie-serve` derrière Caddy : écoute sur `$IP:$PORT` (ou `--ip`, `--port`), `127.0.0.1:8080` dans l'unité. Routes : `GET /health`, `POST /r/v1/report`, `/r/v1/commands`, `/r/v1/logs`, `/r/v1/inventory` et l'API de la console `/api/v1` ; tout le reste renvoie 404 sans corps. Migre la base au démarrage |
+| `~/vigie/bin/vigie serve` | Service `vigie-serve` derrière Caddy : écoute sur `$IP:$PORT` (ou `--ip`, `--port`), `127.0.0.1:8080` dans l'unité. Routes : `GET /health`, `POST /r/v1/report`, `/r/v1/commands`, `/r/v1/logs`, `/r/v1/errors`, `/r/v1/inventory` et l'API de la console `/api/v1` ; tout le reste renvoie 404 sans corps. Migre la base au démarrage |
 | `~/vigie/bin/vigie tick` | Lancé chaque minute par `vigie-tick.timer` : lance les contrôles dus, ouvre ou clôt les incidents, envoie les e-mails |
 | `~/vigie/bin/vigie check <site> --once` | Lance tous les contrôles d'un site et affiche les constats, sans écrire dans la base ni envoyer d'e-mail ; code 1 si un constat est à traiter |
 | `~/vigie/bin/vigie status` | Dernier passage, sites et dernier contrôle, une ligne « failles » par site surveillé (constats critiques et avertissements, date du dernier inventaire de chaque source, « inventaire périmé », rapprochement en échec depuis N passages), une ligne par source de failles déclarée (dernière réussite, dernière issue, bail en cours), incidents ouverts avec leur âge, état de l'agent de chaque site, informations (en-têtes manquants), notifications en attente ; code 1 si `tick` est en retard |

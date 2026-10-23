@@ -361,6 +361,7 @@ fn a_signed_inventory_replays_nowhere_else() {
     for (route, domain) in [
         ("/r/v1/report", b"".as_slice()),
         ("/r/v1/logs", DOMAIN_LOGS),
+        ("/r/v1/errors", key::DOMAIN_ERRORS),
         ("/r/v1/report", key::DOMAIN_INVENTORY),
         ("/r/v1/logs", key::DOMAIN_INVENTORY),
     ] {

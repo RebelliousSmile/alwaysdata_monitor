@@ -24,6 +24,9 @@ use crate::secret::{SecretError, check_parent, open_safely};
 pub const DOMAIN_PULL: &[u8] = b"vigie-pull-v1\n";
 /// Lot de logs de l'agent (`/r/v1/logs`), signé par sa clé de rapport.
 pub const DOMAIN_LOGS: &[u8] = b"vigie-logs-v1\n";
+/// Lot d'erreurs de site de l'agent (`/r/v1/errors`, issue #52), signé par sa
+/// clé de rapport.
+pub const DOMAIN_ERRORS: &[u8] = b"vigie-errors-v1\n";
 /// Réponse de `/r/v1/commands`, signée par la clé de commandes.
 pub const DOMAIN_COMMANDS: &[u8] = b"vigie-commands-v1\n";
 /// Entrée du journal d'audit, signée par la clé d'audit.
@@ -196,15 +199,16 @@ mod tests {
         ));
     }
 
-    /// Matrice des six domaines et d'une signature sans préfixe (celle d'un
+    /// Matrice des sept domaines et d'une signature sans préfixe (celle d'un
     /// rapport) : chaque signature ne vérifie que sous son propre domaine.
     #[test]
     fn each_domain_verifies_only_its_own_signatures() {
         let key = SigningKey::from_bytes(&[9; 32]);
         let public = key.verifying_key();
-        let domains: [&[u8]; 7] = [
+        let domains: [&[u8]; 8] = [
             DOMAIN_PULL,
             DOMAIN_LOGS,
+            DOMAIN_ERRORS,
             DOMAIN_COMMANDS,
             DOMAIN_AUDIT,
             DOMAIN_ROTATE,
