@@ -1,4 +1,5 @@
 <?php
+
 /**
  * SC Alwaysdata - PrestaShop 8 Module — Cron ressources (agrégateur journalier)
  *
@@ -9,7 +10,7 @@
  *
  * Fréquence recommandée : 1 fois par jour à 02h15 (après le cron stats).
  *
- * URL: https://kelenaya.fr/module/sc_alwaysdata/cron_resources?token={SC_ALWAYSDATA_CRON_TOKEN}
+ * URL: https://site-a.example/module/sc_alwaysdata/cron_resources?token={SC_ALWAYSDATA_CRON_TOKEN}
  *
  * @author    Scriptami
  * @copyright Scriptami
@@ -37,7 +38,7 @@ class Sc_alwaysdataCron_resourcesModuleFrontController extends ModuleFrontContro
         $storedToken = (string) Configuration::get(sc_alwaysdata::CONFIG_CRON_TOKEN);
 
         if ($storedToken === '' || !hash_equals($storedToken, $token)) {
-            $this->responseData     = ['error' => 'Forbidden'];
+            $this->responseData = ['error' => 'Forbidden'];
             $this->responseHttpCode = 403;
 
             return;
@@ -75,26 +76,26 @@ class Sc_alwaysdataCron_resourcesModuleFrontController extends ModuleFrontContro
                     null,
                     'sc_alwaysdata'
                 );
-                $this->responseData     = ['warning' => 'No samples for yesterday', 'date' => $date];
+                $this->responseData = ['warning' => 'No samples for yesterday', 'date' => $date];
                 $this->responseHttpCode = 200;
 
                 return;
             }
 
-            $resource                = new DailyResource();
+            $resource = new DailyResource();
             $resource->resource_date = $date;
             // Use MAX for ram_used_mb to preserve peak visibility in long-term history
-            $resource->ram_used_mb   = (int) $row['ram_peak_mb'];
-            $resource->ram_total_mb  = (int) $row['ram_total_mb'];
-            $resource->cpu_load_1    = round((float) $row['cpu_load_1'], 2);
-            $resource->cpu_load_5    = round((float) $row['cpu_load_5'], 2);
-            $resource->cpu_load_15   = round((float) $row['cpu_load_15'], 2);
-            $resource->disk_used_gb  = round((float) $row['disk_used_gb'], 2);
+            $resource->ram_used_mb = (int) $row['ram_peak_mb'];
+            $resource->ram_total_mb = (int) $row['ram_total_mb'];
+            $resource->cpu_load_1 = round((float) $row['cpu_load_1'], 2);
+            $resource->cpu_load_5 = round((float) $row['cpu_load_5'], 2);
+            $resource->cpu_load_15 = round((float) $row['cpu_load_15'], 2);
+            $resource->disk_used_gb = round((float) $row['disk_used_gb'], 2);
             $resource->disk_total_gb = round((float) $row['disk_total_gb'], 2);
-            $resource->date_add      = date('Y-m-d H:i:s');
+            $resource->date_add = date('Y-m-d H:i:s');
 
             if (!$resource->add()) {
-                throw new \RuntimeException('Failed to insert DailyResource for ' . $date);
+                throw new RuntimeException('Failed to insert DailyResource for ' . $date);
             }
 
             Db::getInstance()->execute(
@@ -103,20 +104,20 @@ class Sc_alwaysdataCron_resourcesModuleFrontController extends ModuleFrontContro
             );
 
             $this->responseData = [
-                'date'               => $date,
+                'date' => $date,
                 'samples_aggregated' => (int) $row['samples'],
-                'ram_avg_mb'         => (int) $row['ram_avg_mb'],
-                'ram_peak_mb'        => (int) $row['ram_peak_mb'],
-                'ram_total_mb'       => (int) $row['ram_total_mb'],
+                'ram_avg_mb' => (int) $row['ram_avg_mb'],
+                'ram_peak_mb' => (int) $row['ram_peak_mb'],
+                'ram_total_mb' => (int) $row['ram_total_mb'],
             ];
-        } catch (\Throwable $e) {
+        } catch (Throwable $e) {
             PrestaShopLogger::addLog(
                 '[sc_alwaysdata] Cron resources aggregator error for ' . $date . ': ' . $e->getMessage(),
                 3,
                 null,
                 'sc_alwaysdata'
             );
-            $this->responseData     = ['error' => $e->getMessage(), 'date' => $date];
+            $this->responseData = ['error' => $e->getMessage(), 'date' => $date];
             $this->responseHttpCode = 500;
         }
     }

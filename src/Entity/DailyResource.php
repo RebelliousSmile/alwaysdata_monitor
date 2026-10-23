@@ -1,4 +1,5 @@
 <?php
+
 /**
  * SC Alwaysdata - PrestaShop 8 Module
  *
@@ -45,18 +46,18 @@ class DailyResource extends \ObjectModel
     public $date_add;
 
     public static $definition = [
-        'table'   => 'sc_alwaysdata_resources_daily',
+        'table' => 'sc_alwaysdata_resources_daily',
         'primary' => 'id_resource',
-        'fields'  => [
+        'fields' => [
             'resource_date' => ['type' => self::TYPE_DATE,  'validate' => 'isDate',         'required' => true],
-            'ram_used_mb'   => ['type' => self::TYPE_INT,   'validate' => 'isUnsignedInt'],
-            'ram_total_mb'  => ['type' => self::TYPE_INT,   'validate' => 'isUnsignedInt'],
-            'cpu_load_1'    => ['type' => self::TYPE_FLOAT, 'validate' => 'isFloat'],
-            'cpu_load_5'    => ['type' => self::TYPE_FLOAT, 'validate' => 'isFloat'],
-            'cpu_load_15'   => ['type' => self::TYPE_FLOAT, 'validate' => 'isFloat'],
-            'disk_used_gb'  => ['type' => self::TYPE_FLOAT, 'validate' => 'isFloat'],
+            'ram_used_mb' => ['type' => self::TYPE_INT,   'validate' => 'isUnsignedInt'],
+            'ram_total_mb' => ['type' => self::TYPE_INT,   'validate' => 'isUnsignedInt'],
+            'cpu_load_1' => ['type' => self::TYPE_FLOAT, 'validate' => 'isFloat'],
+            'cpu_load_5' => ['type' => self::TYPE_FLOAT, 'validate' => 'isFloat'],
+            'cpu_load_15' => ['type' => self::TYPE_FLOAT, 'validate' => 'isFloat'],
+            'disk_used_gb' => ['type' => self::TYPE_FLOAT, 'validate' => 'isFloat'],
             'disk_total_gb' => ['type' => self::TYPE_FLOAT, 'validate' => 'isFloat'],
-            'date_add'      => ['type' => self::TYPE_DATE,  'validate' => 'isDate'],
+            'date_add' => ['type' => self::TYPE_DATE,  'validate' => 'isDate'],
         ],
     ];
 

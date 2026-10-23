@@ -1,4 +1,5 @@
 <?php
+
 /**
  * SC Alwaysdata - PrestaShop 8 Module
  *
@@ -15,9 +16,9 @@ class LogReaderService
 {
     private const DEFAULT_LINES = [
         'apache' => 5000,
-        'http'   => 10000,
-        'php'    => 5000,
-        'sites'  => 2000,
+        'http' => 10000,
+        'php' => 5000,
+        'sites' => 2000,
     ];
     private const LOG_DIRS = ['apache', 'http', 'php', 'sites'];
 
@@ -32,6 +33,7 @@ class LogReaderService
     {
         $key = 'SC_ALWAYSDATA_LINES_' . strtoupper($dir);
         $v = (int) \Configuration::get($key);
+
         return $v > 0 ? $v : (self::DEFAULT_LINES[$dir] ?? 5000);
     }
 
@@ -88,10 +90,10 @@ class LogReaderService
             $lines = $this->readLogLines($file, $maxLines);
 
             return [
-                'source'    => 'php',
-                'lines'     => $lines,
+                'source' => 'php',
+                'lines' => $lines,
                 'truncated' => false,
-                'error'     => null,
+                'error' => null,
                 'max_lines' => $maxLines,
             ];
         } catch (\Throwable $e) {
@@ -109,6 +111,7 @@ class LogReaderService
         if (substr($filePath, -3) === '.gz') {
             return $this->tailFileGz($filePath, $maxLines);
         }
+
         return $this->tailFile($filePath, $maxLines);
     }
 

@@ -1,0 +1,78 @@
+name: module
+
+# Module PrestaShop (src/, controllers/, tests/) : tests PHPUnit et style
+# php-cs-fixer. PHPUnit tourne sur la plus
+# ancienne et la plus récente version de PHP prises en charge (composer.json :
+# ^8.1). Le veilleur (vigie/) a son propre workflow.
+on:
+  push:
+    paths:
+      - "src/**"
+      - "controllers/**"
+      - "tests/**"
+      - "views/**"
+      - "upgrade/**"
+      - "*.php"
+      - "composer.*"
+      - ".php-cs-fixer.dist.php"
+      - "phpunit.xml.dist"
+      - ".github/workflows/module.yml"
+  pull_request:
+    paths:
+      - "src/**"
+      - "controllers/**"
+      - "tests/**"
+      - "views/**"
+      - "upgrade/**"
+      - "*.php"
+      - "composer.*"
+      - ".php-cs-fixer.dist.php"
+      - "phpunit.xml.dist"
+      - ".github/workflows/module.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  phpunit:
+    name: phpunit (PHP ${{ matrix.php }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ["8.1", "8.4"]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      # Pas de setup-php (action tierce non épinglée ici) : paquets du PPA
+      # ondrej/php. La version obtenue est vérifiée, le job échoue sinon.
+      - name: PHP ${{ matrix.php }}
+        run: |
+          sudo add-apt-repository -y ppa:ondrej/php
+          sudo apt-get update -q
+          sudo apt-get install -y -q "php${{ matrix.php }}-cli" "php${{ matrix.php }}-mbstring" "php${{ matrix.php }}-xml"
+          sudo update-alternatives --set php "/usr/bin/php${{ matrix.php }}"
+          php -r 'exit(str_starts_with(PHP_VERSION, "${{ matrix.php }}.") ? 0 : 1);'
+      # HtaccessService lance `apachectl -t` s'il le trouve : le runner a Apache
+      # préinstallé, dont la commande échoue sans droits sur /var/run/apache2
+      # (30 erreurs de HtaccessServiceTest). Les tests supposent un hôte sans
+      # Apache, comme le service qui saute alors la validation.
+      - name: retirer Apache du runner
+        run: |
+          sudo rm -f /usr/sbin/apachectl /usr/sbin/apache2ctl
+          ! command -v apachectl && ! command -v apache2ctl
+      - name: composer.lock à jour
+        run: composer validate --no-check-publish
+      - run: composer install --no-interaction --no-progress --prefer-dist
+      - run: vendor/bin/phpunit
+
+  style:
+    name: php-cs-fixer
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - run: composer install --no-interaction --no-progress --prefer-dist
+      # Périmètre et règles : .php-cs-fixer.dist.php (src/, controllers/, upgrade/ et sc_alwaysdata.php).
+      - run: vendor/bin/php-cs-fixer fix --dry-run --diff

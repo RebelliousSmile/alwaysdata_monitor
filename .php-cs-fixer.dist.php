@@ -2,6 +2,8 @@
 
 $finder = PhpCsFixer\Finder::create()->in([
     __DIR__ . '/src',
+    __DIR__ . '/controllers',
+    __DIR__ . '/upgrade',
 ])->append([
     __DIR__ . '/sc_alwaysdata.php',
 ]);

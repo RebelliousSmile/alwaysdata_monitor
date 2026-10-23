@@ -28,7 +28,7 @@ class CrawlerAnalyserServiceTest extends TestCase
     private function httpLine(string $ip, string $ua, string $path = '/index.php'): string
     {
         return sprintf(
-            'www.kelenaya.fr %s - - [09/Mar/2026:10:00:00 +0100] "GET %s HTTP/1.1" 200 1234 "-" "%s" http 0.123',
+            'www.site-a.example %s - - [09/Mar/2026:10:00:00 +0100] "GET %s HTTP/1.1" 200 1234 "-" "%s" http 0.123',
             $ip,
             $path,
             $ua
@@ -42,8 +42,8 @@ class CrawlerAnalyserServiceTest extends TestCase
     public function testIgnoresNonHttpSources(): void
     {
         $sources = [
-            $this->makeSource('php', [$this->httpLine('1.2.3.4', 'AhrefsBot/7.0')]),
-            $this->makeSource('sites', [$this->httpLine('1.2.3.4', 'AhrefsBot/7.0')]),
+            $this->makeSource('php', [$this->httpLine('203.0.113.14', 'AhrefsBot/7.0')]),
+            $this->makeSource('sites', [$this->httpLine('203.0.113.14', 'AhrefsBot/7.0')]),
         ];
 
         $result = $this->service->analyse($sources);
@@ -53,7 +53,7 @@ class CrawlerAnalyserServiceTest extends TestCase
 
     public function testIgnoresSourcesWithError(): void
     {
-        $source = ['source' => 'http', 'lines' => [$this->httpLine('1.2.3.4', 'AhrefsBot/7.0')], 'error' => 'file not found', 'truncated' => false];
+        $source = ['source' => 'http', 'lines' => [$this->httpLine('203.0.113.14', 'AhrefsBot/7.0')], 'error' => 'file not found', 'truncated' => false];
 
         $result = $this->service->analyse([$source]);
 
@@ -63,8 +63,8 @@ class CrawlerAnalyserServiceTest extends TestCase
     public function testAcceptsApacheAndHttpSources(): void
     {
         $sources = [
-            $this->makeSource('apache', [$this->httpLine('1.2.3.4', 'AhrefsBot/7.0')]),
-            $this->makeSource('http', [$this->httpLine('5.6.7.8', 'AhrefsBot/7.0')]),
+            $this->makeSource('apache', [$this->httpLine('203.0.113.14', 'AhrefsBot/7.0')]),
+            $this->makeSource('http', [$this->httpLine('203.0.113.15', 'AhrefsBot/7.0')]),
         ];
 
         $result = $this->service->analyse($sources);
@@ -74,8 +74,8 @@ class CrawlerAnalyserServiceTest extends TestCase
         $this->assertSame('AhrefsBot', $entry['matched_bot']);
         // Both IPs merged into the same group
         $this->assertCount(2, $entry['ips']);
-        $this->assertContains('1.2.3.4', $entry['ips']);
-        $this->assertContains('5.6.7.8', $entry['ips']);
+        $this->assertContains('203.0.113.14', $entry['ips']);
+        $this->assertContains('203.0.113.15', $entry['ips']);
     }
 
     // -----------------------------------------------------------------
@@ -84,7 +84,7 @@ class CrawlerAnalyserServiceTest extends TestCase
 
     public function testDetectsKnownBot(): void
     {
-        $sources = [$this->makeSource('http', [$this->httpLine('1.2.3.4', 'AhrefsBot/7.0')])];
+        $sources = [$this->makeSource('http', [$this->httpLine('203.0.113.14', 'AhrefsBot/7.0')])];
 
         $result = $this->service->analyse($sources);
 
@@ -95,7 +95,7 @@ class CrawlerAnalyserServiceTest extends TestCase
 
     public function testKnownBotIsCaseInsensitive(): void
     {
-        $sources = [$this->makeSource('http', [$this->httpLine('1.2.3.4', 'ahrefsbot/7.0')])];
+        $sources = [$this->makeSource('http', [$this->httpLine('203.0.113.14', 'ahrefsbot/7.0')])];
 
         $result = $this->service->analyse($sources);
 
@@ -123,7 +123,7 @@ class CrawlerAnalyserServiceTest extends TestCase
     public function testRequestCountAccumulates(): void
     {
         // Same IP hits twice with the same bot UA
-        $lines = array_fill(0, 10, $this->httpLine('5.5.5.5', 'GPTBot/1.0'));
+        $lines = array_fill(0, 10, $this->httpLine('203.0.113.5', 'GPTBot/1.0'));
         $sources = [$this->makeSource('http', $lines)];
 
         $result = $this->service->analyse($sources);
@@ -137,7 +137,7 @@ class CrawlerAnalyserServiceTest extends TestCase
 
     public function testHighFrequencyUnknownIp(): void
     {
-        $lines = array_fill(0, 200, $this->httpLine('9.9.9.9', 'curl/7.x'));
+        $lines = array_fill(0, 200, $this->httpLine('203.0.113.9', 'curl/7.x'));
         $sources = [$this->makeSource('http', $lines)];
 
         $result = $this->service->analyse($sources);
@@ -150,7 +150,7 @@ class CrawlerAnalyserServiceTest extends TestCase
 
     public function testBelowThresholdNotReported(): void
     {
-        $lines = array_fill(0, 199, $this->httpLine('9.9.9.9', 'curl/7.x'));
+        $lines = array_fill(0, 199, $this->httpLine('203.0.113.9', 'curl/7.x'));
         $sources = [$this->makeSource('http', $lines)];
 
         $result = $this->service->analyse($sources);
@@ -165,7 +165,7 @@ class CrawlerAnalyserServiceTest extends TestCase
     public function testSkipsAdminRequests(): void
     {
         // 200 requests to the admin panel — must not trigger high-frequency
-        $lines = array_fill(0, 200, $this->httpLine('9.9.9.9', 'Mozilla/5.0', '/admin9615/index.php'));
+        $lines = array_fill(0, 200, $this->httpLine('203.0.113.9', 'Mozilla/5.0', '/admin9615/index.php'));
         $sources = [$this->makeSource('http', $lines)];
 
         $result = $this->service->analyse($sources);
@@ -180,19 +180,19 @@ class CrawlerAnalyserServiceTest extends TestCase
     public function testCapturesCorrectIpNotHostname(): void
     {
         // Alwaysdata format: hostname ip - - [...]
-        $line = 'www.kelenaya.fr 203.0.113.42 - - [09/Mar/2026:10:00:00 +0100] "GET / HTTP/1.1" 200 1 "-" "AhrefsBot/7.0"';
+        $line = 'www.site-a.example 203.0.113.42 - - [09/Mar/2026:10:00:00 +0100] "GET / HTTP/1.1" 200 1 "-" "AhrefsBot/7.0"';
         $sources = [$this->makeSource('http', array_fill(0, 1, $line))];
 
         $result = $this->service->analyse($sources);
 
         $this->assertNotEmpty($result);
         $this->assertContains('203.0.113.42', $result[0]['ips']);
-        $this->assertNotContains('www.kelenaya.fr', $result[0]['ips']);
+        $this->assertNotContains('www.site-a.example', $result[0]['ips']);
     }
 
     public function testCapturesIpv6(): void
     {
-        $line = 'www.kelenaya.fr 2a03:2880:f814:ab::face:b00c - - [09/Mar/2026:10:00:00 +0100] "GET / HTTP/1.1" 200 1 "-" "facebookexternalhit/1.1"';
+        $line = 'www.site-a.example 2a03:2880:f814:ab::face:b00c - - [09/Mar/2026:10:00:00 +0100] "GET / HTTP/1.1" 200 1 "-" "facebookexternalhit/1.1"';
         $sources = [$this->makeSource('http', [$line])];
 
         $result = $this->service->analyse($sources);
@@ -208,9 +208,9 @@ class CrawlerAnalyserServiceTest extends TestCase
     public function testResultsSortedByRequestCountDesc(): void
     {
         $lines = [];
-        $lines = array_merge($lines, array_fill(0, 5, $this->httpLine('1.1.1.1', 'AhrefsBot/7.0')));
-        $lines = array_merge($lines, array_fill(0, 200, $this->httpLine('2.2.2.2', 'curl/7.x'))); // high freq
-        $lines = array_merge($lines, array_fill(0, 50, $this->httpLine('3.3.3.3', 'SemrushBot/1.0')));
+        $lines = array_merge($lines, array_fill(0, 5, $this->httpLine('203.0.113.11', 'AhrefsBot/7.0')));
+        $lines = array_merge($lines, array_fill(0, 200, $this->httpLine('203.0.113.12', 'curl/7.x'))); // high freq
+        $lines = array_merge($lines, array_fill(0, 50, $this->httpLine('203.0.113.13', 'SemrushBot/1.0')));
         $sources = [$this->makeSource('http', $lines)];
 
         $result = $this->service->analyse($sources);

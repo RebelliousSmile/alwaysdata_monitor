@@ -15,7 +15,7 @@ class HtaccessDoctorTest extends TestCase
         . "<IfModule mod_rewrite.c>\n"
         . "RewriteEngine on\n"
         . "RewriteCond %{QUERY_STRING} (^|&)q= [NC]\n"
-        . "RewriteCond %{HTTP_REFERER} !^https?://(www\\.kelenaya\\.fr)(:\\d+)?/ [NC]\n"
+        . "RewriteCond %{HTTP_REFERER} !^https?://(www\\.site-a\\.example)(:\\d+)?/ [NC]\n"
         . "RewriteRule .* - [F,L]\n"
         . "</IfModule>\n"
         . "# END sc_alwaysdata protection\n";
@@ -43,12 +43,12 @@ class HtaccessDoctorTest extends TestCase
     private const PRESTASHOP = "# ~~start~~ Do not remove this comment, Prestashop will keep automatically the code outside this comment when .htaccess will be generated again\n"
         . "<IfModule mod_rewrite.c>\n"
         . "RewriteEngine on\n"
-        . "RewriteCond %{HTTP_HOST} ^www.kelenaya.fr$\n"
+        . "RewriteCond %{HTTP_HOST} ^www.site-a.example$\n"
         . "RewriteRule . - [E=REWRITEBASE:/]\n"
         . "RewriteCond %{REQUEST_FILENAME} -s [OR]\n"
         . "RewriteCond %{REQUEST_FILENAME} -d\n"
         . "RewriteRule ^.*$ - [NC,L]\n"
-        . "RewriteCond %{HTTP_HOST} ^www.kelenaya.fr$\n"
+        . "RewriteCond %{HTTP_HOST} ^www.site-a.example$\n"
         . "RewriteRule ^.*$ %{ENV:REWRITEBASE}index.php [NC,L]\n"
         . "</IfModule>\n"
         . "# ~~end~~ Do not remove this comment, Prestashop will keep automatically the code outside this comment when .htaccess will be generated again\n";
