@@ -52,6 +52,7 @@ class LogReaderServiceTest extends TestCase
         mkdir($path, 0755, true);
         $this->tmpBase = $path;
         \Configuration::$testValues['SC_ALWAYSDATA_LOGS_PATH'] = $path;
+
         return $path;
     }
 
@@ -62,6 +63,7 @@ class LogReaderServiceTest extends TestCase
     {
         $full = $basePath . '/' . $relative;
         mkdir($full, 0755, true);
+
         return $full;
     }
 
@@ -131,9 +133,9 @@ class LogReaderServiceTest extends TestCase
 
     public function testReturnsLogPathWhenPlainLogFileExists(): void
     {
-        $base  = $this->createTmpBase();
-        $date  = '2025-03-15';
-        $year  = '2025';
+        $base = $this->createTmpBase();
+        $date = '2025-03-15';
+        $year = '2025';
 
         $this->mkdirUnder($base, 'http/' . $year);
         $logFile = $base . '/http/' . $year . '/http-' . $date . '.log';

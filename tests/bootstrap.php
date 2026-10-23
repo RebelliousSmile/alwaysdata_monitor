@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../vendor/autoload.php';
 
-/**
+/*
  * Minimal stub for PrestaShop's Configuration class.
  * Allows HtaccessService (which calls \Configuration::get()) to be tested
  * without a full PrestaShop bootstrap.
