@@ -289,6 +289,14 @@ pub fn run_with_sources(
         }
         Err(err) => log::error!("purge des logs : {err:#}"),
     }
+    // Erreurs des sites (#52) : 14 jours. Même règle.
+    match store.purge_errors(now) {
+        Ok(0) => {}
+        Ok(groups) => {
+            log::info!("erreurs : {groups} groupe(s) de plus de 14 jours purgés")
+        }
+        Err(err) => log::error!("purge des erreurs : {err:#}"),
+    }
     purge_analysis(&mut store, now);
     // Inventaires : dernier et 30 jours d'historique par (site, source) ; le
     // dernier d'une source que le site ne déclare plus part aussi après 30

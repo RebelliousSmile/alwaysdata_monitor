@@ -209,7 +209,7 @@ relu en quatre tours ; audit : [`audit-chemin-critique.md`](./audit-chemin-criti
 
 | Décision du 2026-10-17 | Raison |
 | --- | --- |
-| `capability.rs` est la seule déclaration : `Control { Check, Heartbeat, Integrity, Agent(AgentFamily), Logs, Typology }` et `CommandKind`, CMS admis et condition d'existence par des `match` sans joker (agent enregistré et runtime effectif `php` pour `heartbeat`, `agent:integrity` et les familles, référence d'empreintes en plus pour l'intégrité, source de logs pour `logs`) ; `CheckKind::cms` y est déplacé, le prédicat provisoire de `tick` pour `logs` (#8) aussi | Une seule déclaration ; une variante nouvelle oblige à décider ; une clé d'agent sur un site `static` n'ouvre rien |
+| `capability.rs` est la seule déclaration : `Control { Check, Heartbeat, Integrity, Agent(AgentFamily), Errors, Logs, Typology }` et `CommandKind`, CMS admis et condition d'existence par des `match` sans joker (agent enregistré et runtime effectif `php` pour `heartbeat`, `agent:integrity` et les familles, référence d'empreintes en plus pour l'intégrité, source de logs pour `logs`) ; `CheckKind::cms` y est déplacé, le prédicat provisoire de `tick` pour `logs` (#8) aussi | Une seule déclaration ; une variante nouvelle oblige à décider ; une clé d'agent sur un site `static` n'ouvre rien |
 | Familles fermées, celles qu'émet l'agent PHP : `root`, `critical-file`, `must-contain`, `uploads-php` (WordPress seul). **Nom réservé → refus du rapport, famille inconnue → écart** : `integrity` fait refuser tout le rapport (règle de `report.rs`, gardée) ; une famille bien formée mais inconnue ou non admise pour le site est écartée, comptée dans `reports.dropped` (dernier rapport), journalisée par `serve` et montrée par `status`, le rapport restant accepté | Fail-closed sans casser un agent plus récent ; un agent ne fabrique ni intégrité ni incident hors typologie |
 | Un seul verdict `capability::watched(site, contrôle, contexte)` pour `tick` (`close_unwatched`), l'ingestion (`ingest` reçoit la configuration typée de `serve`, `accept_report` ne réconcilie que les contrôles surveillés) et l'API ; un nom inconnu du registre n'est jamais surveillé | Le même verdict partout, vérifié sur toute la matrice par les trois chemins réels (`tests/capability.rs`) |
 | Un incident dont le contrôle n'est plus surveillé est clos par `tick` avec la raison `unwatched` (migration 14, `incidents.close_reason`), et son e-mail dit « plus surveillé », jamais « rétabli » ; son constat étant désormais écarté, il ne se rouvre pas | L'e-mail de clôture part plus tard : la raison est en base. Pas de faux « rétabli » ni de cycle clos/rouvert |
@@ -481,12 +481,13 @@ réglages sont retirés.
   aperçus autonomes ; le second est l'e-mail d'ouverture de l'incident
   `heartbeat`, visible sur son écran Alerte.
 
-## Erreurs des sites (issue #52) — protocole décidé, source à confirmer
+## Erreurs des sites (issue #52) — veilleur livré, agent et console à suivre
 
 Décision prise le 2026-10-23 sur le plan de l'issue : la console montre les
 erreurs d'un site **regroupées par message**, jamais une ligne brute. Le
 chantier se livre en trois PR (protocole et agent, veilleur et API, console).
-Cette section fixe le contrat ; aucun code ne le précède.
+Cette section fixe le contrat. La deuxième PR (veilleur et API) est livrée :
+voir « Livré côté veilleur » plus bas.
 
 **Ce qui sort du compte (liste fermée).** Par site et par jour UTC, au plus 50
 groupes `(message normalisé, compteur, première vue, dernière vue)`. Ni ligne
@@ -508,10 +509,32 @@ refuse un lot dont un message contient encore une adresse.
 | ----- | -------- |
 | Transport | `POST /r/v1/errors`, signé comme `/r/v1/logs` (clé de l'agent, préfixe `vigie-errors-v1` suivi d'un saut de ligne), corps borné à 64 Kio, `seq` propre au site |
 | Stockage | `error_groups(site, day, fingerprint, message, count, first_seen, last_seen)` ; `fingerprint` = SHA-256 du message normalisé ; rétention 14 jours, purge par `tick` |
-| Registre de capacités | famille `agent:errors`, `Control` et `Needs` déclarés comme les autres familles d'agent |
+| Registre de capacités | `agent:errors`, `Control::Errors` (besoin : agent PHP), déclaré dans `capability.rs` |
 | API | `GET /api/v1/sites/{id}/errors`, en lecture seule, groupes du plus fréquent au moins fréquent |
 | Console | écran Erreurs ; entrée retirée de `features.ts` à la PR console |
 | Sourdine par groupe | hors de ce chantier : la sourdine de #50 porte sur les incidents, pas sur les groupes |
+
+**Livré côté veilleur (PR 2).** Code `vigie/src/errors/`, migration
+`0023.sql`, route `GET /api/v1/sites/{id}/errors`, protocole exact dans
+`protocole-agent.md`. Précisions et écarts au tableau ci-dessus :
+
+- La capacité `agent:errors` est la variante `Control::Errors`, et non une
+  `AgentFamily` : les familles sont comparées aux `finding('…'` de l'agent PHP
+  (`tests/capability.rs`), et `agent:errors` n'est pas un constat. Un constat
+  de ce nom dans un rapport est écarté comme tout constat inconnu. Pas de
+  `agent:resources` au registre non plus.
+- La réception est fermée (404 commun) hors runtime effectif `php` avec clé
+  d'agent.
+- Bornes ajoutées au contrat : `count` de 1 à 10^9 ; `day` date calendaire
+  valide, de aujourd'hui moins 13 jours à la date de `now + 300 s` ; `::` seul
+  n'est pas une adresse ; un lot vide est accepté (il vide le jour).
+- Le veilleur renormalise seulement les nombres (`#`) et les UUID (`<uuid>`) ;
+  chemins absolus et requêtes restent l'affaire de l'agent. La détection
+  d'adresse porte sur le message reçu, avant renormalisation.
+- Un parseur d'adresse qui accepte tout jeton hexadécimal lisible en IPv6
+  (`Cafe::add`) refuse parfois un message légitime : faux positif accepté.
+- Rétention : 14 jours UTC, aujourd'hui compris (aujourd'hui moins 13 jours),
+  purge dans `tick`.
 
 **Reste ouvert (bloquant pour la PR de l'agent).** L'existence et
 l'emplacement du journal d'erreurs PHP ou Apache de chaque compte Alwaysdata :

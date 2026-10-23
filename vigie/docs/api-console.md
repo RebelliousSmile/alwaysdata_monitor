@@ -118,6 +118,7 @@ révocation.
 | `GET /api/v1/sites/{id}/incidents` | incidents fermés depuis 30 jours, par pages | Dispo |
 | `GET /api/v1/sites/{id}/logs` | dernier instantané de l'analyse des logs : robots, règles, charge | — |
 | `GET /api/v1/sites/{id}/logs/ips` | verdicts d'IP moyens et élevés, par pages | — |
+| `GET /api/v1/sites/{id}/errors` | erreurs du site sur 14 jours, groupées par message normalisé (#52) | Erreurs |
 | `GET /api/v1/sites/{id}/components` | composants rapprochés des derniers inventaires (#21), par pages | Failles |
 | `GET /api/v1/sites/{id}/vulns` | failles des composants, une par (composant, faille fusionnée), par pages | Failles |
 | `GET /api/v1/vulns/sources` | sources de failles déclarées : âge, issue, attribution, constat `vulns-sync` | SourcesFailles |
@@ -384,6 +385,36 @@ libellé des raisons, qui peut citer l'un ou l'autre.
   `cursor_expired`, le client reprend au début, sans curseur.
 - Site sans source de logs ou absent de la configuration : 404.
 
+### `GET /api/v1/sites/{id}/errors`
+
+```json
+{
+  "site": "site-a",
+  "days": 14,
+  "groups": [
+    { "message": "Undefined array key #", "count": 16,
+      "first_seen": 1792000000, "last_seen": 1792150000, "days_seen": 3 }
+  ]
+}
+```
+
+Erreurs du site reçues de l'agent PHP (`POST /r/v1/errors`, voir
+`docs/protocole-agent.md`), sur les 14 derniers jours UTC (aujourd'hui
+compris), fusionnées par empreinte du message normalisé : `count` est la somme
+des jours, `first_seen` le plus ancien et `last_seen` le plus récent, `days_seen`
+le nombre de jours où le groupe a été vu. Triées par `count` décroissant, puis
+`last_seen` décroissant ; 50 groupes au plus, sans pagination. Le message est
+déjà normalisé par l'agent et renormalisé par le veilleur (nombres en `#`,
+UUID en `<uuid>`) : le `#` y est un chiffre masqué. Le texte reçoit
+l'assainissement de `LogText` (200 caractères au plus).
+
+- Site connu sans lot reçu : `groups` vaut `[]` (la console ne distingue pas
+  « aucune erreur » de « agent muet » ici ; le silence de l'agent a son propre
+  incident `heartbeat`).
+- Site absent de la configuration : 404.
+- Aucune adresse IP, aucun chemin, aucune requête n'est servi : le veilleur
+  refuse à la réception tout lot qui en porte.
+
 ### `GET /api/v1/sites/{id}/components`
 
 ```json
@@ -612,6 +643,7 @@ des maquettes (non conforme, aveugle, à vérifier, OK) : il est placé avant
 | Reglages | `settings` : `alerts.to`, `devices`, `public_url` ; retrait par `devices/self`. |
 | Etats | `state` à `blind` ou `first_read`, `server_time` et `last_read` pour la fraîcheur, échec réseau pour « hors ligne ». |
 | Failles | `sites/{id}/vulns` (composants touchés, failles, versions par source, correctif, KEV, EPSS, dérogation, liens, attributions, mention « usage interne » ou « faits seulement ») et `sites/{id}/components`, par pages ; 404 : écran « non alimenté » ; aucune action d'écriture. |
+| Erreurs | `sites/{id}/errors` : groupes de messages, compteur sur 14 jours, première et dernière vue, jours de présence ; liste vide : aucune erreur reçue ; aucune action d'écriture. |
 | SourcesFailles | `vulns/sources` : âge, dernière issue, entrées, licence, attribution, jeu KEV et EPSS, constat `vulns-sync` ouvert. |
 
 ## Limite de débit

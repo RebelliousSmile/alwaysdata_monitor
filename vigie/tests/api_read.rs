@@ -1388,3 +1388,127 @@ async fn ip_verdicts_older_than_48_hours_are_not_served() {
     let json = v.get("/api/v1/sites/site-a/logs", &token).await.json();
     assert_eq!(json["analysis"]["generated_at"], T0);
 }
+
+/// Écrit l'état d'un jour du site A, comme le fait la réception.
+fn put_errors(v: &Veilleur, seq: i64, day: &str, groups: &[(&str, i64, i64, i64)]) {
+    let groups: Vec<vigie::store::ErrorGroup> = groups
+        .iter()
+        .map(|(message, count, first, last)| vigie::store::ErrorGroup {
+            fingerprint: vigie::errors::fingerprint(message),
+            message: (*message).to_owned(),
+            count: *count,
+            first_seen: *first,
+            last_seen: *last,
+        })
+        .collect();
+    let pubkey = [5u8; 32];
+    let mut store = v.store();
+    let _ = store.add_key("site-a", &pubkey, T0);
+    let outcome = store
+        .accept_errors(&vigie::store::ErrorBatch {
+            site: "site-a",
+            pubkey: &pubkey,
+            seq,
+            day,
+            groups: &groups,
+        })
+        .expect("accept_errors");
+    assert_eq!(outcome, vigie::store::ErrorsOutcome::Accepted);
+}
+
+#[tokio::test]
+async fn the_errors_of_a_site_are_empty_before_any_batch_and_404_for_an_unknown_site() {
+    let v = Veilleur::new();
+    let token = v.token("pc").await;
+    let reply = v.get("/api/v1/sites/site-a/errors", &token).await;
+    assert_eq!(reply.status, StatusCode::OK);
+    assert_eq!(
+        reply.json(),
+        serde_json::json!({ "site": "site-a", "days": 14, "groups": [] })
+    );
+    let reply = v.get("/api/v1/sites/inconnu/errors", &token).await;
+    assert_eq!(reply.status, StatusCode::NOT_FOUND);
+    reply.assert_api_error("site inconnu");
+    // Sans jeton valide : refusé comme les autres routes de lecture.
+    let reply = v.get("/api/v1/sites/site-a/errors", "pas-un-jeton").await;
+    assert_eq!(reply.status, StatusCode::UNAUTHORIZED);
+    reply.assert_api_error("sans appareil");
+    // Lecture seule.
+    let reply = v
+        .call(Method::POST, "/api/v1/sites/site-a/errors", &token)
+        .await;
+    assert_eq!(reply.status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn the_errors_of_fourteen_days_are_merged_sorted_and_counted_by_day() {
+    let v = Veilleur::new();
+    let token = v.token("pc").await;
+    let day = |n: i64| vigie::utc_day(T0 - n * DAY);
+    // Le plus ancien jour lu (aujourd'hui moins 13) et un jour déjà hors fenêtre.
+    put_errors(
+        &v,
+        1,
+        &day(13),
+        &[("Rare #", 1, 100, 200), ("Fréquente #", 5, 90, 150)],
+    );
+    put_errors(&v, 2, &day(14), &[("Trop ancienne", 99, 1, 2)]);
+    put_errors(&v, 3, &day(2), &[("Fréquente #", 10, 300, 400)]);
+    put_errors(
+        &v,
+        4,
+        &day(0),
+        &[("Fréquente #", 1, 500, 600), ("Unique", 12, 700, 800)],
+    );
+
+    let reply = v.get("/api/v1/sites/site-a/errors", &token).await;
+    assert_eq!(reply.status, StatusCode::OK);
+    let json = reply.json();
+    assert_eq!(json["site"], "site-a");
+    assert_eq!(json["days"], 14);
+    let groups = json["groups"].as_array().expect("groups");
+    assert_eq!(groups.len(), 3, "{json}");
+    // Fréquente : 5 + 10 + 1 = 16, vue trois jours ; Unique : 12 ; Rare : 1.
+    assert_eq!(groups[0]["message"], "Fréquente #");
+    assert_eq!(groups[0]["count"], 16);
+    assert_eq!(groups[0]["first_seen"], 90);
+    assert_eq!(groups[0]["last_seen"], 600);
+    assert_eq!(groups[0]["days_seen"], 3);
+    assert_eq!(groups[1]["message"], "Unique");
+    assert_eq!(groups[1]["count"], 12);
+    assert_eq!(groups[1]["days_seen"], 1);
+    assert_eq!(groups[2]["message"], "Rare #");
+    assert!(
+        !groups.iter().any(|g| g["message"] == "Trop ancienne"),
+        "jour hors fenêtre"
+    );
+}
+
+#[tokio::test]
+async fn the_errors_served_are_sanitized_and_capped_at_fifty_groups() {
+    let v = Veilleur::new();
+    let token = v.token("pc").await;
+    let many: Vec<(String, i64)> = (0..60u8)
+        .map(|n| {
+            let name = format!(
+                "Message {}{}",
+                (b'a' + n / 26) as char,
+                (b'a' + n % 26) as char
+            );
+            (name, 60 - i64::from(n))
+        })
+        .collect();
+    let mut groups: Vec<(&str, i64, i64, i64)> =
+        many.iter().map(|(m, c)| (m.as_str(), *c, 1, 2)).collect();
+    // Un texte déjà en base avec un contrôle (écrit hors réception) est
+    // assaini à la lecture.
+    groups.push(("Ligne un\nfausse ligne \u{1b}[31m", 1000, 1, 2));
+    put_errors(&v, 1, &vigie::utc_day(T0), &groups);
+    let json = v.get("/api/v1/sites/site-a/errors", &token).await.json();
+    let served = json["groups"].as_array().expect("groups");
+    assert_eq!(served.len(), 50);
+    assert_eq!(served[0]["count"], 1000);
+    let message = served[0]["message"].as_str().expect("message");
+    assert!(!message.chars().any(char::is_control), "{message:?}");
+    assert!(message.contains('\u{fffd}'));
+}

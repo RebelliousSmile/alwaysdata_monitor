@@ -13,6 +13,9 @@
 //! - `POST /r/v1/logs` reçoit les lots de logs signés des agents
 //!   (`logs/receive.rs`, `docs/logs.md`), fermé pour un site sans
 //!   `[sites.logs] source` ;
+//! - `POST /r/v1/errors` reçoit les lots d'erreurs de site signés de l'agent
+//!   PHP (`errors/receive.rs`, issue #52), fermé pour un site sans runtime
+//!   `php` ;
 //! - `POST /r/v1/inventory` reçoit l'inventaire signé des composants d'un
 //!   site (`inventory/receive.rs`, 512 Kio au plus), fermé pour un site sans
 //!   `[sites.inventory]`, refusé avant toute lecture du corps ;
@@ -146,6 +149,10 @@ pub fn router_with(config: Config, clock: Arc<dyn Clock>, config_path: Option<Pa
         .route(
             crate::logs::receive::ROUTE,
             post(logs_handler).fallback(not_found),
+        )
+        .route(
+            crate::errors::receive::ROUTE,
+            post(errors_handler).fallback(not_found),
         )
         .route(
             crate::inventory::receive::ROUTE,
@@ -539,6 +546,68 @@ async fn logs_handler(State(state): State<Arc<AppState>>, request: Request) -> S
     }
 }
 
+/// 204 si le lot d'erreurs est accepté, 404 sans corps sinon. Mêmes limites
+/// de taille et de délai que `/r/v1/logs` ; la configuration est celle du
+/// démarrage, comme pour les rapports.
+async fn errors_handler(State(state): State<Arc<AppState>>, request: Request) -> StatusCode {
+    let (parts, body) = request.into_parts();
+    let header = |name: &str| {
+        parts
+            .headers
+            .get(name)
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_owned)
+    };
+    let site = header(HEADER_SITE);
+    let signature = header(HEADER_SIGNATURE);
+    let announced = header(CONTENT_LENGTH.as_str()).and_then(|v| v.parse::<u64>().ok());
+    let bytes = match read_agent_body(body, announced, MAX_REPORT_BYTES).await {
+        Ok(bytes) => bytes,
+        Err(reason) => return refuse_errors(Refusal::new(site.as_deref(), reason)),
+    };
+    let now = state.clock.unix();
+    let task_state = Arc::clone(&state);
+    let task_site = site.clone();
+    let outcome = tokio::task::spawn_blocking(move || {
+        let refusal = |reason| Refusal::new(task_site.as_deref(), reason);
+        let written = task_state.writer.write(|store| {
+            Ok(crate::errors::receive::receive(
+                store,
+                &task_state.config,
+                task_site.as_deref(),
+                signature.as_deref(),
+                &bytes,
+                now,
+            ))
+        });
+        match written {
+            Ok(Some(result)) => result,
+            Ok(None) => Err(refusal(Reason::UnknownSite)),
+            Err(err) => Err(refusal(Reason::Internal(format!("{err:#}")))),
+        }
+    })
+    .await;
+    match outcome {
+        Ok(Ok(received)) => {
+            log::info!(
+                "[{}] lot d'erreurs accepté (site {}, seq {}, jour {}) : {} groupe(s) reçu(s), {} écrit(s)",
+                crate::request_id::current(),
+                received.site,
+                received.seq,
+                received.day,
+                received.received,
+                received.stored
+            );
+            StatusCode::NO_CONTENT
+        }
+        Ok(Err(refusal)) => refuse_errors(refusal),
+        Err(err) => refuse_errors(Refusal::new(
+            site.as_deref(),
+            Reason::Internal(format!("tâche interrompue : {err}")),
+        )),
+    }
+}
+
 /// 204 si l'inventaire est accepté (nouveau ou inchangé), 404 sans corps
 /// sinon. La porte (site, `[sites.inventory]`, clés des sources déclarées,
 /// lues par la connexion de lecture) passe avant toute lecture du corps ; signature et liste blanche hors du writer ; seule l'écriture le
@@ -656,6 +725,16 @@ fn refuse_logs(refusal: Refusal) -> StatusCode {
         log::error!("[{rid}] lot de logs : {refusal}");
     } else {
         log::warn!("[{rid}] lot de logs : {refusal}");
+    }
+    StatusCode::NOT_FOUND
+}
+
+fn refuse_errors(refusal: Refusal) -> StatusCode {
+    let rid = crate::request_id::current();
+    if matches!(refusal.reason, Reason::Internal(_)) {
+        log::error!("[{rid}] lot d'erreurs : {refusal}");
+    } else {
+        log::warn!("[{rid}] lot d'erreurs : {refusal}");
     }
     StatusCode::NOT_FOUND
 }
@@ -871,6 +950,7 @@ mod tests {
             "/r/v1/report",
             "/r/v1/commands",
             "/r/v1/logs",
+            "/r/v1/errors",
             "/r/v1/inventory",
             "/r/v1",
             "/api/v1",

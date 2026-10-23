@@ -142,6 +142,11 @@ pub enum Control {
     Integrity,
     /// Famille de constats de l'agent.
     Agent(AgentFamily),
+    /// Erreurs des sites (#52) : famille `agent:errors`, ouvre
+    /// `/r/v1/errors`. Ce n'est pas un constat : l'agent ne l'émet pas dans
+    /// ses rapports (d'où l'absence d'[`AgentFamily`], qui énumère ce que
+    /// `vigie-agent.php` émet) et un constat de ce nom serait écarté.
+    Errors,
     /// Analyse des logs (#8).
     Logs,
     /// Avertissement : clé d'agent sur un site sans runtime `php`.
@@ -159,6 +164,9 @@ pub const WATCHER_SITE: &str = "_veilleur";
 /// Nom du contrôle `vulns-sync`.
 pub const VULNS_SYNC: &str = "vulns-sync";
 
+/// Nom du contrôle `agent:errors` (#52).
+pub const ERRORS: &str = "agent:errors";
+
 /// Nom du contrôle `typology`.
 pub const TYPOLOGY: &str = "typology";
 /// Clé de l'unique constat `typology`.
@@ -166,7 +174,7 @@ pub const TYPOLOGY_KEY: &str = "agent-runtime";
 
 impl Control {
     /// Tous les contrôles, dans l'ordre d'affichage.
-    pub const ALL: [Self; 16] = [
+    pub const ALL: [Self; 17] = [
         Self::Check(CheckKind::Content),
         Self::Check(CheckKind::Installer),
         Self::Check(CheckKind::Exposed),
@@ -179,6 +187,7 @@ impl Control {
         Self::Agent(AgentFamily::CriticalFile),
         Self::Agent(AgentFamily::MustContain),
         Self::Agent(AgentFamily::UploadsPhp),
+        Self::Errors,
         Self::Logs,
         Self::Typology,
         Self::VulnsSync,
@@ -192,6 +201,7 @@ impl Control {
             Self::Heartbeat => crate::checks::heartbeat::NAME,
             Self::Integrity => "agent:integrity",
             Self::Agent(family) => family.check_name(),
+            Self::Errors => ERRORS,
             Self::Logs => crate::analysis::findings::CHECK,
             Self::Typology => TYPOLOGY,
             Self::VulnsSync => VULNS_SYNC,
@@ -218,6 +228,7 @@ impl Control {
             Self::Agent(family) => family.cms(),
             Self::Heartbeat
             | Self::Integrity
+            | Self::Errors
             | Self::Logs
             | Self::Typology
             | Self::VulnsSync
@@ -230,7 +241,7 @@ impl Control {
         match self {
             Self::Check(CheckKind::Custom) => Needs::CustomRules,
             Self::Check(_) => Needs::Nothing,
-            Self::Heartbeat | Self::Agent(_) => Needs::PhpAgent,
+            Self::Heartbeat | Self::Agent(_) | Self::Errors => Needs::PhpAgent,
             Self::Integrity => Needs::PhpAgentAndBaseline,
             Self::Logs => Needs::LogSource,
             Self::Typology => Needs::AgentWithoutPhp,
@@ -257,10 +268,11 @@ impl Control {
         }
     }
 
-    /// Contrôle rapporté par l'agent (familles et intégrité, préfixe `agent:`).
+    /// Contrôle rapporté par l'agent (familles, erreurs et intégrité, préfixe
+    /// `agent:`).
     pub fn is_agent(self) -> bool {
         match self {
-            Self::Integrity | Self::Agent(_) => true,
+            Self::Integrity | Self::Agent(_) | Self::Errors => true,
             Self::Check(_)
             | Self::Heartbeat
             | Self::Logs

@@ -115,6 +115,9 @@ const MIGRATIONS: &[&str] = &[
     // Fichier 0022 : sourdine des incidents (#50), `incidents.snoozed_until`.
     // Version : [`SCHEMA_SNOOZE`].
     include_str!("../migrations/0022.sql"),
+    // Fichier 0023 : erreurs des sites (#52), `site_keys.last_errors_seq` et
+    // `error_groups`. Version : [`SCHEMA_ERRORS`].
+    include_str!("../migrations/0023.sql"),
 ];
 
 /// Version d'une migration : sa place dans [`MIGRATIONS`], plus un.
@@ -195,6 +198,9 @@ pub const SCHEMA_VULNS_MATCH: usize = version_of(include_str!("../migrations/002
 /// Version de schéma à partir de laquelle la sourdine des incidents existe
 /// (issue #50, fichier `0022.sql`).
 pub const SCHEMA_SNOOZE: usize = version_of(include_str!("../migrations/0022.sql"));
+/// Version de schéma à partir de laquelle les erreurs des sites sont reçues
+/// et lues (issue #52, fichier `0023.sql`).
+pub const SCHEMA_ERRORS: usize = version_of(include_str!("../migrations/0023.sql"));
 /// Durées de sourdine admises, en secondes : fermées, pour qu'un jeton volé
 /// ne retarde jamais une alerte de plus de 7 jours.
 pub const SNOOZE_24H: i64 = 24 * 3600;
@@ -532,6 +538,53 @@ pub enum LogsOutcome {
     Overlap { high: i64 },
     /// Plafond quotidien du site atteint.
     Quota { used: i64 },
+}
+
+/// Groupe d'erreurs d'un jour, message déjà normalisé (`errors/mod.rs`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ErrorGroup {
+    /// SHA-256 hexadécimal du message normalisé.
+    pub fingerprint: String,
+    pub message: String,
+    pub count: i64,
+    pub first_seen: i64,
+    pub last_seen: i64,
+}
+
+/// Lot d'erreurs authentifié, à l'heure et normalisé (`errors/receive.rs`),
+/// prêt à écrire : l'état d'un jour d'un site.
+#[derive(Debug, Clone, Copy)]
+pub struct ErrorBatch<'a> {
+    pub site: &'a str,
+    /// Clé qui a vérifié la signature.
+    pub pubkey: &'a [u8; 32],
+    pub seq: i64,
+    /// `AAAA-MM-JJ` (UTC).
+    pub day: &'a str,
+    pub groups: &'a [ErrorGroup],
+}
+
+/// Issue de l'écriture d'un lot d'erreurs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ErrorsOutcome {
+    Accepted,
+    /// Clé retirée ou remplacée entre la vérification et l'écriture.
+    UnknownSite,
+    /// `seq` inférieur ou égal au dernier lot accepté.
+    Replay {
+        last_seq: i64,
+    },
+}
+
+/// Groupe d'erreurs d'un site, fusionné par empreinte sur les jours gardés.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MergedErrorGroup {
+    pub message: String,
+    pub count: i64,
+    pub first_seen: i64,
+    pub last_seen: i64,
+    /// Nombre de jours où le groupe a été vu.
+    pub days_seen: i64,
 }
 
 /// Inventaire authentifié, à l'heure et validé (`inventory/receive.rs`),
@@ -1370,7 +1423,7 @@ impl Store {
                 }
                 tx.execute(
                     "UPDATE site_keys SET pubkey = ?2, rotated_at = ?3, last_logs_seq = 0,
-                       last_inventory_seq = 0
+                       last_inventory_seq = 0, last_errors_seq = 0
                      WHERE site = ?1",
                     params![site, pubkey.as_slice(), now],
                 )?;
@@ -1393,6 +1446,7 @@ impl Store {
     /// `false` si le site n'avait aucune des deux clés.
     pub fn remove_key(&mut self, site: &str, now: i64) -> Result<bool> {
         let match_tables = self.schema_version()? >= SCHEMA_VULNS_MATCH;
+        let error_tables = self.schema_version()? >= SCHEMA_ERRORS;
         let tx = self
             .conn
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -1419,6 +1473,10 @@ impl Store {
             "site_inventory",
         ] {
             tx.execute(&format!("DELETE FROM {table} WHERE site = ?1"), [site])?;
+        }
+        if error_tables {
+            // Groupes d'erreurs (#52).
+            tx.execute("DELETE FROM error_groups WHERE site = ?1", [site])?;
         }
         if match_tables {
             crate::vulns::matching::store::forget_site(&tx, site, now)?;
@@ -1965,6 +2023,102 @@ impl Store {
         tx.execute("DELETE FROM log_marks WHERE received_at < ?1", [limit])?;
         tx.commit()?;
         Ok((entries, batches))
+    }
+
+    /// Écrit un lot d'erreurs, tout ou rien, sous verrou d'écriture : clé
+    /// inchangée, `seq` strictement croissant, puis remplacement des groupes
+    /// du (site, jour) par ceux du lot (idempotent).
+    pub fn accept_errors(&mut self, batch: &ErrorBatch<'_>) -> Result<ErrorsOutcome> {
+        retry_busy(WRITE_PATIENCE, || self.accept_errors_once(batch))
+    }
+
+    fn accept_errors_once(&mut self, batch: &ErrorBatch<'_>) -> Result<ErrorsOutcome> {
+        let tx = self
+            .conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let current: Option<(Vec<u8>, i64)> = tx
+            .query_row(
+                "SELECT pubkey, last_errors_seq FROM site_keys WHERE site = ?1",
+                [batch.site],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
+        let last_seq = match current {
+            Some((key, last_seq)) if key == batch.pubkey.as_slice() => last_seq,
+            _ => return Ok(ErrorsOutcome::UnknownSite),
+        };
+        if batch.seq <= last_seq {
+            return Ok(ErrorsOutcome::Replay { last_seq });
+        }
+        tx.execute(
+            "UPDATE site_keys SET last_errors_seq = ?2 WHERE site = ?1",
+            params![batch.site, batch.seq],
+        )?;
+        tx.execute(
+            "DELETE FROM error_groups WHERE site = ?1 AND day = ?2",
+            params![batch.site, batch.day],
+        )?;
+        {
+            let mut insert = tx.prepare(
+                "INSERT INTO error_groups (site, day, fingerprint, message, count, first_seen,
+                   last_seen)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            )?;
+            for g in batch.groups {
+                insert.execute(params![
+                    batch.site,
+                    batch.day,
+                    g.fingerprint,
+                    g.message,
+                    g.count,
+                    g.first_seen,
+                    g.last_seen
+                ])?;
+            }
+        }
+        tx.commit()?;
+        Ok(ErrorsOutcome::Accepted)
+    }
+
+    /// Conservation de 14 jours (`decisions.md`) : groupes des jours antérieurs
+    /// à `aujourd'hui − 13 j` (UTC), les 14 derniers jours restant lus. Rend le
+    /// nombre de groupes effacés.
+    pub fn purge_errors(&mut self, now: i64) -> Result<usize> {
+        let first_kept = crate::errors::first_kept_day(now);
+        let tx = self
+            .conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let removed = tx.execute("DELETE FROM error_groups WHERE day < ?1", [first_kept])?;
+        tx.commit()?;
+        Ok(removed)
+    }
+
+    /// Groupes d'un site depuis le jour `from_day` (inclus), fusionnés par
+    /// empreinte, du plus fréquent au moins fréquent, `limit` au plus.
+    pub fn error_groups_merged(
+        &self,
+        site: &str,
+        from_day: &str,
+        limit: usize,
+    ) -> Result<Vec<MergedErrorGroup>> {
+        let mut stmt = self.conn.prepare_cached(
+            "SELECT MIN(message), SUM(count), MIN(first_seen), MAX(last_seen), COUNT(*)
+             FROM error_groups WHERE site = ?1 AND day >= ?2
+             GROUP BY fingerprint
+             ORDER BY SUM(count) DESC, MAX(last_seen) DESC, fingerprint
+             LIMIT ?3",
+        )?;
+        let limit = i64::try_from(limit).unwrap_or(i64::MAX);
+        let rows = stmt.query_map(params![site, from_day, limit], |row| {
+            Ok(MergedErrorGroup {
+                message: row.get(0)?,
+                count: row.get(1)?,
+                first_seen: row.get(2)?,
+                last_seen: row.get(3)?,
+                days_seen: row.get(4)?,
+            })
+        })?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
     /// Entrées d'un site d'id supérieur à `after`, dans l'ordre des id (ordre
@@ -2890,6 +3044,92 @@ mod tests {
         (dir, store)
     }
 
+    fn error_group(message: &str, count: i64, first: i64, last: i64) -> ErrorGroup {
+        ErrorGroup {
+            fingerprint: crate::errors::fingerprint(message),
+            message: message.to_owned(),
+            count,
+            first_seen: first,
+            last_seen: last,
+        }
+    }
+
+    #[test]
+    fn error_batches_replace_a_day_refuse_replays_and_unknown_sites() {
+        let (_dir, mut store) = temp_store();
+        let key = [7u8; 32];
+        store.add_key("site-a", &key, 0).expect("add_key");
+        let accept = |store: &mut Store, site, seq, day, groups: &[ErrorGroup]| {
+            store
+                .accept_errors(&ErrorBatch {
+                    site,
+                    pubkey: &key,
+                    seq,
+                    day,
+                    groups,
+                })
+                .expect("accept_errors")
+        };
+        let first = [error_group("A", 3, 1, 2), error_group("B", 1, 5, 6)];
+        assert_eq!(
+            accept(&mut store, "site-a", 1, "2026-10-16", &first),
+            ErrorsOutcome::Accepted
+        );
+        // Le même jour, un seq plus grand : l'état précédent est remplacé.
+        let second = [error_group("A", 4, 1, 9)];
+        assert_eq!(
+            accept(&mut store, "site-a", 2, "2026-10-16", &second),
+            ErrorsOutcome::Accepted
+        );
+        let merged = store
+            .error_groups_merged("site-a", "2026-10-01", 50)
+            .expect("lecture");
+        assert_eq!(merged.len(), 1);
+        assert_eq!((merged[0].count, merged[0].days_seen), (4, 1));
+        // Rejeu et seq plus petit : refusés, rien n'est écrit.
+        for seq in [2, 1] {
+            assert_eq!(
+                accept(&mut store, "site-a", seq, "2026-10-16", &first),
+                ErrorsOutcome::Replay { last_seq: 2 }
+            );
+        }
+        assert_eq!(
+            store
+                .error_groups_merged("site-a", "2026-10-01", 50)
+                .expect("lecture")[0]
+                .count,
+            4
+        );
+        // Site sans clé.
+        assert_eq!(
+            accept(&mut store, "site-b", 1, "2026-10-16", &first),
+            ErrorsOutcome::UnknownSite
+        );
+        // La limite coupe la liste triée.
+        accept(
+            &mut store,
+            "site-a",
+            3,
+            "2026-10-15",
+            &[error_group("Z", 10, 0, 1)],
+        );
+        let top = store
+            .error_groups_merged("site-a", "2026-10-01", 1)
+            .expect("lecture");
+        assert_eq!(top.len(), 1);
+        assert_eq!(top[0].message, "Z");
+        // Purge : 2026-10-15 sort de la fenêtre le 2026-10-29 (au 28, il reste).
+        let at = |day: &str| {
+            let secs = (0..400i64)
+                .map(|n| 1_790_000_000 + n * 86_400)
+                .find(|s| crate::utc_day(*s) == day)
+                .expect("jour");
+            secs + 3600
+        };
+        assert_eq!(store.purge_errors(at("2026-10-28")).expect("purge"), 0);
+        assert_eq!(store.purge_errors(at("2026-10-29")).expect("purge"), 1);
+    }
+
     #[test]
     fn a_repeated_finding_is_one_incident_closed_when_it_disappears() {
         let (_dir, mut store) = temp_store();
@@ -3421,6 +3661,7 @@ mod tests {
         let expected = [
             ("index", "command_audit_site"),
             ("index", "commands_one_open"),
+            ("index", "error_groups_day"),
             ("index", "incidents_open_key"),
             ("index", "incidents_site_check"),
             ("index", "incidents_site_closed"),
@@ -3459,6 +3700,7 @@ mod tests {
             ("table", "command_sites"),
             ("table", "commands"),
             ("table", "devices"),
+            ("table", "error_groups"),
             ("table", "incidents"),
             ("table", "log_analysis"),
             ("table", "log_batches"),
@@ -3530,11 +3772,24 @@ mod tests {
             columns("incidents").last().map(String::as_str),
             Some("snoozed_until")
         );
-        // Migrations 9 et 16 : `seq` des lots de logs et des inventaires, à
-        // côté de la clé.
+        // Migrations 9, 16 et 23 : `seq` des lots de logs, des inventaires et
+        // des erreurs, à côté de la clé.
         assert_eq!(
-            columns("site_keys")[columns("site_keys").len() - 2..],
-            ["last_logs_seq", "last_inventory_seq"]
+            columns("site_keys")[columns("site_keys").len() - 3..],
+            ["last_logs_seq", "last_inventory_seq", "last_errors_seq"]
+        );
+        // Migration 23 : groupes d'erreurs par site et par jour.
+        assert_eq!(
+            columns("error_groups"),
+            [
+                "site",
+                "day",
+                "fingerprint",
+                "message",
+                "count",
+                "first_seen",
+                "last_seen"
+            ]
         );
         // Migration 16 : composants d'inventaire dans une table à rowid.
         let without_rowid: String = store
@@ -3897,7 +4152,8 @@ mod tests {
         }
         let store = Store::open(&path).expect("open");
         assert_eq!(store.schema_version().expect("version"), MIGRATIONS.len());
-        assert_eq!(SCHEMA_SNOOZE, MIGRATIONS.len());
+        assert_eq!(SCHEMA_ERRORS, MIGRATIONS.len());
+        assert_eq!(SCHEMA_SNOOZE + 1, SCHEMA_ERRORS);
         assert_eq!(SCHEMA_VULNS_MATCH + 1, SCHEMA_SNOOZE);
         assert_eq!(SCHEMA_INVENTORY_KEYS + 1, SCHEMA_VULNS_MATCH);
         assert_eq!(store.last_tick().expect("tick"), Some(42));

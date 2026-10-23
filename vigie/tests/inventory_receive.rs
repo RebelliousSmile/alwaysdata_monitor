@@ -579,7 +579,7 @@ async fn signatures_are_bound_to_the_inventory_route() {
     }
     // Inventaire bien signé, envoyé ailleurs.
     let signature = key::sign(&h.key, DOMAIN_INVENTORY, &[&body]);
-    for route in ["/r/v1/report", "/r/v1/logs"] {
+    for route in ["/r/v1/report", "/r/v1/logs", "/r/v1/errors"] {
         assert_eq!(
             h.post(route, "site-a", &signature, body.clone()).await,
             StatusCode::NOT_FOUND,

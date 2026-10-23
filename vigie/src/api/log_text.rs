@@ -80,6 +80,12 @@ impl LogText {
             .then(|| Self::new(&origin.ascii_serialization(), MAX_PATH_CHARS))
     }
 
+    /// Message d'erreur de site normalisé (#52), 200 caractères au plus. Le
+    /// `#` y est un chiffre masqué, pas un fragment d'URL : rien n'est retiré.
+    pub fn error_message(raw: &str) -> Self {
+        Self::new(raw, crate::errors::MAX_MESSAGE_CHARS)
+    }
+
     /// Détail d'un incident ou d'un passage du contrôle `logs`.
     pub fn detail(raw: &str) -> Self {
         Self::new(raw, MAX_DETAIL_CHARS)

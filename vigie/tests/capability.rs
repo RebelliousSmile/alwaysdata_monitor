@@ -94,7 +94,11 @@ fn expected(site: &Site, name: &str, ctx: &Ctx) -> bool {
     match name {
         "content" | "exposed" | "tls" | "headers" => true,
         "installer" => site.kind != SiteKind::Generic,
-        "heartbeat" | "agent:root" | "agent:critical-file" | "agent:must-contain" => php_agent,
+        "heartbeat"
+        | "agent:root"
+        | "agent:critical-file"
+        | "agent:must-contain"
+        | "agent:errors" => php_agent,
         "agent:uploads-php" => php_agent && site.kind == SiteKind::Wordpress,
         "agent:integrity" => php_agent && ctx.baseline,
         "logs" => site.logs.is_some(),
@@ -1026,7 +1030,7 @@ fn vulns_is_watched_only_with_a_declared_inventory_source() {
 
 #[test]
 fn vulns_sync_is_a_watcher_control_never_watched_for_a_site() {
-    assert_eq!(Control::ALL.len(), 16);
+    assert_eq!(Control::ALL.len(), 17);
     assert_eq!(Control::from_name("vulns-sync"), Some(Control::VulnsSync));
     for (kind, runtime) in KINDS {
         for ctx in CONTEXTS {

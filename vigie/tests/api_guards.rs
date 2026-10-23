@@ -1019,6 +1019,10 @@ async fn every_route_serves_only_the_reviewed_keys_and_no_seeded_secret() {
             "/api/v1/sites/site-a/logs/ips".to_owned(),
         ),
         (
+            "GET /api/v1/sites/{id}/errors",
+            "/api/v1/sites/site-a/errors".to_owned(),
+        ),
+        (
             "GET /api/v1/sites/{id}/components",
             "/api/v1/sites/site-a/components".to_owned(),
         ),
