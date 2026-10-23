@@ -40,6 +40,56 @@ class HtaccessServiceTest extends TestCase
     }
 
     // -----------------------------------------------------------------
+    // syntax gate before writing
+    // -----------------------------------------------------------------
+
+    public function testWriteThatWouldBreakTheFileIsRefusedBeforeAnyChange(): void
+    {
+        $original = "<IfModule mod_rewrite.c>\nRewriteEngine on\n</IfModule>\n";
+        $this->write($original);
+        $source = $this->backupOf("<IfModule mod_rewrite.c>\nRewriteEngine on\n");
+
+        try {
+            $this->service()->restoreBackup($source);
+            $this->fail('A write that unbalances the file must be refused');
+        } catch (\RuntimeException $e) {
+            $this->assertStringContainsString('Syntaxe .htaccess invalide, fichier inchangé', $e->getMessage());
+            $this->assertStringContainsString('ligne 1', $e->getMessage());
+        }
+
+        $this->assertSame($original, file_get_contents($this->tmpFile));
+        $this->assertSame([dirname($this->tmpFile) . '/' . $source], glob($this->tmpFile . '.*.bak') ?: [], 'a refused write leaves no new backup');
+        $this->assertFileDoesNotExist($this->tmpFile . '.tmp');
+    }
+
+    public function testAlreadyBrokenFileCanStillBeEditedButNotMadeWorse(): void
+    {
+        $this->write("<IfModule mod_rewrite.c>\nRewriteEngine on\n");
+
+        $this->service()->blockIp('203.0.113.9');
+
+        $this->assertContains('203.0.113.9', $this->service()->readBlockedIps());
+    }
+
+    public function testValidWriteStillCreatesItsBackup(): void
+    {
+        $this->write("RewriteEngine on\n");
+
+        $this->service()->blockIp('203.0.113.9');
+
+        $this->assertCount(1, glob($this->tmpFile . '.*.bak') ?: []);
+    }
+
+    /** Name of a backup file holding $content, next to the htaccess under test. */
+    private function backupOf(string $content): string
+    {
+        $name = basename($this->tmpFile) . '.2026-10-23_00-00-00.bak';
+        file_put_contents(dirname($this->tmpFile) . '/' . $name, $content);
+
+        return $name;
+    }
+
+    // -----------------------------------------------------------------
     // readBlockedIps
     // -----------------------------------------------------------------
 
