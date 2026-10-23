@@ -416,6 +416,49 @@ describe('Appairage', () => {
   })
 })
 
+describe('Thème', () => {
+  afterEach(() => {
+    document.documentElement.removeAttribute('data-theme')
+  })
+
+  it('sombre par défaut, sans l’encart « pas encore disponible »', async () => {
+    mockVeilleur()
+    const { wrapper } = await open('/reglages')
+    const choice = wrapper.get('[data-theme-choice]')
+    expect(choice.findAll('input[type="radio"]').map((r) => (r.element as HTMLInputElement).checked)).toEqual([true, false])
+    expect(wrapper.text()).not.toContain('Thème clair')
+    expect(wrapper.find('[data-notyet]').exists() && wrapper.get('[data-notyet]').text().includes('Thème')).toBe(false)
+  })
+
+  it('choisir Clair applique le thème et le mémorise sur l’appareil', async () => {
+    mockVeilleur()
+    const { wrapper } = await open('/reglages')
+    await wrapper.get('[data-theme-choice] input[value="light"]').setValue(true)
+    expect(document.documentElement.dataset.theme).toBe('light')
+    expect(localStorage.getItem('vigie.theme')).toBe('light')
+    await wrapper.get('[data-theme-choice] input[value="dark"]').setValue(true)
+    expect(document.documentElement.dataset.theme).toBe('dark')
+    expect(localStorage.getItem('vigie.theme')).toBe('dark')
+  })
+
+  it('relit un choix clair déjà mémorisé', async () => {
+    localStorage.setItem('vigie.theme', 'light')
+    mockVeilleur()
+    const { wrapper } = await open('/reglages')
+    const radios = wrapper.get('[data-theme-choice]').findAll('input[type="radio"]')
+    expect(radios.map((r) => (r.element as HTMLInputElement).checked)).toEqual([false, true])
+  })
+
+  it('le groupe est étiqueté et chaque choix a un libellé visible', async () => {
+    mockVeilleur()
+    const { wrapper } = await open('/reglages')
+    const group = wrapper.get('[role="radiogroup"]')
+    expect(group.attributes('aria-labelledby')).toBe('theme')
+    expect(wrapper.get('#theme').text()).toBe('Thème')
+    expect(group.findAll('label').map((l) => l.text())).toEqual(['Sombre', 'Clair'])
+  })
+})
+
 describe('Retirer cet appareil', () => {
   it('veilleur injoignable : retour à Appairage, la notice cite vigie device revoke', async () => {
     const veilleur = mockVeilleur()

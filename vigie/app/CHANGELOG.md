@@ -9,6 +9,7 @@ Prérequis de publication : le veilleur du VPS sert les routes `components`,
 `vulns` et `vulns/sources` de l'API (#21, phase 4). Face à un veilleur en
 retard, les deux écrans restent « pas encore disponible » (404).
 
+- Thème clair (#34) : choix Sombre ou Clair dans les réglages, mémorisé sur l'appareil, appliqué avant l'affichage ; sombre par défaut. Jetons dans `tokens-light.css` (mêmes noms que `tokens.css`, qui reste la copie de la maquette), contrastes vérifiés par les tests : texte au moins 4,5:1, contours de contrôle au moins 3:1. L'encart « Thème clair, pas encore disponible » disparaît. Le fond de la fenêtre native reste sombre une fraction de seconde au lancement.
 - Failles (#21) : composants du site et failles connues rapprochées, par
   groupe d'alias, avec gravité, KEV, EPSS, versions corrigées, dérogation
   en cours et source de l'inventaire ; « Afficher plus » sur un passage
