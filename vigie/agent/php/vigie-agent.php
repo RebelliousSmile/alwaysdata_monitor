@@ -82,6 +82,8 @@ final class Config
         /** @var ?array{composer: list<string>, npm: list<string>} lockfiles en plus de ceux de la racine ; null : inventaire désactivé */
         public readonly ?array $inventory = null,
         public readonly ?string $inventoryEndpoint = null,
+        /** Relève mémoire, charge et disque du compte dans `facts` (#51). */
+        public readonly bool $resources = false,
     ) {
     }
 }
@@ -213,7 +215,7 @@ function load_config(string $path): Config
     if (!\is_array($data) || array_is_list($data) && $data !== []) {
         throw new UsageError('Configuration : un objet JSON est attendu.');
     }
-    $known = ['site', 'endpoint', 'root', 'kind', 'critical', 'must_contain', 'uploads', 'commands', 'logs', 'url', 'tz', 'inventory'];
+    $known = ['site', 'endpoint', 'root', 'kind', 'critical', 'must_contain', 'uploads', 'commands', 'logs', 'url', 'tz', 'inventory', 'resources'];
     foreach (array_keys($data) as $key) {
         if (!\in_array($key, $known, true)) {
             throw new UsageError("Configuration : clé inconnue « {$key} ».");
@@ -277,6 +279,11 @@ function load_config(string $path): Config
         throw new UsageError('Configuration : tz attendu, fuseau IANA du serveur web (Europe/Paris).');
     }
 
+    $resources = $data['resources'] ?? false;
+    if (!\is_bool($resources)) {
+        throw new UsageError('Configuration : resources attendu, true ou false.');
+    }
+
     $inventory = inventory_config($data['inventory'] ?? null);
     $inventoryEndpoint = null;
     if ($inventory !== null) {
@@ -288,7 +295,7 @@ function load_config(string $path): Config
 
     return new Config(
         $site, $endpoint, rtrim($root, '/\\'), $kind, $critical, $mustContain, $uploads, $commandsEndpoint, $commandsKey,
-        $logsDir, $logsHosts, $logsEndpoint, $siteUrl, $tz, $inventory, $inventoryEndpoint,
+        $logsDir, $logsHosts, $logsEndpoint, $siteUrl, $tz, $inventory, $inventoryEndpoint, $resources,
     );
 }
 
@@ -432,6 +439,9 @@ function collect(Config $config): array
         'php_version' => \PHP_VERSION,
         'kind' => $config->kind,
     ];
+    if ($config->resources) {
+        $facts += resource_facts($config->root);
+    }
     $rootReal = realpath($config->root);
     if ($rootReal === false || !is_dir($rootReal)) {
         $findings[] = finding('root', 'critical', 'root', "Racine du site introuvable : {$config->root}");
@@ -494,6 +504,114 @@ function collect(Config $config): array
     }
 
     return ['findings' => $findings, 'files' => $files, 'facts' => $facts, 'uploads' => $uploads];
+}
+
+/**
+ * Mémoire, charge et disque du compte, relevés depuis l'intérieur (#51), sans
+ * secret ni accès à l'hébergeur. Une valeur illisible est absente du résultat :
+ * jamais une valeur par défaut qui passerait pour une mesure.
+ *
+ * - `ram_used_mb`, `ram_limit_mb` : cgroup du compte quand il expose une limite
+ *   plausible (≤ 16 Go) ; sinon somme des VmRSS des processus de l'utilisateur,
+ *   sans limite ;
+ * - `load_1`, `load_5`, `load_15` : charge de la machine (`sys_getloadavg`),
+ *   partagée par les comptes qui l'occupent ;
+ * - `disk_used_gb`, `disk_total_gb` : système de fichiers de la racine du site.
+ *
+ * @return array<string, int|float>
+ */
+function resource_facts(string $root, string $proc = '/proc', string $cgroupRoot = '/sys/fs/cgroup'): array
+{
+    $facts = [];
+    $ram = cgroup_memory_mb($proc, $cgroupRoot);
+    if ($ram === null) {
+        $used = rss_sum_mb($proc);
+        $ram = $used === null ? null : [$used, null];
+    }
+    if ($ram !== null) {
+        $facts['ram_used_mb'] = $ram[0];
+        if ($ram[1] !== null) {
+            $facts['ram_limit_mb'] = $ram[1];
+        }
+    }
+    $load = \function_exists('sys_getloadavg') ? @sys_getloadavg() : false;
+    if (\is_array($load) && \count($load) === 3) {
+        [$facts['load_1'], $facts['load_5'], $facts['load_15']] = array_map(static fn ($v): float => round((float) $v, 2), $load);
+    }
+    $total = @disk_total_space($root);
+    $free = @disk_free_space($root);
+    if ($total !== false && $free !== false && $total > 0) {
+        $facts['disk_used_gb'] = round(($total - $free) / (1024 ** 3), 2);
+        $facts['disk_total_gb'] = round($total / (1024 ** 3), 2);
+    }
+
+    return $facts;
+}
+
+/** @return ?array{0: int, 1: int} [utilisé, limite] en Mo, cgroup v2 puis v1 ; null sans limite plausible */
+function cgroup_memory_mb(string $proc, string $cgroupRoot): ?array
+{
+    $content = @file_get_contents("{$proc}/self/cgroup", false, null, 0, 4096);
+    if ($content === false) {
+        return null;
+    }
+    $layouts = [];
+    if (preg_match('/^0::(.+)$/m', $content, $m) === 1) {
+        $layouts[] = [trim($m[1]), $cgroupRoot, 'memory.current', 'memory.max'];
+    }
+    if (preg_match('/^\d+:(?:[^:]*,)?memory(?:,[^:]*)?:(.*)$/m', $content, $m) === 1) {
+        $layouts[] = [trim($m[1]), "{$cgroupRoot}/memory", 'memory.usage_in_bytes', 'memory.limit_in_bytes'];
+    }
+    foreach ($layouts as [$relative, $base, $usageFile, $limitFile]) {
+        // Le premier ancêtre qui expose la mémoire : le compte, pas la machine.
+        foreach ([$relative, \dirname($relative), \dirname(\dirname($relative))] as $candidate) {
+            $dir = $base . (rtrim($candidate, '/') !== '' ? rtrim($candidate, '/') : '');
+            $used = read_bytes_mb("{$dir}/{$usageFile}");
+            $limit = read_bytes_mb("{$dir}/{$limitFile}");
+            if ($used !== null && $limit !== null && $limit > 0 && $limit <= 16384) {
+                return [$used, $limit];
+            }
+        }
+    }
+
+    return null;
+}
+
+/** Octets lus dans un fichier de cgroup, en Mo ; null si illisible ou « max ». */
+function read_bytes_mb(string $path): ?int
+{
+    $raw = @file_get_contents($path, false, null, 0, 64);
+    if ($raw === false || preg_match('/^\d+$/', trim($raw)) !== 1) {
+        return null;
+    }
+
+    return (int) round((float) trim($raw) / (1024 * 1024));
+}
+
+/** Somme des VmRSS des processus de l'utilisateur courant, en Mo ; null si /proc est illisible. */
+function rss_sum_mb(string $proc): ?int
+{
+    if (!\function_exists('posix_geteuid')) {
+        return null;
+    }
+    $files = glob("{$proc}/[0-9]*/status");
+    if ($files === false || $files === []) {
+        return null;
+    }
+    $uid = posix_geteuid();
+    $kb = 0;
+    foreach ($files as $file) {
+        $status = @file_get_contents($file, false, null, 0, 8192);
+        if ($status === false) {
+            continue;
+        }
+        if (preg_match('/^Uid:\s+(\d+)\s/m', $status, $owner) === 1 && (int) $owner[1] === $uid
+            && preg_match('/^VmRSS:\s+(\d+)\s+kB/m', $status, $rss) === 1) {
+            $kb += (int) $rss[1];
+        }
+    }
+
+    return (int) round($kb / 1024);
 }
 
 /** Version lue dans wp-includes/version.php, sans jamais l'exécuter. */

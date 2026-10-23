@@ -77,6 +77,7 @@ Les exemples visent le site A et le compte `<compte-site-a>`. Les commandes
    | `commands` | Facultatif : canal de commandes, voir [Commandes du veilleur](#commandes-du-veilleur) |
    | `logs` | Facultatif : logs HTTP poussés au veilleur, voir [Logs HTTP](#logs-http) |
    | `inventory` | Facultatif : inventaire des composants (agent 0.5.0), voir [Inventaire](#inventaire-agent-050-issue-19) |
+   | `resources` | Facultatif, `true` ou `false` (défaut `false`) : mémoire, charge et disque du compte dans les `facts`, voir [Ressources du compte](#ressources-du-compte-issue-51) |
 
 4. **Clé de signature** :
 
@@ -297,6 +298,25 @@ retrait, les lignes nouvelles du log HTTP d'Alwaysdata à `/r/v1/logs`
   quelques passages, dans la limite de 50 Mo par jour côté veilleur.
 - Avec une rotation de clé non accusée, l'agent essaie aussi la nouvelle clé,
   comme pour le rapport.
+
+## Ressources du compte (issue #51)
+
+Facultatif : `"resources": true` ajoute au rapport (dans `facts`, donc sans
+nouvelle route ni changement de protocole) ce que l'agent lit **depuis
+l'intérieur du compte**, sans secret ni accès à l'hébergeur :
+
+| Fait | Source |
+| ---- | ------ |
+| `ram_used_mb`, `ram_limit_mb` | cgroup du compte (v2 puis v1) quand il expose une limite d'au plus 16 Go ; sinon somme des `VmRSS` des processus de l'utilisateur, sans `ram_limit_mb` |
+| `load_1`, `load_5`, `load_15` | `sys_getloadavg()` : la charge de la **machine**, partagée avec les autres comptes |
+| `disk_used_gb`, `disk_total_gb` | système de fichiers de `root` |
+
+Une valeur illisible est **absente** des `facts` : l'agent n'envoie jamais de
+valeur par défaut qui passerait pour une mesure. Le veilleur ne garde que le
+dernier relevé (comme tous les `facts`) : la console affiche l'état au dernier
+rapport, pas un historique. Option ajoutée à l'agent 0.5.0 sans changer son
+numéro de version (les rapports enregistrés des tests d'interopérabilité le
+portent).
 
 ## Inventaire (agent 0.5.0, issue #19)
 
