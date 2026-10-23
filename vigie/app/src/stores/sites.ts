@@ -8,6 +8,7 @@ import {
   type Mails,
   type Overview,
   type Settings,
+  type SiteErrors,
   type SiteDetail,
   type SiteComponents,
   type SiteIncidents,
@@ -38,6 +39,8 @@ export const useSites = defineStore('sites', () => {
   const mails = ref<Record<number, Dated<Mails>>>({})
   /** Dernière analyse des logs, par site. */
   const logs = ref<Record<string, Dated<SiteLogs>>>({})
+  /** Erreurs groupées par message (#52), par site. */
+  const siteErrors = ref<Record<string, Dated<SiteErrors>>>({})
   /** Verdicts d'IP déjà lus, pages mises bout à bout, par site. */
   const ips = ref<Record<string, Dated<LogIps>>>({})
   /** Composants rapprochés (#21), pages mises bout à bout, par site. */
@@ -204,6 +207,11 @@ export const useSites = defineStore('sites', () => {
       incidents.value[id] = value
     })
 
+  const loadErrors = (id: string) =>
+    read(`errors:${id}`, () => api.siteErrors(id), (value) => {
+      siteErrors.value[id] = value
+    })
+
   const loadMails = (id: number) =>
     read(`mails:${id}`, () => api.incidentMails(id), (value) => {
       mails.value[id] = value
@@ -264,6 +272,7 @@ export const useSites = defineStore('sites', () => {
     incidents.value = {}
     mails.value = {}
     logs.value = {}
+    siteErrors.value = {}
     ips.value = {}
     components.value = {}
     vulns.value = {}
@@ -280,6 +289,7 @@ export const useSites = defineStore('sites', () => {
     incidents,
     mails,
     logs,
+    siteErrors,
     ips,
     components,
     vulns,
@@ -292,6 +302,7 @@ export const useSites = defineStore('sites', () => {
     loadHistory,
     moreHistory,
     loadLogs,
+    loadErrors,
     loadIps,
     moreIps,
     loadComponents,

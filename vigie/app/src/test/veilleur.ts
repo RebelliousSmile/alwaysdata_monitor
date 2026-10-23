@@ -9,6 +9,7 @@ import type {
   Settings,
   SiteComponents,
   SiteDetail,
+  SiteErrors,
   SiteIncidents,
   SiteLogs,
   SiteVulns,
@@ -171,6 +172,8 @@ export interface Fixture {
   moreHistory: Record<string, SiteIncidents>
   /** Analyse des logs ; un site absent répond 404 (sans source). */
   logs: Record<string, SiteLogs>
+  /** Erreurs groupées par message ; un site absent répond 404. */
+  errors: Record<string, SiteErrors>
   /** Première page des verdicts d'IP ; absent : 404. */
   ips: Record<string, LogIps>
   /** Pages suivantes des verdicts, par curseur. */
@@ -400,6 +403,18 @@ const LOGS_A: SiteLogs = {
   },
 }
 
+/** Messages fictifs, normalisés comme le veilleur les sert (nombres en `#`). */
+const ERRORS_A: SiteErrors = {
+  site: 'site-a',
+  days: 14,
+  groups: [
+    { message: 'Undefined array key #', count: 1234, first_seen: NOW - 9 * DAY, last_seen: NOW - 5 * MIN, days_seen: 6 },
+    { message: 'Call to undefined function <b>exemple()</b>', count: 1, first_seen: NOW - 3 * HOUR, last_seen: NOW - 3 * HOUR, days_seen: 1 },
+  ],
+}
+
+const ERRORS_B: SiteErrors = { site: 'site-b', days: 14, groups: [] }
+
 const IPS_A: LogIps = {
   site: 'site-a',
   generated_at: ANALYSED,
@@ -451,6 +466,7 @@ export function fixture(): Fixture {
     },
     moreHistory: {},
     logs: { 'site-a': LOGS_A },
+    errors: { 'site-a': ERRORS_A, 'site-b': ERRORS_B },
     ips: { 'site-a': IPS_A },
     moreIps: { 'ips-2': IPS_A_2 },
     components: { 'site-a': COMPONENTS_A },
@@ -558,6 +574,12 @@ export function mockVeilleur(paired = true): Veilleur {
         const logs = state.data.logs[String(args.site)]
         if (!logs) throw fail('not_found', 'introuvable')
         return logs
+      }
+      case 'site_errors': {
+        reach()
+        const errors = state.data.errors[String(args.site)]
+        if (!errors) throw fail('not_found', 'site inconnu')
+        return errors
       }
       case 'log_ips': {
         reach()

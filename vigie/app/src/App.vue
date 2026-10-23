@@ -118,6 +118,7 @@ async function load(): Promise<void> {
   if (DETAIL_SCREENS.has(name)) jobs.push(sites.loadHistory(site.value))
   if (LOG_SCREENS.has(name)) jobs.push(sites.loadLogs(site.value))
   if (name === 'trafic') jobs.push(sites.loadIps(site.value))
+  if (name === 'erreurs') jobs.push(sites.loadErrors(site.value))
   if (name === 'failles') jobs.push(sites.loadVulns(site.value), sites.loadComponents(site.value))
   if (name === 'alerte') {
     const id = Number(route.params.id)

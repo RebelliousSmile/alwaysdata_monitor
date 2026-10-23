@@ -152,6 +152,26 @@ export interface SiteLogs {
   analysis: Analysis | null
 }
 
+/**
+ * Un groupe d'erreurs du site : message normalisé par l'agent et le veilleur
+ * (nombres en `#`), jamais une ligne brute. Texte venu des logs du site : il
+ * ne s'affiche qu'en interpolation.
+ */
+export interface ErrorGroup {
+  message: string
+  count: number
+  first_seen: number
+  last_seen: number
+  days_seen: number
+}
+
+/** Erreurs des `days` derniers jours, du groupe le plus fréquent au moins fréquent. */
+export interface SiteErrors {
+  site: string
+  days: number
+  groups: ErrorGroup[]
+}
+
 /** Verdict d'une IP : codes de raison, jamais de user-agent ni de chemin. */
 export interface Verdict {
   ip: string
@@ -364,6 +384,7 @@ export const api = {
   /** Une page ; sans `cursor`, la première. */
   incidents: (site: string, cursor: string | null = null) => call<SiteIncidents>('incidents', { site, cursor }),
   logs: (site: string) => call<SiteLogs>('logs', { site }),
+  siteErrors: (site: string) => call<SiteErrors>('site_errors', { site }),
   /** Une page ; sans `cursor`, la première. */
   logIps: (site: string, cursor: string | null = null) => call<LogIps>('log_ips', { site, cursor }),
   /** Une page ; sans `cursor`, la première. */

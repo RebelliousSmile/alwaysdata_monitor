@@ -6,8 +6,8 @@ import {
 } from 'vue-router'
 import type { FeatureKey } from '@/lib/features'
 
-// Écrans du HANDOFF §3, plus /appairage, et les écrans des
-// failles (#21) : /s/:site/failles et /reglages/sources.
+// Écrans du HANDOFF §3, plus /appairage, les écrans des failles (#21) :
+// /s/:site/failles et /reglages/sources, et /s/:site/erreurs (#52).
 
 export type NavKey = 'a-traiter' | 'trafic' | 'erreurs' | 'sante'
 export type SegmentGroup = 'trafic' | 'sante'
@@ -64,8 +64,8 @@ export const routes: RouteRecordRaw[] = [
   {
     path: '/s/:site/erreurs',
     name: 'erreurs',
-    component: NotYetView,
-    meta: { site: true, nav: 'erreurs', feature: 'erreurs' },
+    component: () => import('@/views/Erreurs.vue'),
+    meta: { site: true, nav: 'erreurs' },
   },
   {
     path: '/s/:site/sante',

@@ -23,7 +23,9 @@ use vigie::finding::{Finding, Severity as VSeverity};
 use vigie::logs::Entry;
 use vigie::logs::source::{LogSource, MemorySource};
 use vigie::serve;
-use vigie::store::{AcceptedReport, ReportOutcome, RunRecord, Store};
+use vigie::store::{
+    AcceptedReport, ErrorBatch, ErrorGroup, ErrorsOutcome, ReportOutcome, RunRecord, Store,
+};
 use vigie::tick::{self, Options};
 use vigie_console_lib::Console;
 use vigie_console_lib::client::{Client, ErrorKind, IncidentState, Severity, SiteState, Snooze};
@@ -359,6 +361,66 @@ async fn previews_the_mails_sent_for_an_incident() {
     assert!(!sent.mails[0].body.is_empty());
 
     let unknown = client.incident_mails(999_999).await.expect_err("inconnu");
+    assert_eq!(unknown.kind, ErrorKind::NotFound);
+}
+
+#[tokio::test]
+async fn reads_the_error_groups_of_a_site() {
+    let v = Veilleur::start().await;
+    let client = v.paired("poste").await;
+
+    let none = client.site_errors("site-a").await.expect("erreurs");
+    assert_eq!(none.site, "site-a");
+    assert_eq!(none.days, 14);
+    assert!(none.groups.is_empty(), "aucun lot reçu : liste vide");
+
+    // La clé de l'agent du site A est celle de `fill`.
+    let group = |message: &str, count: i64, first: i64, last: i64| ErrorGroup {
+        fingerprint: vigie::errors::fingerprint(message),
+        message: message.to_owned(),
+        count,
+        first_seen: first,
+        last_seen: last,
+    };
+    let pubkey = [7u8; 32];
+    let accept = |seq: i64, day: &str, groups: &[ErrorGroup]| {
+        let outcome = v
+            .store()
+            .accept_errors(&ErrorBatch {
+                site: "site-a",
+                pubkey: &pubkey,
+                seq,
+                day,
+                groups,
+            })
+            .expect("accept_errors");
+        assert_eq!(outcome, ErrorsOutcome::Accepted);
+    };
+    accept(
+        1,
+        "2026-10-13",
+        &[group("Undefined array key #", 4, T0 - DAY, T0 - DAY + 60)],
+    );
+    accept(
+        2,
+        "2026-10-14",
+        &[
+            group("Undefined array key #", 12, T0 - 600, T0 - 60),
+            group("Call to undefined function f()", 1, T0 - 30, T0 - 30),
+        ],
+    );
+
+    let read = client.site_errors("site-a").await.expect("erreurs");
+    assert_eq!(read.groups.len(), 2);
+    assert_eq!(read.groups[0].message, "Undefined array key #");
+    assert_eq!(read.groups[0].count, 16);
+    assert_eq!(read.groups[0].first_seen, T0 - DAY);
+    assert_eq!(read.groups[0].last_seen, T0 - 60);
+    assert_eq!(read.groups[0].days_seen, 2);
+    assert_eq!(read.groups[1].count, 1);
+    assert_eq!(read.groups[1].days_seen, 1);
+
+    let unknown = client.site_errors("inconnu").await.expect_err("inconnu");
     assert_eq!(unknown.kind, ErrorKind::NotFound);
 }
 

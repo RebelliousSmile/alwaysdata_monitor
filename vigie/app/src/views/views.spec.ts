@@ -165,6 +165,63 @@ describe('Alerte', () => {
   })
 })
 
+describe('Erreurs', () => {
+  it('groupes du plus fréquent au moins fréquent : message, compteur, première et dernière vue, jours', async () => {
+    const veilleur = mockVeilleur()
+    const { wrapper } = await open('/s/site-a/erreurs')
+    expect(wrapper.find('h1').text()).toBe('Erreurs')
+    const groups = wrapper.findAll('[data-group]')
+    expect(groups).toHaveLength(2)
+    expect(groups[0]!.get('[data-message]').text()).toBe('Undefined array key #')
+    expect(groups[0]!.get('[data-count]').text()).toMatch(/^1\s234 occurrences · vu 6 jours sur 14$/)
+    expect(groups[0]!.get('[data-seen]').text()).toBe('Première vue le 7 oct. à 10:00 · dernière à 09:55')
+    expect(groups[1]!.get('[data-count]').text()).toBe('1 occurrence · vu 1 jour sur 14')
+    expect(wrapper.find('[data-empty]').exists()).toBe(false)
+    // Lecture seule : une seule commande de données, aucune écriture.
+    expect(veilleur.calls.filter((c) => !['status', 'site', 'site_errors'].includes(c))).toEqual([])
+    expect(wrapper.get('main').findAll('button')).toHaveLength(0)
+  })
+
+  it('un message qui contient du HTML s’affiche en texte', async () => {
+    mockVeilleur()
+    const { wrapper } = await open('/s/site-a/erreurs')
+    expect(wrapper.find('[data-message] b').exists()).toBe(false)
+    expect(wrapper.findAll('[data-message]')[1]!.text()).toBe('Call to undefined function <b>exemple()</b>')
+  })
+
+  it('aucune erreur reçue : état vide explicite, distinct d’un échec de lecture', async () => {
+    mockVeilleur()
+    const { wrapper } = await open('/s/site-b/erreurs')
+    expect(wrapper.get('[data-empty]').text()).toContain('Aucune erreur reçue sur les 14 derniers jours')
+    expect(wrapper.find('[data-group]').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('Lecture impossible')
+  })
+
+  it('un site inconnu (404) est dit introuvable', async () => {
+    const veilleur = mockVeilleur()
+    delete veilleur.data.errors['site-b']
+    const { wrapper } = await open('/s/site-b/erreurs')
+    expect(wrapper.text()).toContain('Introuvable')
+    expect(wrapper.find('[data-empty]').exists()).toBe(false)
+  })
+
+  it('hors ligne sans lecture préalable : état d’échec, pas « aucune erreur »', async () => {
+    const veilleur = mockVeilleur()
+    veilleur.offline = true
+    const { wrapper } = await open('/s/site-a/erreurs')
+    expect(wrapper.text()).toContain('Hors ligne')
+    expect(wrapper.find('[data-empty]').exists()).toBe(false)
+  })
+
+  it('un échec de relecture garde les groupes déjà lus', async () => {
+    const veilleur = mockVeilleur()
+    const { wrapper } = await open('/s/site-a/erreurs')
+    veilleur.offline = true
+    await reload(wrapper, 'Relire maintenant')
+    expect(wrapper.findAll('[data-group]')).toHaveLength(2)
+  })
+})
+
 describe('Santé', () => {
   it('Disponibilité : contrôles externes, certificat et incidents fermés', async () => {
     mockVeilleur()

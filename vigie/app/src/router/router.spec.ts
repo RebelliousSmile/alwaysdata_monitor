@@ -11,7 +11,7 @@ const SCREENS: [path: string, name: string, heading: string, notYet: boolean][] 
   [`${SITE}/trafic`, 'trafic', 'Visiteurs', false],
   [`${SITE}/trafic/journal`, 'journal', 'Journal des requêtes', true],
   [`${SITE}/trafic/blocages`, 'blocages', 'Blocages', false],
-  [`${SITE}/erreurs`, 'erreurs', 'Erreurs', true],
+  [`${SITE}/erreurs`, 'erreurs', 'Erreurs', false],
   [`${SITE}/sante`, 'sante', 'Disponibilité', false],
   [`${SITE}/sante/ressources`, 'ressources', 'Ressources', false],
   [`${SITE}/sante/controles`, 'controles', 'Contrôles', false],
