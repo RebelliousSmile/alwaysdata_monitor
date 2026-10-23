@@ -122,6 +122,7 @@ révocation.
 | `GET /api/v1/sites/{id}/vulns` | failles des composants, une par (composant, faille fusionnée), par pages | Failles |
 | `GET /api/v1/vulns/sources` | sources de failles déclarées : âge, issue, attribution, constat `vulns-sync` | SourcesFailles |
 | `GET /api/v1/incidents/{id}` | un incident, ouvert ou fermé | Alerte |
+| `GET /api/v1/incidents/{id}/mails` | les e-mails déjà envoyés pour l'incident, recomposés (#53) | Alerte |
 | `POST /api/v1/incidents/{id}/ack` | l'incident acquitté | Alerte |
 | `POST /api/v1/incidents/{id}/snooze/{duration}` | l'incident, rappels en sourdine (`24h` ou `7d`) | Alerte |
 | `GET /api/v1/settings` | sites, fréquences, destinataire masqué, appareils | Parametres, Reglages |
@@ -477,6 +478,26 @@ compte pas.
 
 L'incident, ouvert ou fermé. Identifiant inconnu ou non entier : 404.
 
+### `GET /api/v1/incidents/{id}/mails`
+
+Aperçu des e-mails que le veilleur **a envoyés** pour cet incident (#53) : un
+par date de notification posée (`open_notified_at`, `last_reminder_at`,
+`close_notified_at`), jamais un modèle générique.
+
+```json
+{ "mails": [ { "kind": "open", "sent_at": 1792000000, "subject": "…", "body": "…" } ] }
+```
+
+- `kind` : `open`, `reminder` ou `close` ; `sent_at` en secondes Unix.
+- Le texte est **recomposé** par les mêmes fonctions que l'envoi, à partir de
+  l'état actuel de l'incident : il peut différer d'un message parti il y a
+  longtemps (par exemple le détail d'une relance, ou l'adresse du site si la
+  configuration a changé). Le veilleur ne conserve pas les messages.
+- Liste vide si aucun e-mail n'est parti, et pour les incidents du contrôle
+  `vulns` : leurs e-mails sont groupés, sans correspondance avec un incident.
+- Le détail est assaini comme les textes issus des logs.
+- 404 si l'identifiant est inconnu ou non entier.
+
 ### `POST /api/v1/incidents/{id}/ack`
 
 Même effet que `vigie ack <id>` : les rappels s'arrêtent, la clôture
@@ -584,7 +605,7 @@ des maquettes (non conforme, aveugle, à vérifier, OK) : il est placé avant
 | ----- | ------- |
 | Main | `overview` : `state`, `worst`, `open_count`, `last_read` de chaque site. |
 | ATraiter | `overview`, puis `sites/{id}` des sites concernés : incidents ouverts, e-mails envoyés tirés des dates de notification. |
-| Alerte | `incidents/{id}`, actions Acquitter (`incidents/{id}/ack`) et Sourdine (`incidents/{id}/snooze/{duration}`). |
+| Alerte | `incidents/{id}`, `incidents/{id}/mails` (e-mails envoyés), actions Acquitter (`incidents/{id}/ack`) et Sourdine (`incidents/{id}/snooze/{duration}`). |
 | Dispo | `sites/{id}` (contrôles externes, `duration_ms`, `last_run`, `tls_not_after`) et `sites/{id}/incidents`. |
 | Controles | `sites/{id}` : `checks`, externes et d'agent. |
 | Parametres | `settings` (site concerné) et `sites/{id}` (`interval`, `agent_silence`). |

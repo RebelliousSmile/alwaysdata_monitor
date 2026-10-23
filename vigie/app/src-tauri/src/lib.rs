@@ -291,6 +291,13 @@ async fn incident(console: State<'_, Console>, id: i64) -> Result<Incident, ApiE
 }
 
 #[tauri::command]
+async fn incident_mails(console: State<'_, Console>, id: i64) -> Result<client::Mails, ApiError> {
+    console
+        .call(|client| async move { client.incident_mails(id).await })
+        .await
+}
+
+#[tauri::command]
 async fn snooze(
     console: State<'_, Console>,
     id: i64,
@@ -340,6 +347,7 @@ pub fn run() {
             vulns,
             vuln_sources,
             incident,
+            incident_mails,
             ack,
             snooze,
             settings
@@ -448,6 +456,7 @@ mod tests {
                 "vulns",
                 "vuln_sources",
                 "incident",
+                "incident_mails",
                 "ack",
                 "snooze",
                 "settings"

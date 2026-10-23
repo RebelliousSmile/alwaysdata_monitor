@@ -72,7 +72,7 @@ const header = computed(() => {
 
 const global = computed(() => {
   if (routeName.value === 'sites') return 'sites'
-  if (['reglages', 'emails', 'sources-failles'].includes(routeName.value)) return 'reglages'
+  if (['reglages', 'sources-failles'].includes(routeName.value)) return 'reglages'
   return undefined
 })
 
@@ -121,7 +121,7 @@ async function load(): Promise<void> {
   if (name === 'failles') jobs.push(sites.loadVulns(site.value), sites.loadComponents(site.value))
   if (name === 'alerte') {
     const id = Number(route.params.id)
-    if (Number.isSafeInteger(id) && id > 0) jobs.push(sites.loadIncident(id))
+    if (Number.isSafeInteger(id) && id > 0) jobs.push(sites.loadIncident(id), sites.loadMails(id))
   }
   if (name === 'parametres') jobs.push(sites.loadSettings())
   await Promise.all(jobs)

@@ -4,6 +4,7 @@ import type {
   Check,
   Incident,
   LogIps,
+  Mail,
   Overview,
   Settings,
   SiteComponents,
@@ -584,6 +585,27 @@ export function mockVeilleur(paired = true): Veilleur {
         const found = findIncident(Number(args.id))
         if (!found) throw fail('not_found', 'incident inconnu')
         return found
+      }
+      case 'incident_mails': {
+        reach()
+        const found = findIncident(Number(args.id))
+        if (!found) throw fail('not_found', 'incident inconnu')
+        const sent: [Mail['kind'], number | null][] = [
+          ['open', found.open_notified_at],
+          ['reminder', found.last_reminder_at],
+          ['close', found.close_notified_at],
+        ]
+        return {
+          mails: sent
+            .filter((entry): entry is [Mail['kind'], number] => entry[1] !== null)
+            .map(([kind, sent_at]) => ({
+              kind,
+              sent_at,
+              subject: `[Vigie] ${kind} n° ${found.id}`,
+              body: `Corps fictif du message ${kind}.
+Site A : ${found.detail}`,
+            })),
+        }
       }
       case 'ack': {
         reach()

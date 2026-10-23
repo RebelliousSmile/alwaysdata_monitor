@@ -49,7 +49,7 @@ describe('badges de la barre', () => {
 })
 
 // Écrans dessinés sans source dans le veilleur : aucun chiffre d'exemple.
-const WITHOUT_SOURCE: FeatureKey[] = ['visiteurs', 'journal', 'blocages', 'erreurs', 'ressources', 'ajouter', 'emails']
+const WITHOUT_SOURCE: FeatureKey[] = ['visiteurs', 'journal', 'blocages', 'erreurs', 'ressources', 'ajouter']
 
 describe('NotYet', () => {
   it.each(WITHOUT_SOURCE)('%s nomme la fonctionnalité et ce qui manque, sans chiffre', (feature) => {

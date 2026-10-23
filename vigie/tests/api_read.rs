@@ -655,6 +655,68 @@ async fn a_snoozed_incident_gets_no_reminder_until_the_snooze_ends() {
 }
 
 #[tokio::test]
+async fn the_mail_preview_is_the_message_that_was_sent() {
+    let v =
+        Veilleur::with(|config| config.sites = vec![site("site-a", SiteKind::Generic, DAY as u64)]);
+    let id = v.open("site-a", "exposed", Severity::Critical, ".env", T0 - 60);
+    let token = v.token("pc").await;
+    let path = format!("/api/v1/incidents/{id}/mails");
+
+    // Inconnu, non entier ou autre méthode : le 404 commun.
+    for (method, path) in [
+        (Method::GET, "/api/v1/incidents/999/mails".to_owned()),
+        (Method::GET, "/api/v1/incidents/abc/mails".to_owned()),
+        (Method::POST, path.clone()),
+    ] {
+        let reply = v.call(method.clone(), &path, &token).await;
+        assert_eq!(reply.status, StatusCode::NOT_FOUND, "{method} {path}");
+    }
+    // Rien n'est parti : aucun aperçu, jamais un message qui n'a pas existé.
+    let reply = v.get(&path, &token).await;
+    assert_eq!(reply.status, StatusCode::OK);
+    assert_eq!(reply.json()["mails"], serde_json::json!([]));
+
+    let tick_at = |at: i64| {
+        let mut store = v.store();
+        for kind in CheckKind::ALL {
+            store
+                .record_run("site-a", kind.name(), at)
+                .expect("record_run");
+        }
+        drop(store);
+        let mail = MemoryNotifier::new();
+        tick::run_with(&v.config, at, &Options::default(), &mail).expect("tick");
+        mail.take()
+    };
+    let opened = tick_at(T0);
+    let reminded = tick_at(T0 + REMINDER_PERIOD);
+    v.store()
+        .reconcile("site-a", "exposed", &[], T0 + 2 * REMINDER_PERIOD)
+        .expect("clôture");
+    let closed = tick_at(T0 + 2 * REMINDER_PERIOD + 1);
+    for sent in [&opened, &reminded, &closed] {
+        assert_eq!(sent.len(), 1, "{sent:?}");
+    }
+
+    let reply = v.get(&path, &token).await;
+    assert_eq!(reply.status, StatusCode::OK);
+    let json = reply.json();
+    let mails = json["mails"].as_array().expect("mails");
+    assert_eq!(mails.len(), 3, "{json}");
+    for (mail, (kind, sent_at, sent)) in mails.iter().zip([
+        ("open", T0, &opened[0]),
+        ("reminder", T0 + REMINDER_PERIOD, &reminded[0]),
+        ("close", T0 + 2 * REMINDER_PERIOD + 1, &closed[0]),
+    ]) {
+        assert_eq!(mail["kind"], kind);
+        assert_eq!(mail["sent_at"], sent_at);
+        // Octet pour octet le message parti, pas une copie qui dériverait.
+        assert_eq!(mail["subject"], sent.subject.as_str(), "{kind}");
+        assert_eq!(mail["body"], sent.body.as_str(), "{kind}");
+    }
+}
+
+#[tokio::test]
 async fn a_watcher_incident_is_readable_and_ackable_but_in_no_site_view() {
     // Incident `vulns-sync` du pseudo-site du veilleur (#16) : lisible et
     // acquittable par son numéro, absent des vues par site (F7 pour la vue

@@ -118,6 +118,10 @@ pub(crate) fn routes() -> Router<Arc<AppState>> {
             get(incident_handler).fallback(not_found),
         )
         .route(
+            "/api/v1/incidents/{id}/mails",
+            get(incident_mails_handler).fallback(not_found),
+        )
+        .route(
             "/api/v1/incidents/{id}/ack",
             post(ack_handler).fallback(not_found),
         )
@@ -1830,6 +1834,55 @@ async fn incident_handler(
         })
     })
     .await
+}
+
+/// E-mails déjà envoyés pour cet incident, recomposés par le code d'envoi
+/// (voir [`crate::alert::sent_emails`]). Lecture seule.
+async fn incident_mails_handler(
+    State(state): State<Arc<AppState>>,
+    Authenticated(_device): Authenticated,
+    id: Result<Path<String>, PathRejection>,
+) -> Response {
+    let Some(id) = incident_id(id) else {
+        return ApiError::NOT_FOUND.into_response();
+    };
+    with_store(&state, "/api/v1/incidents/mails", move |state, store| {
+        Ok(match store.incident(id)? {
+            Some(mut incident) => {
+                // Même assainissement que `GET /api/v1/incidents/{id}` : le
+                // détail d'un contrôle de logs ne sort pas brut.
+                incident.detail = check_text(&incident.check_name, &incident.detail);
+                let url = crate::tick::site_url(&state.config, &incident.site);
+                let mails = crate::alert::sent_emails(&incident, url)
+                    .into_iter()
+                    .map(|(kind, sent_at, email)| MailJson {
+                        kind: kind.as_str(),
+                        sent_at,
+                        subject: email.subject,
+                        body: email.body,
+                    })
+                    .collect();
+                json(&MailsJson { mails })
+            }
+            None => ApiError::NOT_FOUND.into_response(),
+        })
+    })
+    .await
+}
+
+#[derive(Serialize)]
+struct MailJson {
+    /// `open`, `reminder` ou `close`.
+    kind: &'static str,
+    /// Date de l'envoi (secondes Unix) ; pour `reminder`, le dernier rappel.
+    sent_at: i64,
+    subject: String,
+    body: String,
+}
+
+#[derive(Serialize)]
+struct MailsJson {
+    mails: Vec<MailJson>,
 }
 
 /// Même effet que `vigie ack` : arrête les rappels, la clôture reste.

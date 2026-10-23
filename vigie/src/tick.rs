@@ -894,7 +894,7 @@ fn notify(
     Ok(sent)
 }
 
-fn site_url<'a>(config: &'a Config, site: &str) -> &'a str {
+pub(crate) fn site_url<'a>(config: &'a Config, site: &str) -> &'a str {
     config
         .sites
         .iter()
