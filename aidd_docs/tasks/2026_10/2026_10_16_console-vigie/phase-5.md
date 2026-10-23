@@ -109,3 +109,25 @@ journey
 | 3 | Les étapes du README suffisent pour installer et appairer sans autre source. |
 | 4 | Le PC et le téléphone affichent les sites de production, et `vigie device list` les liste comme actifs. |
 | 4 | Un appareil révoqué perd l'accès au premier rechargement, sans effet sur l'autre. |
+
+## Constat au 2026-10-23 (issue #32)
+
+**Le blocage d'origine est levé.** Le commit `2cbb04e` (2026-10-16) classait la phase « bloquée » : la clé de signature Android et les trois secrets (`ANDROID_KEYSTORE_BASE64`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`) étaient à créer par l'exploitant. La release `console-v0.1.0` a été publiée le 2026-10-16 avec l'installeur Windows, l'APK arm64 et `SHA256SUMS` ; le job Android échouant avant le build sans les secrets, ils existent (déduit, non vu : les secrets ne se lisent pas).
+
+| Critère | État |
+| ------- | ---- |
+| Un tag `console-v*` produit un brouillon avec installeur, APK et `SHA256SUMS` | **Constaté** : `console-v0.1.0` (publiée) et `console-v0.1.1` (brouillon) |
+| Un tag `v*` du module ne déclenche pas le workflow de la console | Non constaté |
+| Un tag qui ne correspond pas aux versions arrête le workflow avant le build | Non constaté |
+| Un lancement manuel produit un brouillon complet sans créer de tag | Non constaté |
+| Aucun keystore ni mot de passe dans l'historique git ou les journaux | Non constaté (gitleaks vert sur tout l'historique) |
+| Une version N+1 s'installe par-dessus la version N | À constater sur un téléphone |
+| Le PC et le téléphone affichent les sites de production ; `vigie device list` les liste comme actifs | À constater |
+| Un appareil révoqué perd l'accès au premier rechargement, sans effet sur l'autre | À constater |
+
+**Reste à faire :**
+
+- publier ou supprimer le brouillon `console-v0.1.1` ;
+- la version 0.2.0 (package.json) n'est pas publiée : ses prérequis sont dans `vigie/app/CHANGELOG.md` (le veilleur du VPS doit servir la pagination et les routes `logs`, `components`, `vulns` et `vulns/sources`, donc le déploiement du binaire courant sur le VPS, issue #36) ;
+- les critères qui demandent un téléphone et le veilleur de production (lignes « À constater »).
+
