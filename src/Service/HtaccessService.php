@@ -18,14 +18,17 @@ class HtaccessService
 
     private HtaccessDoctor $doctor;
 
+    private HtaccessSyntaxChecker $syntaxChecker;
+
     private const PROTECTION_BEGIN = '# BEGIN sc_alwaysdata protection';
     private const PROTECTION_END = '# END sc_alwaysdata protection';
     private const PROTECTION_OPTIONS = '# sc_alwaysdata options:';
     private const PROTECTION_PATTERN = '/^# BEGIN sc_alwaysdata protection\n.*?^# END sc_alwaysdata protection\n?/ms';
 
-    public function __construct(?HtaccessDoctor $doctor = null)
+    public function __construct(?HtaccessDoctor $doctor = null, ?HtaccessSyntaxChecker $syntaxChecker = null)
     {
         $this->doctor = $doctor ?? new HtaccessDoctor();
+        $this->syntaxChecker = $syntaxChecker ?? new HtaccessSyntaxChecker();
     }
 
     public function readBlockedIps(): array
@@ -508,6 +511,10 @@ class HtaccessService
         $backupPath = null;
 
         try {
+            // Refuse content that would break the site before anything is touched:
+            // no backup, no temporary file, the live file is never in a bad state
+            $this->assertNotWorse($content);
+
             // Archive the current version before overwriting
             if (file_exists($htaccessPath)) {
                 // Unique name: two writes in the same second must not overwrite the undo point
@@ -529,19 +536,6 @@ class HtaccessService
             if (!rename($tmp, $htaccessPath)) {
                 throw new \RuntimeException(sprintf('Failed to rename %s to %s', $tmp, $htaccessPath));
             }
-
-            // Validate Apache syntax — restore backup if invalid
-            $syntaxError = $this->validateApacheSyntax();
-            if ($syntaxError !== null) {
-                if ($backupPath !== null && file_exists($backupPath)) {
-                    copy($backupPath, $htaccessPath);
-                    throw new \RuntimeException(sprintf(
-                        "Syntaxe Apache invalide — backup restaur\u00e9 :\n%s",
-                        $syntaxError
-                    ));
-                }
-                throw new \RuntimeException(sprintf("Syntaxe Apache invalide :\n%s", $syntaxError));
-            }
         } catch (\Throwable $e) {
             @unlink($tmp);
             throw new \RuntimeException(sprintf('Atomic write failed: %s', $e->getMessage()));
@@ -549,33 +543,23 @@ class HtaccessService
     }
 
     /**
-     * Runs `apachectl -t` (or `apache2ctl -t`) without a shell.
-     * Returns the error output if invalid, null if valid or if no such command is available.
+     * Refuses content that has structural problems the current file does not already have.
+     * A file that was already broken can still be edited, but never made worse.
      */
-    private function validateApacheSyntax(): ?string
+    private function assertNotWorse(string $content): void
     {
-        if (!function_exists('proc_open')) {
-            return null;
+        $current = @file_get_contents($this->getHtaccessPath());
+        $introduced = $this->syntaxChecker->introduced(
+            $this->syntaxChecker->check($current === false ? '' : $current),
+            $this->syntaxChecker->check($content)
+        );
+        if ($introduced === []) {
+            return;
         }
 
-        foreach (['apachectl', 'apache2ctl'] as $cmd) {
-            $binary = ExecutableFinder::find($cmd);
-            if ($binary === null) {
-                continue;
-            }
-
-            $process = @proc_open([$binary, '-t'], [1 => ['pipe', 'w'], 2 => ['redirect', 1]], $pipes);
-            if (!is_resource($process)) {
-                continue;
-            }
-
-            $output = (string) stream_get_contents($pipes[1]);
-            fclose($pipes[1]);
-
-            return proc_close($process) === 0 ? null : trim($output);
-        }
-
-        // apachectl not found — skip validation silently
-        return null;
+        throw new \RuntimeException("Syntaxe .htaccess invalide, fichier inchangé :\n" . implode("\n", array_map(
+            static fn (array $p): string => sprintf('ligne %d : %s', $p['line'], $p['message']),
+            $introduced
+        )));
     }
 }

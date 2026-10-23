@@ -54,14 +54,6 @@ jobs:
           sudo apt-get install -y -q "php${{ matrix.php }}-cli" "php${{ matrix.php }}-mbstring" "php${{ matrix.php }}-xml"
           sudo update-alternatives --set php "/usr/bin/php${{ matrix.php }}"
           php -r 'exit(str_starts_with(PHP_VERSION, "${{ matrix.php }}.") ? 0 : 1);'
-      # HtaccessService lance `apachectl -t` s'il le trouve : le runner a Apache
-      # préinstallé, dont la commande échoue sans droits sur /var/run/apache2
-      # (30 erreurs de HtaccessServiceTest). Les tests supposent un hôte sans
-      # Apache, comme le service qui saute alors la validation.
-      - name: retirer Apache du runner
-        run: |
-          sudo rm -f /usr/sbin/apachectl /usr/sbin/apache2ctl
-          ! command -v apachectl && ! command -v apache2ctl
       - name: composer.lock à jour
         run: composer validate --no-check-publish
       - run: composer install --no-interaction --no-progress --prefer-dist
