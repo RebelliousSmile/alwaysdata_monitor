@@ -481,6 +481,47 @@ réglages sont retirés.
   aperçus autonomes ; le second est l'e-mail d'ouverture de l'incident
   `heartbeat`, visible sur son écran Alerte.
 
+## Erreurs des sites (issue #52) — protocole décidé, source à confirmer
+
+Décision prise le 2026-10-23 sur le plan de l'issue : la console montre les
+erreurs d'un site **regroupées par message**, jamais une ligne brute. Le
+chantier se livre en trois PR (protocole et agent, veilleur et API, console).
+Cette section fixe le contrat ; aucun code ne le précède.
+
+**Ce qui sort du compte (liste fermée).** Par site et par jour UTC, au plus 50
+groupes `(message normalisé, compteur, première vue, dernière vue)`. Ni ligne
+brute, ni IP, ni requête, ni identifiant.
+
+| Normalisation, faite par l'agent avant l'envoi | Remplacé par |
+| ---------------------------------------------- | ------------ |
+| chemin absolu | sa base (nom du fichier) |
+| nombre, UUID | marqueur `#`, `<uuid>` |
+| adresse IP (v4, v6) | `<ip>` |
+| requête ou fragment d'URL | retirés |
+| message entier | tronqué à 200 caractères |
+
+Le veilleur applique la même normalisation à la réception (défense en
+profondeur : un agent ancien ou compromis ne fait pas entrer d'IP en base) et
+refuse un lot dont un message contient encore une adresse.
+
+| Point | Décision |
+| ----- | -------- |
+| Transport | `POST /r/v1/errors`, signé comme `/r/v1/logs` (clé de l'agent, préfixe `vigie-errors-v1
+`), corps borné à 64 Kio, `seq` propre au site |
+| Stockage | `error_groups(site, day, fingerprint, message, count, first_seen, last_seen)` ; `fingerprint` = SHA-256 du message normalisé ; rétention 14 jours, purge par `tick` |
+| Registre de capacités | famille `agent:errors`, `Control` et `Needs` déclarés comme les autres familles d'agent |
+| API | `GET /api/v1/sites/{id}/errors`, en lecture seule, groupes du plus fréquent au moins fréquent |
+| Console | écran Erreurs ; entrée retirée de `features.ts` à la PR console |
+| Sourdine par groupe | hors de ce chantier : la sourdine de #50 porte sur les incidents, pas sur les groupes |
+
+**Reste ouvert (bloquant pour la PR de l'agent).** L'existence et
+l'emplacement du journal d'erreurs PHP ou Apache de chaque compte Alwaysdata :
+l'agent ne lit aujourd'hui que `admin/logs/http`. Il faut relever sur un
+compte réel le chemin, le format d'une ligne et la rotation avant d'écrire le
+lecteur ; le chemin se déclarera dans la configuration de l'agent, jamais en
+dur. Sans ce relevé, les PR veilleur et console peuvent avancer sur des lots
+de test, mais la fonctionnalité ne produit rien en production.
+
 ## Dépendances (issue #22)
 
 Plan : `aidd_docs/tasks/2026_10/2026_10_17_osv-scanner/plan.md`. Job `deps`
