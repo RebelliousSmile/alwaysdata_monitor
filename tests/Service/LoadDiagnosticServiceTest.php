@@ -36,7 +36,7 @@ class LoadDiagnosticServiceTest extends TestCase
     private function line(array $o = []): string
     {
         $o += [
-            'ip' => '1.2.3.4', 'hour' => '14', 'method' => 'GET', 'url' => '/4-vtt',
+            'ip' => '203.0.113.14', 'hour' => '14', 'method' => 'GET', 'url' => '/4-vtt',
             'status' => '200', 'referer' => '-', 'ua' => 'Mozilla/5.0', 'time' => '0.250',
         ];
 
@@ -118,7 +118,7 @@ class LoadDiagnosticServiceTest extends TestCase
             $this->line(['url' => '/43-cuissards?q=Taille-S', 'referer' => 'https://site-a.example/43-cuissards', 'time' => '2']),
             $this->line([
                 'url' => '/43-cuissards?page=1&q=Taille-M', 'referer' => 'https://www.google.com/?x=1',
-                'ua' => 'FakeChrome', 'status' => '403', 'ip' => '9.9.9.9',
+                'ua' => 'FakeChrome', 'status' => '403', 'ip' => '203.0.113.9',
             ]),
             $this->line(['url' => '/recherche?s=casque']),
         ]), self::SHOP_HOSTS);
@@ -154,26 +154,26 @@ class LoadDiagnosticServiceTest extends TestCase
     {
         $lines = [];
         for ($i = 0; $i < 30; ++$i) {
-            $lines[] = $this->line(['ip' => '5.5.5.5', 'url' => '/43-cuissards?q=Taille-' . $i, 'status' => '403', 'ua' => 'python-requests/2.31']);
+            $lines[] = $this->line(['ip' => '203.0.113.5', 'url' => '/43-cuissards?q=Taille-' . $i, 'status' => '403', 'ua' => 'python-requests/2.31']);
         }
-        $lines[] = $this->line(['ip' => '8.8.8.8', 'url' => '/4-vtt', 'referer' => 'https://www.site-a.example/']);
-        $lines[] = $this->line(['ip' => '8.8.8.8', 'url' => '/themes/app.css']);
+        $lines[] = $this->line(['ip' => '203.0.113.8', 'url' => '/4-vtt', 'referer' => 'https://www.site-a.example/']);
+        $lines[] = $this->line(['ip' => '203.0.113.8', 'url' => '/themes/app.css']);
 
         $service = new LoadDiagnosticService(new CrawlerAnalyserService(), null, static function (string $ip): ?string {
-            return $ip === '5.5.5.5' ? 'vps-1234.ovh.net' : 'lfbn-1.abo.wanadoo.fr';
+            return $ip === '203.0.113.5' ? 'vps-1234.ovh.net' : 'lfbn-1.abo.wanadoo.fr';
         });
         $profiles = array_column($service->analyse($this->writeLog($lines), self::SHOP_HOSTS)['ip_profiles'], null, 'ip');
 
-        $this->assertSame(['5.5.5.5', '8.8.8.8'], array_keys($profiles));
-        $scraper = $profiles['5.5.5.5'];
+        $this->assertSame(['203.0.113.5', '203.0.113.8'], array_keys($profiles));
+        $scraper = $profiles['203.0.113.5'];
         $this->assertSame('vps-1234.ovh.net', $scraper['rdns']);
         $this->assertSame(100, $scraper['facet_pct']);
         $this->assertSame(100, $scraper['refused_pct']);
         $this->assertSame(30, $scraper['peak_minute']);
         $this->assertSame('eleve', $scraper['level']);
         $this->assertSame('hebergeur', $scraper['network']);
-        $this->assertSame('faible', $profiles['8.8.8.8']['level']);
-        $this->assertSame(0, $profiles['8.8.8.8']['score']);
+        $this->assertSame('faible', $profiles['203.0.113.8']['level']);
+        $this->assertSame(0, $profiles['203.0.113.8']['score']);
     }
 
     public function testLoginRequestsAreSplitByMethod(): void
@@ -197,7 +197,7 @@ class LoadDiagnosticServiceTest extends TestCase
     public function testLinesWithoutRefererOrTimeStillParse(): void
     {
         $result = $this->service->analyse($this->writeLog([
-            '1.2.3.4 - - [25/Sep/2026:03:00:00 +0200] "GET /4-vtt?q=x HTTP/1.1" 200 10',
+            '203.0.113.14 - - [25/Sep/2026:03:00:00 +0200] "GET /4-vtt?q=x HTTP/1.1" 200 10',
         ]), self::SHOP_HOSTS);
 
         $this->assertSame(0, $result['unparsed']);
@@ -216,39 +216,39 @@ class LoadDiagnosticServiceTest extends TestCase
         $lines = [];
         // Scraper: facets without referer
         for ($i = 0; $i < 40; ++$i) {
-            $lines[] = $this->line(['ip' => '5.5.5.5', 'url' => '/4-vtt?q=Taille-M' . $i, 'status' => '403']);
+            $lines[] = $this->line(['ip' => '203.0.113.5', 'url' => '/4-vtt?q=Taille-M' . $i, 'status' => '403']);
         }
         // Customer from Google, gives up after two 403s
-        $lines[] = $this->line(['ip' => '9.9.9.9', 'url' => '/fr/', 'status' => '403', 'referer' => 'https://www.google.fr/']);
-        $lines[] = $this->line(['ip' => '9.9.9.9', 'url' => '/fr/', 'status' => '403', 'referer' => 'https://www.google.fr/']);
-        $lines[] = $this->line(['ip' => '9.9.9.9', 'url' => '/favicon.ico', 'status' => '403']);
+        $lines[] = $this->line(['ip' => '203.0.113.9', 'url' => '/fr/', 'status' => '403', 'referer' => 'https://www.google.fr/']);
+        $lines[] = $this->line(['ip' => '203.0.113.9', 'url' => '/fr/', 'status' => '403', 'referer' => 'https://www.google.fr/']);
+        $lines[] = $this->line(['ip' => '203.0.113.9', 'url' => '/favicon.ico', 'status' => '403']);
         // Not blocked: ignored
-        $lines[] = $this->line(['ip' => '1.1.1.1', 'url' => '/', 'referer' => 'https://www.google.fr/']);
+        $lines[] = $this->line(['ip' => '203.0.113.11', 'url' => '/', 'referer' => 'https://www.google.fr/']);
         // Internal referer is not a human signal
-        $lines[] = $this->line(['ip' => '7.7.7.7', 'url' => '/4-vtt', 'status' => '403', 'referer' => 'https://www.site-a.example/']);
+        $lines[] = $this->line(['ip' => '203.0.113.7', 'url' => '/4-vtt', 'status' => '403', 'referer' => 'https://www.site-a.example/']);
 
-        $audit = $this->service->auditBlockedIps($this->writeLog($lines), ['5.5.5.5', '9.9.9.9', '7.7.7.7', '8.8.8.8'], ['www.site-a.example']);
+        $audit = $this->service->auditBlockedIps($this->writeLog($lines), ['203.0.113.5', '203.0.113.9', '203.0.113.7', '203.0.113.8'], ['www.site-a.example']);
         $byIp = array_column($audit['seen'], null, 'ip');
 
-        $this->assertSame('9.9.9.9', $audit['seen'][0]['ip']);
-        $this->assertSame('humain', $byIp['9.9.9.9']['verdict']);
-        $this->assertSame(2, $byIp['9.9.9.9']['pages']);
-        $this->assertSame(2, $byIp['9.9.9.9']['homepage']);
-        $this->assertSame([['value' => 'www.google.fr', 'count' => 2]], $byIp['9.9.9.9']['referers']);
-        $this->assertSame('robot', $byIp['5.5.5.5']['verdict']);
-        $this->assertSame('robot', $byIp['7.7.7.7']['verdict']);
-        $this->assertArrayNotHasKey('1.1.1.1', $byIp);
-        $this->assertSame(['8.8.8.8'], $audit['absent']);
+        $this->assertSame('203.0.113.9', $audit['seen'][0]['ip']);
+        $this->assertSame('humain', $byIp['203.0.113.9']['verdict']);
+        $this->assertSame(2, $byIp['203.0.113.9']['pages']);
+        $this->assertSame(2, $byIp['203.0.113.9']['homepage']);
+        $this->assertSame([['value' => 'www.google.fr', 'count' => 2]], $byIp['203.0.113.9']['referers']);
+        $this->assertSame('robot', $byIp['203.0.113.5']['verdict']);
+        $this->assertSame('robot', $byIp['203.0.113.7']['verdict']);
+        $this->assertArrayNotHasKey('203.0.113.11', $byIp);
+        $this->assertSame(['203.0.113.8'], $audit['absent']);
     }
 
     public function testAuditHumanSignalsOnHeavyTrafficNeedAHumanCheck(): void
     {
         $lines = [];
         for ($i = 0; $i < 50; ++$i) {
-            $lines[] = $this->line(['ip' => '6.6.6.6', 'url' => '/4-vtt?q=' . $i, 'status' => '403', 'referer' => 'https://www.google.com/']);
+            $lines[] = $this->line(['ip' => '203.0.113.6', 'url' => '/4-vtt?q=' . $i, 'status' => '403', 'referer' => 'https://www.google.com/']);
         }
 
-        $audit = $this->service->auditBlockedIps($this->writeLog($lines), ['6.6.6.6'], ['www.site-a.example']);
+        $audit = $this->service->auditBlockedIps($this->writeLog($lines), ['203.0.113.6'], ['www.site-a.example']);
 
         $this->assertSame('a_verifier', $audit['seen'][0]['verdict']);
     }

@@ -1,9 +1,9 @@
 <?php
+
 /**
  * SC Alwaysdata - Upgrade 1.2.0
  * Adds errors_500_pages column.
  */
-
 if (!defined('_PS_VERSION_')) {
     exit;
 }

@@ -1,4 +1,5 @@
 <?php
+
 /**
  * SC Alwaysdata - PrestaShop 8 Module
  *
@@ -57,22 +58,22 @@ class ResourceSample extends \ObjectModel
     public $process_summary = '[]';
 
     public static $definition = [
-        'table'   => 'sc_alwaysdata_resources_samples',
+        'table' => 'sc_alwaysdata_resources_samples',
         'primary' => 'id_sample',
-        'fields'  => [
-            'sampled_at'          => ['type' => self::TYPE_DATE,   'validate' => 'isDate',        'required' => true],
-            'bucket_key'          => ['type' => self::TYPE_INT,    'validate' => 'isUnsignedInt', 'required' => true],
-            'ram_used_mb'         => ['type' => self::TYPE_INT,    'validate' => 'isUnsignedInt'],
-            'ram_total_mb'        => ['type' => self::TYPE_INT,    'validate' => 'isUnsignedInt'],
-            'cpu_load_1'          => ['type' => self::TYPE_FLOAT,  'validate' => 'isFloat'],
-            'cpu_load_5'          => ['type' => self::TYPE_FLOAT,  'validate' => 'isFloat'],
-            'cpu_load_15'         => ['type' => self::TYPE_FLOAT,  'validate' => 'isFloat'],
-            'disk_used_gb'        => ['type' => self::TYPE_FLOAT,  'validate' => 'isFloat'],
-            'disk_total_gb'       => ['type' => self::TYPE_FLOAT,  'validate' => 'isFloat'],
-            'opcache_used_mb'     => ['type' => self::TYPE_FLOAT,  'validate' => 'isFloat'],
-            'top_processes'       => ['type' => self::TYPE_HTML,   'allow_html' => true],
+        'fields' => [
+            'sampled_at' => ['type' => self::TYPE_DATE,   'validate' => 'isDate',        'required' => true],
+            'bucket_key' => ['type' => self::TYPE_INT,    'validate' => 'isUnsignedInt', 'required' => true],
+            'ram_used_mb' => ['type' => self::TYPE_INT,    'validate' => 'isUnsignedInt'],
+            'ram_total_mb' => ['type' => self::TYPE_INT,    'validate' => 'isUnsignedInt'],
+            'cpu_load_1' => ['type' => self::TYPE_FLOAT,  'validate' => 'isFloat'],
+            'cpu_load_5' => ['type' => self::TYPE_FLOAT,  'validate' => 'isFloat'],
+            'cpu_load_15' => ['type' => self::TYPE_FLOAT,  'validate' => 'isFloat'],
+            'disk_used_gb' => ['type' => self::TYPE_FLOAT,  'validate' => 'isFloat'],
+            'disk_total_gb' => ['type' => self::TYPE_FLOAT,  'validate' => 'isFloat'],
+            'opcache_used_mb' => ['type' => self::TYPE_FLOAT,  'validate' => 'isFloat'],
+            'top_processes' => ['type' => self::TYPE_HTML,   'allow_html' => true],
             'top_modules_opcache' => ['type' => self::TYPE_HTML,   'allow_html' => true],
-            'process_summary'     => ['type' => self::TYPE_HTML,   'allow_html' => true],
+            'process_summary' => ['type' => self::TYPE_HTML,   'allow_html' => true],
         ],
     ];
 

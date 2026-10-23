@@ -42,7 +42,7 @@ class HttpLogParserServiceTest extends TestCase
     private function makeLine(array $overrides = []): string
     {
         $defaults = [
-            'ip'     => '1.2.3.4',
+            'ip'     => '203.0.113.14',
             'hour'   => '14',
             'method' => 'GET',
             'path'   => '/index.html',
@@ -358,7 +358,7 @@ class HttpLogParserServiceTest extends TestCase
     public function testCheckout500IncrementsErrors500CheckoutAndAddsDetail(): void
     {
         $path = $this->createLogFile([
-            $this->makeLine(['path' => '/commande', 'status' => '500', 'ip' => '5.5.5.5', 'hour' => '10']),
+            $this->makeLine(['path' => '/commande', 'status' => '500', 'ip' => '203.0.113.5', 'hour' => '10']),
         ]);
 
         $result = $this->service->parse($path);
@@ -367,7 +367,7 @@ class HttpLogParserServiceTest extends TestCase
         $this->assertCount(1, $result['errors_500_checkout_detail']);
         $detail = $result['errors_500_checkout_detail'][0];
         $this->assertSame('/commande', $detail['path']);
-        $this->assertSame('5.5.5.5', $detail['ip']);
+        $this->assertSame('203.0.113.5', $detail['ip']);
         $this->assertSame(10, $detail['hour']);
     }
 
@@ -468,7 +468,7 @@ class HttpLogParserServiceTest extends TestCase
 
     public function testIpWithManyPagesAndNoStaticIsCountedAsScraper(): void
     {
-        $result = $this->service->parse($this->createLogFile($this->pages(25, '9.9.9.9')));
+        $result = $this->service->parse($this->createLogFile($this->pages(25, '203.0.113.9')));
 
         $this->assertSame(25, $result['requests_scrapers']);
         $this->assertSame(0, $result['requests_human']);
@@ -479,8 +479,8 @@ class HttpLogParserServiceTest extends TestCase
 
     public function testIpLoadingStaticsStaysHuman(): void
     {
-        $lines = $this->pages(25, '9.9.9.9');
-        $lines[] = $this->makeLine(['ip' => '9.9.9.9', 'path' => '/themes/theme.css']);
+        $lines = $this->pages(25, '203.0.113.9');
+        $lines[] = $this->makeLine(['ip' => '203.0.113.9', 'path' => '/themes/theme.css']);
 
         $result = $this->service->parse($this->createLogFile($lines));
 
@@ -491,7 +491,7 @@ class HttpLogParserServiceTest extends TestCase
     public function testIpBelowPageThresholdStaysHuman(): void
     {
         // A returning visitor with a warm cache loads no static at all
-        $result = $this->service->parse($this->createLogFile($this->pages(19, '9.9.9.9', '?q=Couleur-Rouge')));
+        $result = $this->service->parse($this->createLogFile($this->pages(19, '203.0.113.9', '?q=Couleur-Rouge')));
 
         $this->assertSame(0, $result['requests_scrapers']);
         $this->assertSame(19, $result['requests_human']);
@@ -499,9 +499,9 @@ class HttpLogParserServiceTest extends TestCase
 
     public function testIpMostlyOnFacetsIsCountedAsScraperEvenWithStatics(): void
     {
-        $lines = $this->pages(25, '9.9.9.9', '?q=Couleur-Rouge');
+        $lines = $this->pages(25, '203.0.113.9', '?q=Couleur-Rouge');
         for ($i = 0; $i < 3; $i++) {
-            $lines[] = $this->makeLine(['ip' => '9.9.9.9', 'path' => '/img/' . $i . '.jpg']);
+            $lines[] = $this->makeLine(['ip' => '203.0.113.9', 'path' => '/img/' . $i . '.jpg']);
         }
 
         $result = $this->service->parse($this->createLogFile($lines));
@@ -512,8 +512,8 @@ class HttpLogParserServiceTest extends TestCase
 
     public function testFacetInSecondParameterIsDetected(): void
     {
-        $lines = $this->pages(25, '9.9.9.9', '?page=2&q=Taille-M');
-        $lines[] = $this->makeLine(['ip' => '9.9.9.9', 'path' => '/themes/theme.css']);
+        $lines = $this->pages(25, '203.0.113.9', '?page=2&q=Taille-M');
+        $lines[] = $this->makeLine(['ip' => '203.0.113.9', 'path' => '/themes/theme.css']);
 
         $result = $this->service->parse($this->createLogFile($lines));
 
@@ -565,15 +565,15 @@ class HttpLogParserServiceTest extends TestCase
 
     public function testScraperDoesNotHideOtherVisitors(): void
     {
-        $lines = $this->pages(25, '9.9.9.9');
-        $lines[] = $this->makeLine(['ip' => '5.5.5.5', 'path' => '/cat-0.html']);
+        $lines = $this->pages(25, '203.0.113.9');
+        $lines[] = $this->makeLine(['ip' => '203.0.113.5', 'path' => '/cat-0.html']);
 
         $result = $this->service->parse($this->createLogFile($lines));
 
         $this->assertSame(25, $result['requests_scrapers']);
         $this->assertSame(1, $result['requests_human']);
         $this->assertSame(['/cat-0.html' => 1], $result['page_counts']);
-        $this->assertSame(['5.5.5.5' => 1], $result['ip_counts']);
+        $this->assertSame(['203.0.113.5' => 1], $result['ip_counts']);
     }
 
     // -----------------------------------------------------------------
@@ -584,19 +584,19 @@ class HttpLogParserServiceTest extends TestCase
     {
         $browser = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)';
         $lines = [
-            $this->makeLine(['ip' => '51.1.1.1', 'path' => '/a.html', 'ua' => 'Mozilla/5.0 (compatible; AhrefsBot/7.0)']),
-            $this->makeLine(['ip' => '51.1.1.1', 'path' => '/b.html', 'ua' => 'Mozilla/5.0 (compatible; AhrefsBot/7.0)']),
+            $this->makeLine(['ip' => '203.0.113.16', 'path' => '/a.html', 'ua' => 'Mozilla/5.0 (compatible; AhrefsBot/7.0)']),
+            $this->makeLine(['ip' => '203.0.113.16', 'path' => '/b.html', 'ua' => 'Mozilla/5.0 (compatible; AhrefsBot/7.0)']),
             $this->makeLine(['ip' => '40.77.1.1', 'path' => '/a.html', 'ua' => 'Mozilla/5.0 (compatible; bingbot/2.0)']),
             $this->makeLine(['ip' => '66.249.1.1', 'path' => '/a.html', 'ua' => 'Mozilla/5.0 (compatible; Googlebot/2.1)']),
             $this->makeLine(['ip' => '74.125.1.1', 'path' => '/a.html', 'ua' => $browser]),
-            $this->makeLine(['ip' => '6.6.6.6', 'path' => '/x.html', 'status' => '403', 'ua' => $browser]),
-            $this->makeLine(['ip' => '7.7.7.7', 'path' => '/themes/t.css', 'ua' => $browser]),
-            $this->makeLine(['ip' => '1.1.1.1', 'path' => '/home.html', 'ua' => $browser]),
-            $this->makeLine(['ip' => '1.1.1.1', 'path' => '/home.html', 'ua' => $browser]),
-            $this->makeLine(['ip' => '2.2.2.2', 'path' => '/home.html', 'ua' => $browser]),
-            $this->makeLine(['ip' => '3.3.3.3', 'path' => '/robes', 'ua' => $browser]),
+            $this->makeLine(['ip' => '203.0.113.6', 'path' => '/x.html', 'status' => '403', 'ua' => $browser]),
+            $this->makeLine(['ip' => '203.0.113.7', 'path' => '/themes/t.css', 'ua' => $browser]),
+            $this->makeLine(['ip' => '203.0.113.11', 'path' => '/home.html', 'ua' => $browser]),
+            $this->makeLine(['ip' => '203.0.113.11', 'path' => '/home.html', 'ua' => $browser]),
+            $this->makeLine(['ip' => '203.0.113.12', 'path' => '/home.html', 'ua' => $browser]),
+            $this->makeLine(['ip' => '203.0.113.13', 'path' => '/robes', 'ua' => $browser]),
         ];
-        $lines = array_merge($lines, $this->pages(22, '9.9.9.9'));
+        $lines = array_merge($lines, $this->pages(22, '203.0.113.9'));
 
         $result = $this->service->parse($this->createLogFile($lines));
 
