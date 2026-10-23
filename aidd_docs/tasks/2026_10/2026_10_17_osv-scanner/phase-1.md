@@ -51,3 +51,9 @@ status: in-progress
 | 8 | La section de `decisions.md` contient la marche à suivre complète, la raison glib mot pour mot et les commandes locales identiques à celles du job |
 | 9 | Runs (a) et (b) rouges au scan, (c) et (d) rouges au script, liens consignés, branche supprimée |
 | 1-9 | Toutes les actions du workflow épinglées par SHA ; `permissions: contents: read` ; `timeout-minutes: 10` sur `deps` ; aucune donnée réelle (domaine, hôte, clé) dans les fichiers ajoutés |
+
+## Avancement au 2026-10-23
+
+- Tâches 2 à 8 : en place sur `main` ; le job `deps` passe, un run `schedule` a eu lieu le 2026-10-19 (tâche 3), les essais locaux du script d'exceptions donnent tous le résultat attendu (tâche 6).
+- Tâche 9 : preuves (a) à (d) faites et consignées dans `vigie/docs/decisions.md`, section « Preuves de détection ». La suppression de la branche `test/osv-detecte` reste à faire (le conteneur ne peut pas supprimer de branche distante).
+- Tâche 1 : la somme du binaire est vérifiée ; **la provenance SLSA ne l'est pas** (`tuf-repo-cdn.sigstore.dev` injoignable du conteneur). Le plan reste `in-progress` jusqu'à cette vérification, à faire depuis un poste qui l'atteint.
