@@ -80,6 +80,7 @@ fn site(id: &str, kind: SiteKind, runtime: Option<Runtime>, logs: bool) -> Site 
             ..SiteLogs::default()
         }),
         inventory: None,
+        custom_checks: Vec::new(),
     }
 }
 
@@ -190,11 +191,55 @@ fn the_installer_check_applies_to_wordpress_and_prestashop_only() {
             kind != SiteKind::Generic,
             "{kind:?}/{runtime:?}"
         );
+        // `custom` ne s'applique qu'avec une règle déclarée (test dédié).
         for other in CheckKind::ALL
             .into_iter()
-            .filter(|k| *k != CheckKind::Installer)
+            .filter(|k| *k != CheckKind::Installer && *k != CheckKind::Custom)
         {
             assert!(other.applies(&site), "{} pour {kind:?}", other.name());
+        }
+    }
+}
+
+// --- Contrôles personnalisés (#33) -----------------------------------------
+
+fn rule(id: &str) -> vigie::config::CustomCheck {
+    vigie::config::CustomCheck {
+        id: id.into(),
+        path: "/panier".into(),
+        status: 200,
+        contains: None,
+        absent: None,
+        severity: vigie::config::CustomSeverity::Warning,
+    }
+}
+
+#[test]
+fn the_custom_check_is_watched_only_with_a_declared_rule_whatever_the_cms() {
+    assert_eq!(CheckKind::Custom.name(), "custom");
+    assert_eq!(
+        Control::from_name("custom"),
+        Some(Control::Check(CheckKind::Custom))
+    );
+    for (kind, runtime) in KINDS {
+        let without = site("site-a", kind, runtime, false);
+        assert!(
+            !CheckKind::Custom.applies(&without),
+            "{kind:?}/{runtime:?} sans règle"
+        );
+        let with = Site {
+            custom_checks: vec![rule("panier")],
+            ..without
+        };
+        assert!(
+            CheckKind::Custom.applies(&with),
+            "{kind:?}/{runtime:?} avec règle"
+        );
+        for ctx in CONTEXTS {
+            assert!(
+                capability::watched(&with, "custom", &ctx),
+                "{kind:?}/{runtime:?}"
+            );
         }
     }
 }
@@ -981,7 +1026,7 @@ fn vulns_is_watched_only_with_a_declared_inventory_source() {
 
 #[test]
 fn vulns_sync_is_a_watcher_control_never_watched_for_a_site() {
-    assert_eq!(Control::ALL.len(), 15);
+    assert_eq!(Control::ALL.len(), 16);
     assert_eq!(Control::from_name("vulns-sync"), Some(Control::VulnsSync));
     for (kind, runtime) in KINDS {
         for ctx in CONTEXTS {

@@ -40,6 +40,7 @@ fn site() -> Site {
         agent_silence: 900,
         logs: None,
         inventory: None,
+        custom_checks: Vec::new(),
     }
 }
 

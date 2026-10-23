@@ -17,7 +17,6 @@ export type FeatureKey =
   | 'sourdine'
   | 'file'
   | 'wordpress'
-  | 'personnalises'
 
 export interface Feature {
   title: string
@@ -113,10 +112,5 @@ export const FEATURES: Record<FeatureKey, Feature> = {
     missing:
       'Un inventaire des composants de ce site. Il se déclare dans la section [sites.inventory] de config.toml sur le VPS (agent PHP ou vigie-inventory en CI) ; le veilleur le rapproche au passage suivant de tick. Ou le veilleur ne sert pas encore cette lecture.',
     link: { label: 'Voir les failles', name: 'failles' },
-  },
-  personnalises: {
-    title: 'Contrôles personnalisés',
-    shows: 'Des contrôles propres à un site, définis à la main : page attendue, texte à trouver, réponse à exclure.',
-    missing: 'Le veilleur n’a que ses contrôles intégrés ; il ne lit aucune définition de contrôle personnalisé.',
   },
 }

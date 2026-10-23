@@ -376,6 +376,98 @@ pub const DEFAULT_INTERVAL: u64 = 300;
 /// En dessous, le site serait sondé à chaque passage du timer.
 pub const MIN_INTERVAL: u64 = 60;
 
+/// Règles `[[sites.custom_checks]]` au plus, par site.
+pub const MAX_CUSTOM_CHECKS: usize = 20;
+/// Longueur maximale de `contains`, `absent` et `path`, en caractères.
+pub const MAX_CUSTOM_TEXT: usize = 200;
+
+/// Gravité du constat d'une règle personnalisée.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CustomSeverity {
+    #[default]
+    Warning,
+    Critical,
+}
+
+/// Une page à contrôler, définie à la main : `[[sites.custom_checks]]`.
+///
+/// Trois assertions fermées, sans expression régulière : le statut attendu,
+/// un texte qui doit figurer dans la page, un texte qui ne doit pas y
+/// figurer. Le constat d'une règle a pour clé son `id`.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CustomCheck {
+    /// Identifiant de la règle : `[a-z0-9-]`, 40 au plus, unique par site.
+    pub id: String,
+    /// Chemin de la page, joint à l'origine du site : il commence par `/`.
+    pub path: String,
+    /// Statut HTTP attendu.
+    #[serde(default = "default_custom_status")]
+    pub status: u16,
+    /// Texte qui doit figurer dans la page.
+    pub contains: Option<String>,
+    /// Texte qui ne doit pas figurer dans la page.
+    pub absent: Option<String>,
+    #[serde(default)]
+    pub severity: CustomSeverity,
+}
+
+fn default_custom_status() -> u16 {
+    200
+}
+
+impl CustomCheck {
+    fn validate(&self) -> Result<(), String> {
+        let valid_id = !self.id.is_empty()
+            && self.id.len() <= 40
+            && !self.id.starts_with('-')
+            && self
+                .id
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-');
+        if !valid_id {
+            return Err(format!(
+                "id « {} » : 1 à 40 caractères parmi a-z, 0-9 et -, sans tiret initial",
+                self.id
+            ));
+        }
+        let ctx = |what: &str| format!("règle « {} » : {what}", self.id);
+        if !self.path.starts_with('/') || self.path.starts_with("//") {
+            return Err(ctx(&format!(
+                "path commence par un seul / (reçu : {})",
+                self.path
+            )));
+        }
+        if self.path.chars().count() > MAX_CUSTOM_TEXT
+            || self.path.contains('\\')
+            || self
+                .path
+                .chars()
+                .any(|c| c.is_whitespace() || c.is_control())
+        {
+            return Err(ctx(&format!(
+                "path : {MAX_CUSTOM_TEXT} caractères au plus, sans espace, contrôle ni \\"
+            )));
+        }
+        if !(100..=599).contains(&self.status) {
+            return Err(ctx(&format!("status : 100 à 599 (reçu : {})", self.status)));
+        }
+        for (name, value) in [("contains", &self.contains), ("absent", &self.absent)] {
+            let Some(text) = value else { continue };
+            if text.trim().is_empty() {
+                return Err(ctx(&format!("{name} est vide")));
+            }
+            if text.chars().count() > MAX_CUSTOM_TEXT || text.chars().any(char::is_control) {
+                return Err(ctx(&format!(
+                    "{name} : {MAX_CUSTOM_TEXT} caractères au plus, sans caractère de contrôle"
+                )));
+            }
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Site {
@@ -401,6 +493,9 @@ pub struct Site {
     pub logs: Option<SiteLogs>,
     /// `[sites.inventory]`, facultatif.
     pub inventory: Option<SiteInventory>,
+    /// `[[sites.custom_checks]]` : pages à contrôler, définies à la main.
+    #[serde(default)]
+    pub custom_checks: Vec<CustomCheck>,
 }
 
 fn default_interval() -> u64 {
@@ -774,6 +869,24 @@ impl Config {
                     site.id, site.agent_silence
                 ));
             }
+            if site.custom_checks.len() > MAX_CUSTOM_CHECKS {
+                return Err(format!(
+                    "custom_checks du site « {} » : {MAX_CUSTOM_CHECKS} règles au plus (reçu : {})",
+                    site.id,
+                    site.custom_checks.len()
+                ));
+            }
+            let mut rule_ids = std::collections::HashSet::new();
+            for rule in &site.custom_checks {
+                rule.validate()
+                    .map_err(|err| format!("custom_checks du site « {} » : {err}", site.id))?;
+                if !rule_ids.insert(rule.id.as_str()) {
+                    return Err(format!(
+                        "custom_checks du site « {} » : règle « {} » déclarée deux fois",
+                        site.id, rule.id
+                    ));
+                }
+            }
             if let Some(inventory) = &site.inventory {
                 inventory
                     .validate(site)
@@ -810,6 +923,138 @@ url = "https://www.example.org/"
 
     fn parse_str(raw: &str) -> Result<Config, ConfigError> {
         parse(Path::new("config.toml"), raw)
+    }
+
+    const RULE: &str = "\n[[sites.custom_checks]]\nid = \"panier\"\npath = \"/panier\"\n";
+
+    #[test]
+    fn reads_custom_checks_with_their_defaults() {
+        let config = parse_str(&format!(
+            "{VALID}{RULE}contains = \"Votre panier\"\nabsent = \"Fatal error\"\nstatus = 200\nseverity = \"critical\"\n\n[[sites.custom_checks]]\nid = \"legacy\"\npath = \"/ancienne?x=1\"\nstatus = 404\n"
+        ))
+        .expect("valide");
+        let rules = &config.sites[0].custom_checks;
+        assert_eq!(rules.len(), 2);
+        assert_eq!(rules[0].contains.as_deref(), Some("Votre panier"));
+        assert_eq!(rules[0].absent.as_deref(), Some("Fatal error"));
+        assert_eq!(rules[0].severity, CustomSeverity::Critical);
+        assert_eq!(rules[1].status, 404);
+        assert_eq!(
+            rules[1].severity,
+            CustomSeverity::Warning,
+            "gravité par défaut"
+        );
+        assert_eq!(rules[1].contains, None);
+        let none = parse_str(VALID).expect("valide");
+        assert!(none.sites[0].custom_checks.is_empty(), "facultatif");
+    }
+
+    #[test]
+    fn refuses_bad_custom_checks_naming_the_site_and_the_rule() {
+        let cases = [
+            ("id = \"Panier\"\npath = \"/p\"\n", "id « Panier »"),
+            ("id = \"\"\npath = \"/p\"\n", "1 à 40 caractères"),
+            ("id = \"-x\"\npath = \"/p\"\n", "sans tiret initial"),
+            ("id = \"a_b\"\npath = \"/p\"\n", "id « a_b »"),
+            ("id = \"p\"\npath = \"panier\"\n", "commence par un seul /"),
+            (
+                "id = \"p\"\npath = \"//autre.example/x\"\n",
+                "commence par un seul /",
+            ),
+            ("id = \"p\"\npath = \"/a b\"\n", "sans espace"),
+            ("id = \"p\"\npath = \"/a\\\\b\"\n", "sans espace"),
+            (
+                "id = \"p\"\npath = \"/p\"\nstatus = 99\n",
+                "status : 100 à 599",
+            ),
+            (
+                "id = \"p\"\npath = \"/p\"\nstatus = 600\n",
+                "status : 100 à 599",
+            ),
+            (
+                "id = \"p\"\npath = \"/p\"\ncontains = \"  \"\n",
+                "contains est vide",
+            ),
+            (
+                "id = \"p\"\npath = \"/p\"\nabsent = \"\"\n",
+                "absent est vide",
+            ),
+            (
+                "id = \"p\"\npath = \"/p\"\nabsent = \"a\\nb\"\n",
+                "sans caractère de contrôle",
+            ),
+            (
+                "id = \"p\"\npath = \"/p\"\nseverity = \"info\"\n",
+                "severity",
+            ),
+            ("id = \"p\"\npath = \"/p\"\nregex = \"x\"\n", "regex"),
+            ("id = \"p\"\n", "path"),
+        ];
+        for (body, expected) in cases {
+            let err = parse_str(&format!("{VALID}\n[[sites.custom_checks]]\n{body}"))
+                .expect_err(body)
+                .to_string();
+            assert!(err.contains(expected), "{body} -> {err}");
+        }
+        let err = parse_str(&format!(
+            "{VALID}\n[[sites.custom_checks]]\nid = \"{}\"\npath = \"/p\"\n",
+            "a".repeat(41)
+        ))
+        .expect_err("41 caractères")
+        .to_string();
+        assert!(
+            err.contains("exemple") && err.contains("1 à 40 caractères"),
+            "{err}"
+        );
+        let long = "x".repeat(MAX_CUSTOM_TEXT + 1);
+        for field in ["contains", "absent"] {
+            let err = parse_str(&format!("{VALID}{RULE}{field} = \"{long}\"\n"))
+                .expect_err(field)
+                .to_string();
+            assert!(err.contains("200 caractères au plus"), "{field} -> {err}");
+        }
+        let err = parse_str(&format!(
+            "{VALID}\n[[sites.custom_checks]]\nid = \"p\"\npath = \"/{long}\"\n"
+        ))
+        .expect_err("path trop long")
+        .to_string();
+        assert!(err.contains("200 caractères au plus"), "{err}");
+    }
+
+    #[test]
+    fn refuses_a_duplicate_rule_id_in_a_site_but_not_across_sites() {
+        let err = parse_str(&format!("{VALID}{RULE}{RULE}"))
+            .expect_err("doublon")
+            .to_string();
+        assert!(
+            err.contains("exemple") && err.contains("« panier » déclarée deux fois"),
+            "{err}"
+        );
+        let two_sites = format!(
+            "{VALID}{RULE}\n[[sites]]\nid = \"autre\"\nurl = \"https://www.example.net/\"\n{RULE}"
+        );
+        // `RULE` est une table `[[sites.custom_checks]]` : elle se rattache au dernier `[[sites]]`.
+        let config = parse_str(&two_sites).expect("deux sites, même identifiant de règle");
+        assert!(
+            config
+                .sites
+                .iter()
+                .all(|site| site.custom_checks.len() == 1)
+        );
+    }
+
+    #[test]
+    fn refuses_more_than_the_maximum_number_of_rules() {
+        let rules = |n: usize| {
+            (0..n)
+                .map(|i| format!("\n[[sites.custom_checks]]\nid = \"r{i}\"\npath = \"/p\"\n"))
+                .collect::<String>()
+        };
+        assert!(parse_str(&format!("{VALID}{}", rules(MAX_CUSTOM_CHECKS))).is_ok());
+        let err = parse_str(&format!("{VALID}{}", rules(MAX_CUSTOM_CHECKS + 1)))
+            .expect_err("trop de règles")
+            .to_string();
+        assert!(err.contains("20 règles au plus"), "{err}");
     }
 
     #[test]

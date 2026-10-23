@@ -72,6 +72,7 @@ fn site(id: &str, kind: SiteKind, runtime: Option<Runtime>, sources: &[Inventory
         agent_silence: 900,
         logs: None,
         inventory: (!sources.is_empty()).then(|| SiteInventory::new(sources)),
+        custom_checks: Vec::new(),
     }
 }
 

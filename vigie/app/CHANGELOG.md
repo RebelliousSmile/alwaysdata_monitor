@@ -9,6 +9,7 @@ Prérequis de publication : le veilleur du VPS sert les routes `components`,
 `vulns` et `vulns/sources` de l'API (#21, phase 4). Face à un veilleur en
 retard, les deux écrans restent « pas encore disponible » (404).
 
+- Contrôles personnalisés (#33) : le contrôle `custom` du veilleur s'affiche avec les contrôles externes, libellé « Pages personnalisées » ; l'encart « pas encore disponible » disparaît. Les règles se déclarent dans `config.toml` sur le VPS, jamais depuis la console.
 - Failles (#21) : composants du site et failles connues rapprochées, par
   groupe d'alias, avec gravité, KEV, EPSS, versions corrigées, dérogation
   en cours et source de l'inventaire ; « Afficher plus » sur un passage

@@ -80,6 +80,20 @@ kind = "wordpress"
 # Sans keyword_url, c'est `url` ; sans keyword, seul le code 200 compte.
 keyword_url = "https://www.example.org/kb/"
 keyword = "/problemes/"
+# Contrôle `custom` : des pages à contrôler à la main, une table par règle,
+# 20 au plus par site. Le constat d'une règle a pour clé son id (a-z, 0-9 et -,
+# 40 caractères au plus, unique dans le site). Le chemin commence par un seul /
+# et se joint à l'origine du site (https://hôte), même pour un site installé
+# dans un sous-dossier ; il figure dans les constats et les e-mails : n'y mettez
+# aucun secret. status (200 par défaut), contains (texte qui doit figurer),
+# absent (texte qui ne doit pas figurer) et severity (warning par défaut, ou
+# critical) sont facultatifs. Texte exact, sans expression régulière.
+# [[sites.custom_checks]]
+# id = "panier"
+# path = "/panier"
+# contains = "Votre panier"
+# absent = "Fatal error"
+# severity = "critical"
 # Secondes entre deux passages des contrôles (60 au moins). Les contrôles TLS
 # et des en-têtes passent au plus une fois par heure.
 interval = 300
