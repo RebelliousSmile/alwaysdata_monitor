@@ -549,22 +549,30 @@ class HtaccessService
     }
 
     /**
-     * Runs `apachectl -t` to check .htaccess syntax.
-     * Returns the error output if invalid, null if valid or if apachectl is not available.
+     * Runs `apachectl -t` (or `apache2ctl -t`) without a shell.
+     * Returns the error output if invalid, null if valid or if no such command is available.
      */
     private function validateApacheSyntax(): ?string
     {
+        if (!function_exists('proc_open')) {
+            return null;
+        }
+
         foreach (['apachectl', 'apache2ctl'] as $cmd) {
-            $which = @shell_exec('which ' . escapeshellarg($cmd) . ' 2>/dev/null');
-            if ($which === null || trim($which) === '') {
+            $binary = ExecutableFinder::find($cmd);
+            if ($binary === null) {
                 continue;
             }
 
-            $output = [];
-            $exitCode = 0;
-            exec(escapeshellcmd($cmd) . ' -t 2>&1', $output, $exitCode);
+            $process = @proc_open([$binary, '-t'], [1 => ['pipe', 'w'], 2 => ['redirect', 1]], $pipes);
+            if (!is_resource($process)) {
+                continue;
+            }
 
-            return $exitCode === 0 ? null : implode("\n", $output);
+            $output = (string) stream_get_contents($pipes[1]);
+            fclose($pipes[1]);
+
+            return proc_close($process) === 0 ? null : trim($output);
         }
 
         // apachectl not found — skip validation silently
