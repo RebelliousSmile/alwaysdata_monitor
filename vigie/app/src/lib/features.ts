@@ -13,7 +13,6 @@ export type FeatureKey =
   | 'compte'
   | 'ajouter'
   | 'emails'
-  | 'theme'
   | 'sourdine'
   | 'file'
   | 'wordpress'
@@ -91,11 +90,6 @@ export const FEATURES: Record<FeatureKey, Feature> = {
     shows: 'L’aperçu des e-mails envoyés : alerte immédiate, e-mail du matin, « Vigie ne voit plus le site ».',
     missing: 'Le veilleur n’expose pas ses modèles d’e-mail à la console.',
     link: { label: 'Revenir aux réglages', name: 'reglages' },
-  },
-  theme: {
-    title: 'Thème clair',
-    shows: 'Le choix entre le thème sombre et un thème clair aux mêmes jetons.',
-    missing: 'Le thème clair n’est pas dessiné ; la console reste en thème sombre.',
   },
   sourdine: {
     title: 'Sourdine',

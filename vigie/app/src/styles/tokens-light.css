@@ -1,0 +1,37 @@
+/* Vigie — thème clair : mêmes noms que tokens.css, seules les couleurs changent.
+   tokens.css reste la copie exacte de la maquette (design.spec.ts) ; ce fichier
+   ne la modifie pas, il la surcharge quand <html data-theme="light">.
+   Les rapports de contraste (WCAG) sont vérifiés par design.spec.ts :
+   texte ≥ 4,5:1 sur chaque fond, contours de contrôle ≥ 3:1. */
+:root[data-theme='light'] {
+  color-scheme: light;
+
+  /* Fonds */
+  --vg-bg: #F4F6F8;
+  --vg-surface: #FFFFFF;
+  --vg-surface-2: #EEF1F4;
+  --vg-surface-3: #DDE3E8;
+  --vg-header: #FFFFFF;
+  --vg-code: #EAEEF1;
+
+  /* Lignes */
+  --vg-line: #D5DBE0;
+  --vg-line-soft: #E3E8EC;
+  --vg-control: #6B7782;     /* 4,6:1 sur carte, 4,2:1 sur fond */
+  --vg-switch-off: #6E7983;  /* 4,4:1 sur carte, 4,1:1 sur fond */
+
+  /* Texte */
+  --vg-text: #14181B;
+  --vg-text-2: #3A444D;
+  --vg-text-3: #55616B;      /* minimum, jamais plus clair */
+  --vg-link: #0A62A8;
+
+  /* Sens — le rouge n'est utilisé QUE pour la gravité ou le danger */
+  --vg-primary: #0F7A6B;     --vg-on-primary: #FFFFFF;
+  --vg-ok: #0B7A68;          --vg-ok-bg: #DDF3EE;
+  --vg-danger: #B3261E;      --vg-danger-bg: #FCE9E6;  --vg-danger-line: #E8A79F;  --vg-danger-text: #8F1D16;
+  --vg-warn: #8A5A00;        --vg-warn-bg: #FBF0D5;
+  --vg-info: #115E9E;        --vg-info-bg: #E1EEFA;
+  --vg-ia: #6B3FB0;          --vg-ia-bg: #EEE6FA;
+  --vg-neutral: #3F4A54;     --vg-neutral-bg: #E8ECEF;
+}
