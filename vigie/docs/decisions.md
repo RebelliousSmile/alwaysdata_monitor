@@ -506,8 +506,7 @@ refuse un lot dont un message contient encore une adresse.
 
 | Point | Décision |
 | ----- | -------- |
-| Transport | `POST /r/v1/errors`, signé comme `/r/v1/logs` (clé de l'agent, préfixe `vigie-errors-v1
-`), corps borné à 64 Kio, `seq` propre au site |
+| Transport | `POST /r/v1/errors`, signé comme `/r/v1/logs` (clé de l'agent, préfixe `vigie-errors-v1` suivi d'un saut de ligne), corps borné à 64 Kio, `seq` propre au site |
 | Stockage | `error_groups(site, day, fingerprint, message, count, first_seen, last_seen)` ; `fingerprint` = SHA-256 du message normalisé ; rétention 14 jours, purge par `tick` |
 | Registre de capacités | famille `agent:errors`, `Control` et `Needs` déclarés comme les autres familles d'agent |
 | API | `GET /api/v1/sites/{id}/errors`, en lecture seule, groupes du plus fréquent au moins fréquent |
