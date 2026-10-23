@@ -62,7 +62,10 @@ rapport accepté est considéré comme résolu. L'agent envoie donc tous ses
 constats à chaque rapport, même ceux déjà signalés.
 
 `facts` sert au relevé (versions de PHP, du CMS, des extensions…) : le dernier
-relevé accepté est conservé, il n'ouvre aucun incident.
+relevé accepté est conservé, il n'ouvre aucun incident. Avec `"resources": true`
+l'agent PHP y ajoute `ram_used_mb`, `ram_limit_mb`, `load_1`, `load_5`,
+`load_15`, `disk_used_gb` et `disk_total_gb` (`agent-php.md`, « Ressources du
+compte »), tous numériques et absents quand ils ne sont pas lisibles.
 
 `files` sert à la comparaison d'intégrité (voir plus bas) : l'agent ne garde
 aucun état, c'est le veilleur qui voit qu'un fichier a changé.

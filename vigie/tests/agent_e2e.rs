@@ -1059,3 +1059,95 @@ fn a_held_lock_makes_the_agent_skip_without_waiting() {
     drop(held);
     let _ = std::fs::remove_dir_all(&base);
 }
+
+/// Ressources du compte (#51) : `resources: true` ajoute mémoire, charge et
+/// disque aux `facts` du rapport ; sans la clé, rien n'est relevé.
+#[test]
+#[ignore = "lancé avec VIGIE_E2E_PHP (voir l'en-tête)"]
+fn the_account_resources_are_reported_as_facts_only_when_enabled() {
+    let php = php_command();
+    let base = std::env::temp_dir().join(format!("vigie-e2e-resources-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    private_dir(&base);
+    let facts = |enabled: Option<bool>| {
+        let dir = base.join(format!("agent-{enabled:?}"));
+        private_dir(&dir);
+        let mut config = serde_json::json!({ "endpoint": "http://127.0.0.1:9/r/v1/report" });
+        if let Some(enabled) = enabled {
+            config["resources"] = enabled.into();
+        }
+        let (agent, _) = init_agent(php.clone(), &dir, config);
+        let out = agent.run(&["--dry-run"]);
+        assert!(out.status.success(), "{out:?}");
+        let body: serde_json::Value = serde_json::from_slice(&out.stdout).expect("corps JSON");
+        body["facts"].clone()
+    };
+    let on = facts(Some(true));
+    for key in ["disk_used_gb", "disk_total_gb"] {
+        assert!(on[key].is_number(), "{key} : {on}");
+    }
+    assert!(on["disk_total_gb"].as_f64().unwrap() > 0.0, "{on}");
+    for off in [facts(None), facts(Some(false))] {
+        for key in ["ram_used_mb", "load_1", "disk_used_gb"] {
+            assert!(off.get(key).is_none(), "{key} relevé sans la clé : {off}");
+        }
+    }
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+/// Les sources de mémoire : cgroup v2 avec limite, limite « max » (repli sur la
+/// somme des VmRSS, sans limite), et rien d'inventé quand `/proc` manque.
+#[test]
+#[ignore = "lancé avec VIGIE_E2E_PHP (voir l'en-tête)"]
+fn memory_comes_from_the_cgroup_then_from_rss_and_is_absent_otherwise() {
+    let php = php_command();
+    let base = std::env::temp_dir().join(format!("vigie-e2e-memory-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    let (proc_dir, cgroup) = (base.join("proc"), base.join("cgroup"));
+    std::fs::create_dir_all(proc_dir.join("self")).unwrap();
+    std::fs::create_dir_all(proc_dir.join("42")).unwrap();
+    std::fs::create_dir_all(cgroup.join("compte")).unwrap();
+    std::fs::write(proc_dir.join("self/cgroup"), "0::/compte\n").unwrap();
+    std::fs::write(cgroup.join("compte/memory.current"), "104857600\n").unwrap();
+    std::fs::write(cgroup.join("compte/memory.max"), "209715200\n").unwrap();
+    let script = base.join("memory.php");
+    std::fs::write(
+        &script,
+        "<?php\nrequire $argv[1];\n$uid = posix_geteuid();\n\
+         if (is_dir($argv[2] . '/42')) {\n\
+         file_put_contents($argv[2] . '/42/status', \"Name:\\tphp\\nUid:\\t$uid\\t$uid\\nVmRSS:\\t   51200 kB\\n\");\n\
+         }\n\
+         echo json_encode(Vigie\\Agent\\resource_facts($argv[4], $argv[2], $argv[3]));\n",
+    )
+    .unwrap();
+    let agent = Path::new(env!("CARGO_MANIFEST_DIR")).join("agent/php/vigie-agent.php");
+    let run = |proc: &Path| -> serde_json::Value {
+        let out = Command::new(&php[0])
+            .args(&php[1..])
+            .arg(&script)
+            .arg(&agent)
+            .arg(proc)
+            .arg(&cgroup)
+            .arg(&base)
+            .output()
+            .expect("php");
+        assert!(out.status.success(), "{out:?}");
+        serde_json::from_slice(&out.stdout).expect("JSON")
+    };
+
+    let with_limit = run(&proc_dir);
+    assert_eq!(with_limit["ram_used_mb"], 100, "{with_limit}");
+    assert_eq!(with_limit["ram_limit_mb"], 200, "{with_limit}");
+
+    // Limite « max » : le cgroup est écarté, les VmRSS (50 Mo) le remplacent.
+    std::fs::write(cgroup.join("compte/memory.max"), "max\n").unwrap();
+    let fallback = run(&proc_dir);
+    assert_eq!(fallback["ram_used_mb"], 50, "{fallback}");
+    assert!(fallback.get("ram_limit_mb").is_none(), "{fallback}");
+
+    // /proc absent : aucune mémoire, ni valeur par défaut.
+    let none = run(&base.join("absent"));
+    assert!(none.get("ram_used_mb").is_none(), "{none}");
+    assert!(none.get("ram_limit_mb").is_none(), "{none}");
+    let _ = std::fs::remove_dir_all(&base);
+}

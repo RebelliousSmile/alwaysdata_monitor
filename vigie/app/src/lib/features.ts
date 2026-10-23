@@ -74,7 +74,7 @@ export const FEATURES: Record<FeatureKey, Feature> = {
   compte: {
     title: 'Ressources du compte',
     shows: 'La mémoire, la charge processeur et le disque du compte d’hébergement, partagés entre ses sites.',
-    missing: 'Un relevé des ressources du compte chez l’hébergeur, que le veilleur ne fait pas.',
+    missing: 'Un relevé de l’agent PHP de ce site : il se demande par « "resources": true » dans sa config.json, sans accès à l’hébergeur.',
   },
   ajouter: {
     title: 'Ajouter un site',

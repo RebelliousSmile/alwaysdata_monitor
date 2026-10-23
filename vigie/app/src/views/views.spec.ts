@@ -292,6 +292,29 @@ describe('Trafic', () => {
     expect(wrapper.text()).toContain('Ressources du compte')
   })
 
+  it('Ressources du compte : relevé de l’agent quand il y en a un, sinon pas encore disponible', async () => {
+    const veilleur = mockVeilleur()
+    const agent = veilleur.data.sites['site-a']?.agent
+    if (!agent) throw new Error('agent de site-a attendu')
+    agent.facts = {
+      php: '8.3.12',
+      ram_used_mb: 512,
+      ram_limit_mb: 2048,
+      load_1: 0.5,
+      load_5: 1,
+      load_15: 1.5,
+      disk_used_gb: 12.5,
+      disk_total_gb: 50,
+    }
+    const { wrapper } = await open('/s/site-a/sante/ressources')
+    const account = wrapper.get('[data-account]').text()
+    expect(account).toContain('Ressources du compte')
+    expect(wrapper.get('[data-resource="ram"]').text()).toMatch(/512 Mo\s+sur 2 Go \(25 %\)/)
+    expect(wrapper.get('[data-resource="load"]').text()).toContain('0,5 · 1 · 1,5')
+    expect(wrapper.get('[data-resource="disk"]').text()).toMatch(/12,5 Go\s+sur 50 Go \(25 %\)/)
+    expect(wrapper.find('[data-notyet]').exists()).toBe(false)
+  })
+
   it.each(['/s/site-b/trafic', '/s/site-b/trafic/blocages', '/s/site-b/sante/ressources'])(
     'site sans source de logs (404) : %s pas encore disponible',
     async (path) => {

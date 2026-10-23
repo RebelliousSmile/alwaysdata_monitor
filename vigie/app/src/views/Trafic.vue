@@ -22,6 +22,7 @@ import {
   overThreshold,
   reasonLabel,
 } from '@/lib/logs'
+import { accountResources, formatGb, formatLoad, formatMb, percent } from '@/lib/resources'
 import { useSiteData } from '@/lib/site-data'
 import type { Tone } from '@/lib/state'
 import { formatHour, formatSpan, formatWhen } from '@/lib/time'
@@ -35,7 +36,7 @@ import { formatHour, formatSpan, formatWhen } from '@/lib/time'
 type Screen = 'trafic' | 'blocages' | 'ressources'
 
 const route = useRoute()
-const { site, to, sites } = useSiteData()
+const { site, to, sites, detail } = useSiteData()
 
 const screen = computed<Screen>(() => {
   const name = route.name
@@ -66,6 +67,9 @@ const featureLink = computed<RouteLocationRaw | undefined>(() => {
   const target = FEATURES[feature.value].link
   return target ? to(target.name) : undefined
 })
+
+/** Mémoire, charge et disque relevés par l'agent PHP, s'il est configuré pour. */
+const account = computed(() => accountResources(detail.value?.agent?.facts))
 
 const logs = computed(() => sites.logs[site.value]?.data)
 const analysis = computed(() => logs.value?.analysis ?? null)
@@ -370,8 +374,61 @@ const busiest = computed(() => Math.max(1, ...load.value.map((h) => h.requests))
     feature="htaccess"
     compact
   />
+  <section
+    v-if="screen === 'ressources' && account"
+    aria-labelledby="compte-title"
+    class="flex flex-col gap-2 rounded-card border border-line bg-surface p-3"
+    data-account
+  >
+    <h2
+      id="compte-title"
+      class="text-md font-semibold"
+    >
+      Ressources du compte
+    </h2>
+    <p class="text-xs text-text-3">
+      Dernier rapport de l’agent {{ detail?.agent?.last_report_at ? formatWhen(detail.agent.last_report_at, now) : '' }}
+    </p>
+    <dl class="grid grid-cols-1 gap-2 text-sm">
+      <div
+        v-if="account.ram"
+        data-resource="ram"
+      >
+        <dt class="text-xs uppercase tracking-wider text-text-3">
+          Mémoire
+        </dt>
+        <dd>
+          {{ formatMb(account.ram.used) }}
+          <template v-if="account.ram.limit">
+            sur {{ formatMb(account.ram.limit) }} ({{ percent(account.ram.used, account.ram.limit) }} %)
+          </template>
+          <template v-else>
+            utilisés, limite non lue par l’agent
+          </template>
+        </dd>
+      </div>
+      <div
+        v-if="account.load"
+        data-resource="load"
+      >
+        <dt class="text-xs uppercase tracking-wider text-text-3">
+          Charge de la machine
+        </dt>
+        <dd>{{ account.load.map(formatLoad).join(' · ') }} <span class="text-text-3">(1, 5 et 15 minutes, partagée avec les autres comptes)</span></dd>
+      </div>
+      <div
+        v-if="account.disk"
+        data-resource="disk"
+      >
+        <dt class="text-xs uppercase tracking-wider text-text-3">
+          Disque
+        </dt>
+        <dd>{{ formatGb(account.disk.used) }} sur {{ formatGb(account.disk.total) }} ({{ percent(account.disk.used, account.disk.total) }} %)</dd>
+      </div>
+    </dl>
+  </section>
   <NotYet
-    v-if="screen === 'ressources'"
+    v-else-if="screen === 'ressources'"
     feature="compte"
     compact
   />
