@@ -608,8 +608,8 @@ class HtaccessServiceTest extends TestCase
 
     public function testBlockUserAgentsWritesAllRulesOnceAndSkipsExisting(): void
     {
-        $this->write("RewriteEngine on
-");
+        $this->write('RewriteEngine on
+');
         $this->service()->blockUserAgent('GPTBot');
         $backupsBefore = count(glob($this->tmpFile . '.*.bak') ?: []);
 
@@ -622,8 +622,8 @@ class HtaccessServiceTest extends TestCase
 
     public function testBlockUserAgentsWithNothingNewLeavesFileUntouched(): void
     {
-        $this->write("RewriteEngine on
-");
+        $this->write('RewriteEngine on
+');
         $this->service()->blockUserAgent('GPTBot');
         $before = file_get_contents($this->tmpFile);
 
