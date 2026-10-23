@@ -5,6 +5,8 @@
  *
  * Called nightly by Alwaysdata cron:
  *   https://site-a.example/module/sc_alwaysdata/cron?token={SC_ALWAYSDATA_CRON_TOKEN}
+ *   (or, preferred, without the query string and with the header
+ *   X-Cron-Token: {SC_ALWAYSDATA_CRON_TOKEN}, e.g. curl -H "X-Cron-Token: ...")
  *
  * @author    Scriptami
  * @copyright Scriptami
@@ -15,6 +17,7 @@ declare(strict_types=1);
 
 use ScAlwaysdata\Entity\DailyStat;
 use ScAlwaysdata\Service\CrawlerAnalyserService;
+use ScAlwaysdata\Service\CronTokenGuard;
 use ScAlwaysdata\Service\HttpLogParserService;
 use ScAlwaysdata\Service\LogReaderService;
 use ScAlwaysdata\Service\PhpErrorAnalyserService;
@@ -32,10 +35,10 @@ class Sc_alwaysdataCronModuleFrontController extends ModuleFrontController
 
     public function initContent(): void
     {
-        $token = (string) Tools::getValue('token');
+        $token = CronTokenGuard::provided($_SERVER, (string) Tools::getValue('token'));
         $storedToken = (string) Configuration::get(sc_alwaysdata::CONFIG_CRON_TOKEN);
 
-        if ($storedToken === '' || !hash_equals($storedToken, $token)) {
+        if (!CronTokenGuard::isValid($storedToken, $token)) {
             $this->responseData = ['error' => 'Forbidden'];
             $this->responseHttpCode = 403;
 

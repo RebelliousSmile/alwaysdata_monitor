@@ -8,6 +8,8 @@
  * (moyennes, pics, séries temporelles) consultables depuis l'onglet Ressources.
  *
  * URL: https://site-a.example/module/sc_alwaysdata/cron_resources_sample?token={SC_ALWAYSDATA_CRON_TOKEN}
+ *   (or, preferred, without the query string and with the header
+ *   X-Cron-Token: {SC_ALWAYSDATA_CRON_TOKEN}, e.g. curl -H "X-Cron-Token: ...")
  *
  * @author    Scriptami
  * @copyright Scriptami
@@ -17,6 +19,7 @@
 declare(strict_types=1);
 
 use ScAlwaysdata\Entity\ResourceSample;
+use ScAlwaysdata\Service\CronTokenGuard;
 use ScAlwaysdata\Service\ResourceCollectorService;
 
 class Sc_alwaysdataCron_resources_sampleModuleFrontController extends ModuleFrontController
@@ -32,10 +35,10 @@ class Sc_alwaysdataCron_resources_sampleModuleFrontController extends ModuleFron
 
     public function initContent(): void
     {
-        $token = (string) Tools::getValue('token');
+        $token = CronTokenGuard::provided($_SERVER, (string) Tools::getValue('token'));
         $storedToken = (string) Configuration::get(sc_alwaysdata::CONFIG_CRON_TOKEN);
 
-        if ($storedToken === '' || !hash_equals($storedToken, $token)) {
+        if (!CronTokenGuard::isValid($storedToken, $token)) {
             $this->responseData = ['error' => 'Forbidden'];
             $this->responseHttpCode = 403;
 

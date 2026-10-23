@@ -11,6 +11,8 @@
  * Fréquence recommandée : 1 fois par jour à 02h15 (après le cron stats).
  *
  * URL: https://site-a.example/module/sc_alwaysdata/cron_resources?token={SC_ALWAYSDATA_CRON_TOKEN}
+ *   (or, preferred, without the query string and with the header
+ *   X-Cron-Token: {SC_ALWAYSDATA_CRON_TOKEN}, e.g. curl -H "X-Cron-Token: ...")
  *
  * @author    Scriptami
  * @copyright Scriptami
@@ -20,6 +22,7 @@
 declare(strict_types=1);
 
 use ScAlwaysdata\Entity\DailyResource;
+use ScAlwaysdata\Service\CronTokenGuard;
 
 class Sc_alwaysdataCron_resourcesModuleFrontController extends ModuleFrontController
 {
@@ -34,10 +37,10 @@ class Sc_alwaysdataCron_resourcesModuleFrontController extends ModuleFrontContro
 
     public function initContent(): void
     {
-        $token = (string) Tools::getValue('token');
+        $token = CronTokenGuard::provided($_SERVER, (string) Tools::getValue('token'));
         $storedToken = (string) Configuration::get(sc_alwaysdata::CONFIG_CRON_TOKEN);
 
-        if ($storedToken === '' || !hash_equals($storedToken, $token)) {
+        if (!CronTokenGuard::isValid($storedToken, $token)) {
             $this->responseData = ['error' => 'Forbidden'];
             $this->responseHttpCode = 403;
 
