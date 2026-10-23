@@ -1114,7 +1114,9 @@ fn memory_comes_from_the_cgroup_then_from_rss_and_is_absent_otherwise() {
     std::fs::write(
         &script,
         "<?php\nrequire $argv[1];\n$uid = posix_geteuid();\n\
+         if (is_dir($argv[2] . '/42')) {\n\
          file_put_contents($argv[2] . '/42/status', \"Name:\\tphp\\nUid:\\t$uid\\t$uid\\nVmRSS:\\t   51200 kB\\n\");\n\
+         }\n\
          echo json_encode(Vigie\\Agent\\resource_facts($argv[4], $argv[2], $argv[3]));\n",
     )
     .unwrap();
