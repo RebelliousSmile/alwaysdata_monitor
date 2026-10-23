@@ -229,6 +229,7 @@ fn site(base: &str) -> Site {
         agent_silence: 900,
         logs: None,
         inventory: None,
+        custom_checks: Vec::new(),
     }
 }
 
@@ -646,5 +647,151 @@ fn a_readable_password_file_is_refused_before_any_connection() {
     assert!(
         matches!(&accepted, Err(e) if e.kind() == std::io::ErrorKind::WouldBlock),
         "{accepted:?}"
+    );
+}
+
+// --- Contrôles personnalisés (#33) -----------------------------------------
+
+use vigie::config::{CustomCheck, CustomSeverity};
+
+fn rule(id: &str, path: &str) -> CustomCheck {
+    CustomCheck {
+        id: id.into(),
+        path: path.into(),
+        status: 200,
+        contains: None,
+        absent: None,
+        severity: CustomSeverity::Warning,
+    }
+}
+
+/// Le contrôle `custom` seul, avec ces règles.
+fn run_custom(fixture: &Fixture, rules: Vec<CustomCheck>) -> Result<Vec<Finding>, CheckError> {
+    let options = fixture.options();
+    let http = Http::new(&options.trust, options.request_timeout);
+    let ctx = Ctx {
+        http: &http,
+        trust: &options.trust,
+        request_timeout: options.request_timeout,
+        deadline: Instant::now() + options.check_budget,
+        now: T0,
+    };
+    let site = Site {
+        custom_checks: rules,
+        ..site(&fixture.base())
+    };
+    CheckKind::Custom.run(&site, &ctx)
+}
+
+#[test]
+fn conforming_rules_give_no_finding() {
+    let fixture = Fixture::start(Mode::Healthy);
+    let mut kb = rule("kb", "/kb/");
+    kb.contains = Some("/problemes/".into());
+    kb.absent = Some("Fatal error".into());
+    let mut missing = rule("retiree", "/ancienne-page");
+    missing.status = 404;
+    assert_eq!(
+        run_custom(&fixture, vec![rule("accueil", "/"), kb, missing]),
+        Ok(Vec::new())
+    );
+}
+
+#[test]
+fn a_failing_rule_gives_one_finding_keyed_by_its_id_and_hides_no_other_rule() {
+    let fixture = Fixture::start(Mode::Incident);
+    let mut kb = rule("kb", "/kb/");
+    kb.contains = Some("/problemes/".into());
+    kb.severity = CustomSeverity::Critical;
+    let mut home_forbids = rule("accueil", "/");
+    home_forbids.absent = Some("Base de connaissances".into());
+    let healthy = rule("sain", "/");
+
+    let findings = run_custom(&fixture, vec![kb, healthy, home_forbids]).expect("concluant");
+
+    let keys: Vec<_> = findings.iter().map(|f| f.key.as_str()).collect();
+    assert_eq!(keys, ["kb", "accueil"], "{findings:?}");
+    assert!(findings.iter().all(|f| f.check == "custom"));
+    assert_eq!(findings[0].severity, Severity::Critical);
+    assert_eq!(findings[1].severity, Severity::Warning);
+    assert!(
+        findings[0].detail.contains("« /problemes/ » absent"),
+        "{findings:?}"
+    );
+    assert!(
+        findings[1]
+            .detail
+            .contains("« Base de connaissances » présent"),
+        "{findings:?}"
+    );
+}
+
+#[test]
+fn an_unexpected_status_is_reported_with_both_codes() {
+    let fixture = Fixture::start(Mode::Healthy);
+    let findings = run_custom(&fixture, vec![rule("panier", "/panier")]).expect("concluant");
+    assert_eq!(findings.len(), 1, "{findings:?}");
+    assert_eq!(findings[0].key, "panier");
+    assert!(
+        findings[0].detail.contains("répond 404, 200 attendu"),
+        "{findings:?}"
+    );
+}
+
+#[test]
+fn an_unreachable_site_gives_one_finding_per_rule() {
+    let port = {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        listener.local_addr().expect("adresse").port()
+    };
+    let fixture = Fixture::start(Mode::Healthy);
+    let options = fixture.options();
+    let http = Http::new(&options.trust, options.request_timeout);
+    let ctx = Ctx {
+        http: &http,
+        trust: &options.trust,
+        request_timeout: options.request_timeout,
+        deadline: Instant::now() + options.check_budget,
+        now: T0,
+    };
+    let site = Site {
+        custom_checks: vec![rule("a", "/a"), rule("b", "/b")],
+        ..site(&format!("https://127.0.0.1:{port}"))
+    };
+
+    let findings = CheckKind::Custom.run(&site, &ctx).expect("concluant");
+
+    assert_eq!(
+        findings.iter().map(|f| f.key.as_str()).collect::<Vec<_>>(),
+        ["a", "b"]
+    );
+    assert!(
+        findings.iter().all(|f| f.detail.contains("injoignable")),
+        "{findings:?}"
+    );
+}
+
+#[test]
+fn a_site_without_rule_runs_no_custom_check_and_a_site_with_one_does() {
+    let fixture = Fixture::start(Mode::Incident);
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut config = config(dir.path(), &fixture.base());
+    let options = fixture.options();
+    let mail = MemoryNotifier::new();
+
+    let summary = tick::run_with(&config, T0, &options, &mail).expect("sans règle");
+    assert_eq!(summary.checks_run, 5, "{summary:?}");
+    assert!(!open_keys(&config).iter().any(|k| k.contains("/custom/")));
+
+    let mut kb = rule("kb", "/kb/");
+    kb.contains = Some("/problemes/".into());
+    config.sites[0].custom_checks = vec![kb];
+    let summary = tick::run_with(&config, T0 + 300, &options, &mail).expect("avec règle");
+    // tls et headers attendent leur heure ; custom s'ajoute aux trois autres.
+    assert_eq!(summary.checks_run, 4, "{summary:?}");
+    assert!(
+        open_keys(&config).contains(&"site-a/custom/kb".to_string()),
+        "{:?}",
+        open_keys(&config)
     );
 }

@@ -73,6 +73,7 @@ fn site(id: &str, kind: SiteKind, inventory: bool) -> Site {
         agent_silence: 900,
         logs: None,
         inventory: inventory.then(|| SiteInventory::new(&[InventorySource::AgentPhp])),
+        custom_checks: Vec::new(),
     }
 }
 

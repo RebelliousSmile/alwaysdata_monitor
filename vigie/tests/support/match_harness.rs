@@ -42,6 +42,7 @@ pub fn site(id: &str, kind: SiteKind, sources: &[InventorySource]) -> Site {
         agent_silence: 100 * 365 * 86_400,
         logs: None,
         inventory: (!sources.is_empty()).then(|| SiteInventory::new(sources)),
+        custom_checks: Vec::new(),
     }
 }
 

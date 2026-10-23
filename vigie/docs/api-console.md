@@ -256,7 +256,8 @@ Forme commune à toutes les routes qui renvoient un incident :
 - `checks` : les contrôles que le registre des capacités (`capability.rs`,
   issue #4) surveille pour ce site, dans son ordre : d'abord les contrôles
   externes applicables au type du site (`content`, `installer` hors
-  `generic`, `exposed`, `tls`, `headers`), puis, si un agent est déclaré sur
+  `generic`, `exposed`, `tls`, `headers`, puis `custom` si le site déclare au
+  moins une règle `[[sites.custom_checks]]`), puis, si un agent est déclaré sur
   un site au runtime effectif `php`, `heartbeat` ; enfin, dès leur premier
   passage, `agent:integrity` (référence posée), les familles `agent:*` admises
   pour le site, `logs` (site avec une source) et `typology` (clé d'agent sur

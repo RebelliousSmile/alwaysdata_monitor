@@ -115,6 +115,7 @@ au plus, User-Agent `vigie/<version>`, redirections limitées à l'hôte du site
 | `exposed` | Critique si `.env`, `.git/HEAD`, une sauvegarde de `wp-config.php` ou un dump SQL courant est servi. Une URL témoin aléatoire est interrogée d'abord : une réponse identique au témoin, ou sans la signature attendue, n'est pas un constat |
 | `tls` | Avertissement à moins de 14 jours de l'expiration, critique à moins de 3 jours ou si le nom n'est pas couvert |
 | `headers` | Information : HSTS, `X-Content-Type-Options`, `X-Frame-Options` ou `frame-ancestors`. Montré dans `status`, jamais envoyé par e-mail |
+| `custom` | Une règle `[[sites.custom_checks]]` par page à contrôler (statut attendu, texte présent, texte absent) ; un constat par règle en échec, de clé son `id`, d'avertissement par défaut. Sans règle, le contrôle ne tourne pas |
 
 Un site injoignable donne un seul constat `unreachable` : les autres contrôles
 du passage ne sont pas lancés, pour ne pas produire de constats fantômes.

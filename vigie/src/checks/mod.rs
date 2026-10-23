@@ -1,9 +1,10 @@
 //! Contrôles externes : ce que n'importe qui voit du site depuis Internet.
 //!
-//! Un `enum` plutôt qu'un trait : cinq contrôles connus à la compilation, une
+//! Un `enum` plutôt qu'un trait : six contrôles connus à la compilation, une
 //! même signature, et un registre qui se lit d'un coup d'œil.
 
 mod content;
+mod custom;
 mod exposed;
 mod headers;
 pub mod heartbeat;
@@ -27,17 +28,20 @@ pub enum CheckKind {
     Exposed,
     Tls,
     Headers,
+    /// Règles `[[sites.custom_checks]]` du site.
+    Custom,
 }
 
 impl CheckKind {
     /// Ordre d'exécution : `content` d'abord, car un site injoignable fait
     /// sauter les autres contrôles.
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::Content,
         Self::Installer,
         Self::Exposed,
         Self::Tls,
         Self::Headers,
+        Self::Custom,
     ];
 
     pub fn name(self) -> &'static str {
@@ -47,6 +51,7 @@ impl CheckKind {
             Self::Exposed => "exposed",
             Self::Tls => "tls",
             Self::Headers => "headers",
+            Self::Custom => "custom",
         }
     }
 
@@ -80,6 +85,7 @@ impl CheckKind {
             Self::Exposed => exposed::run(site, ctx).map(plain),
             Self::Tls => tls::run(site, ctx),
             Self::Headers => headers::run(site, ctx).map(plain),
+            Self::Custom => custom::run(site, ctx).map(plain),
         }
     }
 }

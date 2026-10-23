@@ -95,10 +95,6 @@ function cadence(check: Check): string | undefined {
     Voir les failles des composants
   </RouterLink>
   <NotYet
-    feature="personnalises"
-    compact
-  />
-  <NotYet
     feature="file"
     compact
   />

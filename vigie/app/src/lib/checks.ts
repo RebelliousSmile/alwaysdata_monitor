@@ -4,7 +4,7 @@ import type { State, Tone } from '@/lib/state'
 // Libellés et regroupements des contrôles et des incidents du veilleur.
 
 /** Contrôles externes, dans l'ordre de l'API. */
-export const EXTERNAL_CHECKS: readonly string[] = ['content', 'installer', 'exposed', 'tls', 'headers']
+export const EXTERNAL_CHECKS: readonly string[] = ['content', 'installer', 'exposed', 'tls', 'headers', 'custom']
 
 const LABELS: Record<string, string> = {
   content: 'Contenu de la page',
@@ -12,6 +12,7 @@ const LABELS: Record<string, string> = {
   exposed: 'Fichiers exposés',
   tls: 'Certificat TLS',
   headers: 'En-têtes de sécurité',
+  custom: 'Pages personnalisées',
   heartbeat: 'Silence de l’agent',
   'agent:integrity': 'Intégrité des fichiers critiques',
   'agent:critical-file': 'Fichiers critiques',

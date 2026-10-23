@@ -124,6 +124,7 @@ fn site(i: usize) -> Site {
         agent_silence: 900,
         logs: None,
         inventory: Some(SiteInventory::new(&[InventorySource::Ci])),
+        custom_checks: Vec::new(),
     }
 }
 

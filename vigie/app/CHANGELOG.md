@@ -10,6 +10,7 @@ Prérequis de publication : le veilleur du VPS sert les routes `components`,
 retard, les deux écrans restent « pas encore disponible » (404).
 
 - Thème clair (#34) : choix Sombre ou Clair dans les réglages, mémorisé sur l'appareil, appliqué avant l'affichage ; sombre par défaut. Jetons dans `tokens-light.css` (mêmes noms que `tokens.css`, qui reste la copie de la maquette), contrastes vérifiés par les tests : texte au moins 4,5:1, contours de contrôle au moins 3:1. L'encart « Thème clair, pas encore disponible » disparaît. Le fond de la fenêtre native reste sombre une fraction de seconde au lancement.
+- Contrôles personnalisés (#33) : le contrôle `custom` du veilleur s'affiche avec les contrôles externes, libellé « Pages personnalisées » ; l'encart « pas encore disponible » disparaît. Les règles se déclarent dans `config.toml` sur le VPS, jamais depuis la console.
 - Failles (#21) : composants du site et failles connues rapprochées, par
   groupe d'alias, avec gravité, KEV, EPSS, versions corrigées, dérogation
   en cours et source de l'inventaire ; « Afficher plus » sur un passage

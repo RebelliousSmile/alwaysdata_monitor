@@ -112,6 +112,8 @@ pub enum Needs {
     /// Au moins une source d'inventaire déclarée ([`inventory_sources`]) :
     /// condition du contrôle `vulns` (F7). La clé d'inventaire n'y entre pas.
     InventorySource,
+    /// Au moins une règle `[[sites.custom_checks]]` déclarée.
+    CustomRules,
     /// Contrôle du veilleur lui-même : jamais pour un site de la
     /// configuration, seulement pour [`WATCHER_SITE`].
     Watcher,
@@ -164,12 +166,13 @@ pub const TYPOLOGY_KEY: &str = "agent-runtime";
 
 impl Control {
     /// Tous les contrôles, dans l'ordre d'affichage.
-    pub const ALL: [Self; 15] = [
+    pub const ALL: [Self; 16] = [
         Self::Check(CheckKind::Content),
         Self::Check(CheckKind::Installer),
         Self::Check(CheckKind::Exposed),
         Self::Check(CheckKind::Tls),
         Self::Check(CheckKind::Headers),
+        Self::Check(CheckKind::Custom),
         Self::Heartbeat,
         Self::Integrity,
         Self::Agent(AgentFamily::Root),
@@ -206,9 +209,11 @@ impl Control {
         match self {
             Self::Check(kind) => match kind {
                 CheckKind::Installer => &[SiteKind::Wordpress, SiteKind::Prestashop],
-                CheckKind::Content | CheckKind::Exposed | CheckKind::Tls | CheckKind::Headers => {
-                    ALL_CMS
-                }
+                CheckKind::Content
+                | CheckKind::Exposed
+                | CheckKind::Tls
+                | CheckKind::Headers
+                | CheckKind::Custom => ALL_CMS,
             },
             Self::Agent(family) => family.cms(),
             Self::Heartbeat
@@ -223,6 +228,7 @@ impl Control {
     /// Condition d'existence, en plus du CMS.
     pub fn needs(self) -> Needs {
         match self {
+            Self::Check(CheckKind::Custom) => Needs::CustomRules,
             Self::Check(_) => Needs::Nothing,
             Self::Heartbeat | Self::Agent(_) => Needs::PhpAgent,
             Self::Integrity => Needs::PhpAgentAndBaseline,
@@ -246,6 +252,7 @@ impl Control {
             Needs::LogSource => site.logs.as_ref().is_some_and(|l| l.source.is_some()),
             Needs::AgentWithoutPhp => ctx.agent && !php,
             Needs::InventorySource => !inventory_sources(site).is_empty(),
+            Needs::CustomRules => !site.custom_checks.is_empty(),
             Needs::Watcher => false,
         }
     }

@@ -37,6 +37,7 @@ fn site(id: &str, logs: Option<SiteLogs>) -> Site {
         agent_silence: 900,
         logs,
         inventory: None,
+        custom_checks: Vec::new(),
     }
 }
 
