@@ -12,6 +12,7 @@
     "opened_at",
     "severity",
     "site",
+    "snoozed_until",
     "state"
   ],
   "GET /api/v1/overview": [
@@ -38,6 +39,7 @@
     "sites[].worst.opened_at",
     "sites[].worst.severity",
     "sites[].worst.site",
+    "sites[].worst.snoozed_until",
     "sites[].worst.state"
   ],
   "GET /api/v1/settings": [
@@ -99,6 +101,7 @@
     "open_incidents[].opened_at",
     "open_incidents[].severity",
     "open_incidents[].site",
+    "open_incidents[].snoozed_until",
     "open_incidents[].state",
     "runtime",
     "state",
@@ -132,6 +135,7 @@
     "incidents[].opened_at",
     "incidents[].severity",
     "incidents[].site",
+    "incidents[].snoozed_until",
     "incidents[].state",
     "next_cursor",
     "since",
@@ -244,6 +248,23 @@
     "opened_at",
     "severity",
     "site",
+    "snoozed_until",
+    "state"
+  ],
+  "POST /api/v1/incidents/{id}/snooze/{duration}": [
+    "acked_at",
+    "check",
+    "close_notified_at",
+    "closed_at",
+    "detail",
+    "id",
+    "key",
+    "last_reminder_at",
+    "open_notified_at",
+    "opened_at",
+    "severity",
+    "site",
+    "snoozed_until",
     "state"
   ],
   "POST /api/v1/pair": [

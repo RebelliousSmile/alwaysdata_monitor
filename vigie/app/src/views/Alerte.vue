@@ -2,10 +2,9 @@
 import { computed, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import DataGate from '@/components/DataGate.vue'
-import NotYet from '@/components/NotYet.vue'
 import ScreenTitle from '@/components/ScreenTitle.vue'
 import StatusChip from '@/components/StatusChip.vue'
-import type { ApiError, Incident } from '@/lib/api'
+import type { ApiError, Incident, SnoozeDuration } from '@/lib/api'
 import { SEVERITY_LABEL, SEVERITY_TONE, checkLabel, factEntries } from '@/lib/checks'
 import { now } from '@/lib/clock'
 import { useSiteData } from '@/lib/site-data'
@@ -13,7 +12,7 @@ import type { Tone } from '@/lib/state'
 import { formatWhen } from '@/lib/time'
 
 // Détail d'un incident : état, chronologie, constat, faits de l'agent, et
-// la seule écriture de la console, Acquitter.
+// les deux écritures de la console, Acquitter et la sourdine des relances.
 const route = useRoute()
 const { to, sites, detail } = useSiteData()
 
@@ -44,6 +43,12 @@ const chip = computed<{ tone: Tone; label: string } | undefined>(() => {
   return { tone: SEVERITY_TONE[i.severity], label: 'En cours' }
 })
 
+/** Fin de la sourdine, tant qu'elle n'est pas passée. */
+const snoozedUntil = computed(() => {
+  const until = incident.value?.snoozed_until ?? null
+  return until !== null && until > now.value ? until : null
+})
+
 const timeline = computed(() => {
   const i = incident.value
   if (!i) return []
@@ -52,6 +57,7 @@ const timeline = computed(() => {
     ['E-mail d’ouverture', i.open_notified_at],
     ['Dernière relance', i.last_reminder_at],
     ['Acquitté', i.acked_at],
+    ['Relances en sourdine jusqu’à', snoozedUntil.value],
     ['Fermé', i.closed_at],
     ['E-mail de clôture', i.close_notified_at],
   ]
@@ -75,6 +81,28 @@ const ackError = ref<string | null>(null)
 watch(id, () => {
   ackError.value = null
 })
+
+const snoozing = ref(false)
+
+const SNOOZES: { duration: SnoozeDuration; label: string }[] = [
+  { duration: '24h', label: 'Sourdine 24 h' },
+  { duration: '7d', label: 'Sourdine 7 jours' },
+]
+
+async function snooze(duration: SnoozeDuration): Promise<void> {
+  if (id.value === null) return
+  snoozing.value = true
+  ackError.value = null
+  const failure = await sites.snooze(id.value, duration)
+  snoozing.value = false
+  if (failure) ackError.value = SNOOZE_ERRORS[failure.kind] ?? `Sourdine impossible : ${failure.message}`
+}
+
+const SNOOZE_ERRORS: Partial<Record<ApiError['kind'], string>> = {
+  conflict: 'Cet incident est déjà fermé : il n’y a plus de relance à faire taire.',
+  offline: 'Le veilleur ne répond pas : la sourdine n’est pas posée.',
+  not_found: 'Le veilleur ne connaît plus cet incident.',
+}
 
 const ACK_ERRORS: Partial<Record<ApiError['kind'], string>> = {
   conflict: 'Cet incident est déjà fermé : il n’y a plus rien à acquitter.',
@@ -213,6 +241,28 @@ async function ack(): Promise<void> {
       >
         Acquitter arrête les relances ; l’incident reste listé jusqu’à sa fermeture par le veilleur.
       </p>
+      <div
+        v-if="incident.state === 'open'"
+        class="grid grid-cols-2 gap-2"
+      >
+        <button
+          v-for="option in SNOOZES"
+          :key="option.duration"
+          type="button"
+          :data-snooze="option.duration"
+          class="flex min-h-[48px] items-center justify-center rounded-control border border-line font-semibold text-text-2 disabled:opacity-60"
+          :disabled="snoozing"
+          @click="snooze(option.duration)"
+        >
+          {{ option.label }}
+        </button>
+      </div>
+      <p
+        v-if="incident.state === 'open'"
+        class="text-xs text-text-3"
+      >
+        La sourdine ne fait taire que les relances ; les e-mails d’ouverture et de clôture partent toujours.
+      </p>
       <p
         v-if="ackError"
         role="alert"
@@ -222,8 +272,4 @@ async function ack(): Promise<void> {
       </p>
     </article>
   </DataGate>
-  <NotYet
-    feature="sourdine"
-    compact
-  />
 </template>

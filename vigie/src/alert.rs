@@ -512,6 +512,7 @@ mod tests {
             open_notified_at: None,
             close_notified_at: None,
             last_reminder_at: None,
+            snoozed_until: None,
             close_reason: Some(CloseReason::Resolved),
         }
     }

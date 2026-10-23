@@ -126,7 +126,27 @@ pub struct Incident {
     pub close_notified_at: Option<i64>,
     #[serde(deserialize_with = "nullable")]
     pub last_reminder_at: Option<i64>,
+    #[serde(deserialize_with = "nullable")]
+    pub snoozed_until: Option<i64>,
     pub state: IncidentState,
+}
+
+/// Durées de sourdine que le veilleur admet : rien d'autre ne part.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+pub enum Snooze {
+    #[serde(rename = "24h")]
+    Day,
+    #[serde(rename = "7d")]
+    Week,
+}
+
+impl Snooze {
+    fn segment(self) -> &'static str {
+        match self {
+            Snooze::Day => "24h",
+            Snooze::Week => "7d",
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -721,6 +741,16 @@ impl Client {
     pub async fn ack(&self, id: i64) -> Result<Incident, ApiError> {
         self.read(Method::POST, &["incidents", &id.to_string(), "ack"], None)
             .await
+    }
+
+    /// Fait taire les rappels d'un incident : `24h` ou `7d` seulement.
+    pub async fn snooze(&self, id: i64, duration: Snooze) -> Result<Incident, ApiError> {
+        self.read(
+            Method::POST,
+            &["incidents", &id.to_string(), "snooze", duration.segment()],
+            None,
+        )
+        .await
     }
 
     pub async fn settings(&self) -> Result<Settings, ApiError> {
