@@ -74,5 +74,5 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - run: composer install --no-interaction --no-progress --prefer-dist
-      # Périmètre et règles : .php-cs-fixer.dist.php (src/, controllers/, upgrade/ et sc_alwaysdata.php).
+      # Périmètre et règles : .php-cs-fixer.dist.php (src/, controllers/, upgrade/, tests/ et sc_alwaysdata.php).
       - run: vendor/bin/php-cs-fixer fix --dry-run --diff
