@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Security
+- Cron front controllers accept the token in an `X-Cron-Token` header (checked first) as well as the `token` query parameter, which stays accepted so scheduled URLs keep working; the header keeps the secret out of access logs and `Referer` values (`CronTokenGuard`)
 - `rustls-webpki` 0.103.16, `webpki-roots` and `webpki-root-certs` 1.0.10 in `vigie/Cargo.lock` and `vigie/app/src-tauri/Cargo.lock` (RUSTSEC-2026-0381, -0382, -0383)
 
 ### Added
