@@ -6,7 +6,7 @@ import {
 } from 'vue-router'
 import type { FeatureKey } from '@/lib/features'
 
-// Écrans du HANDOFF §3, plus /appairage, /reglages/emails, et les écrans des
+// Écrans du HANDOFF §3, plus /appairage, et les écrans des
 // failles (#21) : /s/:site/failles et /reglages/sources.
 
 export type NavKey = 'a-traiter' | 'trafic' | 'erreurs' | 'sante'
@@ -102,12 +102,6 @@ export const routes: RouteRecordRaw[] = [
     name: 'reglages',
     component: () => import('@/views/Reglages.vue'),
     meta: { title: 'Réglages', back: 'sites' },
-  },
-  {
-    path: '/reglages/emails',
-    name: 'emails',
-    component: NotYetView,
-    meta: { title: 'E-mails', back: 'reglages', feature: 'emails' },
   },
   {
     path: '/reglages/sources',

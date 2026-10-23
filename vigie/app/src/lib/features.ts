@@ -12,7 +12,6 @@ export type FeatureKey =
   | 'htaccess'
   | 'compte'
   | 'ajouter'
-  | 'emails'
   | 'file'
   | 'wordpress'
 
@@ -82,12 +81,6 @@ export const FEATURES: Record<FeatureKey, Feature> = {
     missing:
       'Ajouter un site change la confiance accordée au veilleur : il se déclare dans config.toml sur le VPS, puis sa clé d’agent par « vigie site add ».',
     link: { label: 'Revenir à mes sites', name: 'sites' },
-  },
-  emails: {
-    title: 'Modèles d’e-mail',
-    shows: 'L’aperçu des e-mails envoyés : alerte immédiate, e-mail du matin, « Vigie ne voit plus le site ».',
-    missing: 'Le veilleur n’expose pas ses modèles d’e-mail à la console.',
-    link: { label: 'Revenir aux réglages', name: 'reglages' },
   },
   file: {
     title: 'File d’écriture',

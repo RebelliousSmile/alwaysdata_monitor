@@ -5,6 +5,8 @@ Le veilleur a son propre historique.
 
 ## Non publiée
 
+- Aperçu des e-mails (#53) : l'écran Alerte liste les e-mails réellement envoyés pour l'incident (ouverture, relances, clôture), à déplier. Texte recomposé par le veilleur (route `incidents/{id}/mails`) ; l'écran « Modèles d'e-mail » réservé disparaît.
+
 Prérequis de publication : le veilleur du VPS sert les routes `components`,
 `vulns` et `vulns/sources` de l'API (#21, phase 4). Face à un veilleur en
 retard, les deux écrans restent « pas encore disponible » (404).

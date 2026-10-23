@@ -19,7 +19,6 @@ const SCREENS: [path: string, name: string, heading: string, notYet: boolean][] 
   [`${SITE}/failles`, 'failles', 'Failles', false],
   ['/reglages', 'reglages', 'Réglages', false],
   ['/reglages/sources', 'sources-failles', 'Sources de failles', false],
-  ['/reglages/emails', 'emails', 'Modèles d’e-mail', true],
   ['/ajouter', 'ajouter', 'Ajouter un site', true],
   ['/appairage', 'appairage', 'Appairer cet appareil', false],
 ]

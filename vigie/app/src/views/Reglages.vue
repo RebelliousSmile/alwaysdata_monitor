@@ -219,16 +219,6 @@ async function remove(): Promise<void> {
   </section>
 
   <RouterLink
-    :to="{ name: 'emails' }"
-    class="flex min-h-tap items-center gap-3 rounded-card border border-line bg-surface px-3.5 py-3 text-text"
-  >
-    <span class="flex-1">Modèles d’e-mail</span>
-    <span class="text-text-3"><AppIcon
-      name="next"
-      :size="18"
-    /></span>
-  </RouterLink>
-  <RouterLink
     :to="{ name: 'sources-failles' }"
     class="flex min-h-tap items-center gap-3 rounded-card border border-line bg-surface px-3.5 py-3 text-text"
     data-sources-link

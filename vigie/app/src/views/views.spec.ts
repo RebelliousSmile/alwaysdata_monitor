@@ -147,6 +147,17 @@ describe('Alerte', () => {
     expect(wrapper.find('[data-snooze="24h"]').exists()).toBe(true)
   })
 
+  it('E-mails envoyés : l’e-mail d’ouverture parti est relisible, sans écran de modèles', async () => {
+    vi.setSystemTime((NOW - 5 * MIN) * 1000)
+    mockVeilleur()
+    const { wrapper } = await open('/s/site-a/alerte/12')
+    const sent = wrapper.findAll('[data-sent-mail]')
+    expect(sent).toHaveLength(1)
+    expect(sent[0]!.text()).toContain('Ouverture')
+    expect(sent[0]!.text()).toContain('[Vigie] open n° 12')
+    expect(sent[0]!.text()).toContain('Corps fictif du message open.')
+  })
+
   it('un incident inconnu est dit introuvable', async () => {
     mockVeilleur()
     const { wrapper } = await open('/s/site-a/alerte/99')

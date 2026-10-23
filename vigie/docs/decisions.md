@@ -463,6 +463,24 @@ avec `24h` ou `7d` dans le chemin (pas de corps à lire, durées fermées). « J
 un changement du constat » n'est pas livrée : un constat qui change ferme
 l'incident et en ouvre un autre, donc elle reviendrait à `ack`.
 
+## Aperçu des e-mails (issue #53) — décidé
+
+Option (b) de l'issue : l'écran **Alerte** montre les e-mails réellement
+envoyés pour l'incident (ouverture, relances, clôture), pas un écran
+« Modèles » autonome. Le veilleur n'a pas de modèles à éditer : le texte est
+composé en code, donc un écran de modèles présenterait des gabarits qui
+n'existent pas. L'écran réservé `/reglages/emails` et son lien dans les
+réglages sont retirés.
+
+- Route `GET /api/v1/incidents/{id}/mails`, en lecture seule : la liste des
+  écritures de la console ne change pas.
+- Texte **recomposé** à partir de l'état actuel (le veilleur ne stocke pas les
+  messages) ; la console le dit sous la liste.
+- Incidents `vulns` exclus : leurs e-mails sont groupés.
+- Non livré : « e-mail du matin » et « Vigie ne voit plus le site » comme
+  aperçus autonomes ; le second est l'e-mail d'ouverture de l'incident
+  `heartbeat`, visible sur son écran Alerte.
+
 ## Dépendances (issue #22)
 
 Plan : `aidd_docs/tasks/2026_10/2026_10_17_osv-scanner/plan.md`. Job `deps`

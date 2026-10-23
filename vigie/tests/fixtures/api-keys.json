@@ -15,6 +15,13 @@
     "snoozed_until",
     "state"
   ],
+  "GET /api/v1/incidents/{id}/mails": [
+    "mails",
+    "mails[].body",
+    "mails[].kind",
+    "mails[].sent_at",
+    "mails[].subject"
+  ],
   "GET /api/v1/overview": [
     "last_tick",
     "server_time",

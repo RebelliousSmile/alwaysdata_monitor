@@ -497,6 +497,7 @@ async fn options_with_an_origin_is_the_uniform_404_without_cors() {
         "/api/v1/overview",
         "/api/v1/sites/site-a",
         "/api/v1/incidents/1/ack",
+        "/api/v1/incidents/1/mails",
         "/api/v1/incidents/1/snooze/24h",
         "/api/v1/devices/self",
     ] {
@@ -980,6 +981,18 @@ fn snapshot_diff(
 async fn every_route_serves_only_the_reviewed_keys_and_no_seeded_secret() {
     let (v, seeds) = populated().await;
     let token = seeds.token.clone();
+    // Un e-mail d'ouverture « parti » : l'aperçu a alors un corps à relire.
+    let first = v
+        .store()
+        .open_incidents()
+        .expect("incidents")
+        .into_iter()
+        .find(|i| i.check_name == "exposed")
+        .expect("incident exposed")
+        .id;
+    v.store()
+        .mark_open_notified(first, 1_792_000_000)
+        .expect("notifié");
     let mut bodies: Vec<(String, Reply)> = Vec::new();
     for (route, path) in [
         ("GET /api/v1/overview", "/api/v1/overview".to_owned()),
@@ -991,6 +1004,10 @@ async fn every_route_serves_only_the_reviewed_keys_and_no_seeded_secret() {
         (
             "GET /api/v1/incidents/{id}",
             "/api/v1/incidents/1".to_owned(),
+        ),
+        (
+            "GET /api/v1/incidents/{id}/mails",
+            format!("/api/v1/incidents/{first}/mails"),
         ),
         ("GET /api/v1/settings", "/api/v1/settings".to_owned()),
         (

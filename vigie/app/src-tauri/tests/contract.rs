@@ -337,6 +337,32 @@ async fn acknowledges_an_open_incident_only() {
 }
 
 #[tokio::test]
+async fn previews_the_mails_sent_for_an_incident() {
+    let v = Veilleur::start().await;
+    let client = v.paired("poste").await;
+    let detail = client.site("site-a").await.expect("site");
+    let open = detail
+        .open_incidents
+        .iter()
+        .find(|i| i.check == "exposed")
+        .expect("ouvert");
+
+    let none = client.incident_mails(open.id).await.expect("mails");
+    assert!(none.mails.is_empty(), "rien n'est parti : rien à relire");
+
+    v.store().mark_open_notified(open.id, T0).expect("notifié");
+    let sent = client.incident_mails(open.id).await.expect("mails");
+    assert_eq!(sent.mails.len(), 1);
+    assert_eq!(sent.mails[0].kind, "open");
+    assert_eq!(sent.mails[0].sent_at, T0);
+    assert!(!sent.mails[0].subject.is_empty());
+    assert!(!sent.mails[0].body.is_empty());
+
+    let unknown = client.incident_mails(999_999).await.expect_err("inconnu");
+    assert_eq!(unknown.kind, ErrorKind::NotFound);
+}
+
+#[tokio::test]
 async fn snoozes_the_reminders_of_an_open_incident_only() {
     let v = Veilleur::start().await;
     let client = v.paired("poste").await;

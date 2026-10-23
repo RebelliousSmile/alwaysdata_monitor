@@ -28,6 +28,18 @@ export interface Incident {
   state: IncidentState
 }
 
+/** Un e-mail déjà parti pour un incident, recomposé par le veilleur. */
+export interface Mail {
+  kind: 'open' | 'reminder' | 'close'
+  sent_at: number
+  subject: string
+  body: string
+}
+
+export interface Mails {
+  mails: Mail[]
+}
+
 export interface OverviewSite {
   id: string
   url: string
@@ -360,6 +372,7 @@ export const api = {
   vulns: (site: string, cursor: string | null = null) => call<SiteVulns>('vulns', { site, cursor }),
   vulnSources: () => call<VulnSources>('vuln_sources'),
   incident: (id: number) => call<Incident>('incident', { id }),
+  incidentMails: (id: number) => call<Mails>('incident_mails', { id }),
   ack: (id: number) => call<Incident>('ack', { id }),
   snooze: (id: number, duration: SnoozeDuration) => call<Incident>('snooze', { id, duration }),
   settings: () => call<Settings>('settings'),

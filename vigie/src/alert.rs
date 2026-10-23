@@ -484,6 +484,49 @@ pub fn close_email(incident: &Incident, site_url: &str) -> Email {
     }
 }
 
+/// Sorte d'e-mail d'un incident, telle que la console la nomme.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SentKind {
+    Open,
+    Reminder,
+    Close,
+}
+
+impl SentKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            SentKind::Open => "open",
+            SentKind::Reminder => "reminder",
+            SentKind::Close => "close",
+        }
+    }
+}
+
+/// E-mails déjà partis pour un incident, avec leur date d'envoi, recomposés
+/// par les fonctions mêmes de l'envoi (`open_email`, `reminder_email`,
+/// `close_email`) : l'aperçu de la console est le message, pas une copie.
+///
+/// Le veilleur ne garde pas le texte envoyé, seulement les dates : le corps
+/// vient de l'incident tel qu'il est aujourd'hui. Les incidents de failles
+/// n'ont pas d'aperçu : leurs e-mails sont groupés par site au-delà d'un
+/// seuil, un groupe qu'un seul incident ne permet pas de reconstituer.
+pub fn sent_emails(incident: &Incident, site_url: &str) -> Vec<(SentKind, i64, Email)> {
+    if is_vulns(incident) {
+        return Vec::new();
+    }
+    let mut sent = Vec::new();
+    if let Some(at) = incident.open_notified_at {
+        sent.push((SentKind::Open, at, open_email(incident, site_url)));
+    }
+    if let Some(at) = incident.last_reminder_at {
+        sent.push((SentKind::Reminder, at, reminder_email(incident, site_url)));
+    }
+    if let Some(at) = incident.close_notified_at {
+        sent.push((SentKind::Close, at, close_email(incident, site_url)));
+    }
+    sent
+}
+
 pub fn test_email(now: i64) -> Email {
     Email {
         subject: "[vigie] e-mail de test".into(),
@@ -515,6 +558,33 @@ mod tests {
             snoozed_until: None,
             close_reason: Some(CloseReason::Resolved),
         }
+    }
+
+    #[test]
+    fn sent_emails_follow_the_notification_dates_and_the_sending_code() {
+        let url = "https://a.example.org/";
+        let mut i = incident();
+        i.closed_at = None;
+        assert!(sent_emails(&i, url).is_empty(), "rien n'est parti");
+
+        i.open_notified_at = Some(10);
+        i.last_reminder_at = Some(20);
+        i.closed_at = Some(60);
+        i.close_notified_at = Some(70);
+        let sent = sent_emails(&i, url);
+        let kinds: Vec<_> = sent.iter().map(|(k, at, _)| (k.as_str(), *at)).collect();
+        assert_eq!(kinds, [("open", 10), ("reminder", 20), ("close", 70)]);
+        assert_eq!(sent[0].2, open_email(&i, url));
+        assert_eq!(sent[1].2, reminder_email(&i, url));
+        assert_eq!(sent[2].2, close_email(&i, url));
+    }
+
+    #[test]
+    fn a_vulns_incident_has_no_preview_because_its_mails_are_grouped() {
+        let mut i = incident();
+        i.check_name = crate::vulns::matching::finding::CHECK.into();
+        i.open_notified_at = Some(10);
+        assert!(sent_emails(&i, "https://a.example.org/").is_empty());
     }
 
     #[test]

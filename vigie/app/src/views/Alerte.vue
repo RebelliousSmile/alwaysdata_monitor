@@ -4,7 +4,7 @@ import { useRoute } from 'vue-router'
 import DataGate from '@/components/DataGate.vue'
 import ScreenTitle from '@/components/ScreenTitle.vue'
 import StatusChip from '@/components/StatusChip.vue'
-import type { ApiError, Incident, SnoozeDuration } from '@/lib/api'
+import type { ApiError, Incident, Mail, SnoozeDuration } from '@/lib/api'
 import { SEVERITY_LABEL, SEVERITY_TONE, checkLabel, factEntries } from '@/lib/checks'
 import { now } from '@/lib/clock'
 import { useSiteData } from '@/lib/site-data'
@@ -65,6 +65,17 @@ const timeline = computed(() => {
     .filter((step): step is [string, number] => step[1] !== null)
     .sort((a, b) => a[1] - b[1])
 })
+
+const MAIL_KIND: Record<Mail['kind'], string> = {
+  open: 'Ouverture',
+  reminder: 'Relance',
+  close: 'Clôture',
+}
+
+/** E-mails réellement partis pour cet incident, du plus ancien au plus récent. */
+const mails = computed<Mail[]>(() =>
+  id.value === null ? [] : [...(sites.mails[id.value]?.data.mails ?? [])].sort((a, b) => a.sent_at - b.sent_at),
+)
 
 /** Faits du dernier rapport de l'agent, pour un contrôle de l'agent. */
 const facts = computed(() => {
@@ -223,6 +234,39 @@ async function ack(): Promise<void> {
           class="text-sm text-text-3"
         >
           Le dernier rapport ne contient aucun fait.
+        </p>
+      </section>
+
+      <section
+        v-if="mails.length"
+        aria-labelledby="mails"
+        class="flex flex-col gap-1"
+      >
+        <h2
+          id="mails"
+          class="text-xs uppercase tracking-wider text-text-3"
+        >
+          E-mails envoyés
+        </h2>
+        <details
+          v-for="mail in mails"
+          :key="mail.kind + mail.sent_at"
+          class="rounded-card border border-line bg-surface text-sm"
+          data-sent-mail
+        >
+          <summary class="flex min-h-tap cursor-pointer items-baseline gap-2 px-3.5 py-2">
+            <span class="flex-1">{{ MAIL_KIND[mail.kind] }}</span>
+            <span class="text-text-2">{{ formatWhen(mail.sent_at, now) }}</span>
+          </summary>
+          <div class="flex flex-col gap-2 border-t border-line px-3.5 py-3">
+            <p class="break-words font-semibold">
+              {{ mail.subject }}
+            </p>
+            <pre class="whitespace-pre-wrap break-words font-mono text-xs">{{ mail.body }}</pre>
+          </div>
+        </details>
+        <p class="text-xs text-text-3">
+          Texte recomposé à partir de l’état actuel de l’incident, tel que le veilleur l’enverrait aujourd’hui.
         </p>
       </section>
 

@@ -131,6 +131,20 @@ pub struct Incident {
     pub state: IncidentState,
 }
 
+/// Un e-mail que le veilleur a envoyé pour un incident.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Mail {
+    pub kind: String,
+    pub sent_at: i64,
+    pub subject: String,
+    pub body: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Mails {
+    pub mails: Vec<Mail>,
+}
+
 /// Durées de sourdine que le veilleur admet : rien d'autre ne part.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 pub enum Snooze {
@@ -735,6 +749,12 @@ impl Client {
 
     pub async fn incident(&self, id: i64) -> Result<Incident, ApiError> {
         self.read(Method::GET, &["incidents", &id.to_string()], None)
+            .await
+    }
+
+    /// Les e-mails réellement envoyés pour un incident, recomposés.
+    pub async fn incident_mails(&self, id: i64) -> Result<Mails, ApiError> {
+        self.read(Method::GET, &["incidents", &id.to_string(), "mails"], None)
             .await
     }
 
