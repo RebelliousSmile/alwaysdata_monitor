@@ -583,6 +583,78 @@ async fn an_acked_incident_gets_no_more_reminders() {
 }
 
 #[tokio::test]
+async fn a_snoozed_incident_gets_no_reminder_until_the_snooze_ends() {
+    let v =
+        Veilleur::with(|config| config.sites = vec![site("site-a", SiteKind::Generic, DAY as u64)]);
+    let snoozed = v.open("site-a", "exposed", Severity::Critical, ".env", T0 - 60);
+    let other = v.open("site-a", "headers", Severity::Warning, "hsts", T0 - 60);
+    for id in [snoozed, other] {
+        v.store().mark_open_notified(id, T0 - 60).expect("notifié");
+    }
+    let token = v.token("pc").await;
+
+    // Durées fermées : tout autre segment, méthode ou id est le 404 commun.
+    for (method, path) in [
+        (
+            Method::POST,
+            format!("/api/v1/incidents/{snoozed}/snooze/1h"),
+        ),
+        (Method::POST, format!("/api/v1/incidents/{snoozed}/snooze/")),
+        (Method::POST, "/api/v1/incidents/999/snooze/24h".to_owned()),
+        (Method::POST, "/api/v1/incidents/abc/snooze/24h".to_owned()),
+        (
+            Method::GET,
+            format!("/api/v1/incidents/{snoozed}/snooze/24h"),
+        ),
+    ] {
+        let reply = v.call(method.clone(), &path, &token).await;
+        assert_eq!(reply.status, StatusCode::NOT_FOUND, "{method} {path}");
+    }
+
+    let path = format!("/api/v1/incidents/{snoozed}/snooze/7d");
+    let reply = v.call(Method::POST, &path, &token).await;
+    assert_eq!(reply.status, StatusCode::OK);
+    assert_eq!(reply.cache_control.as_deref(), Some("no-store"));
+    let json = reply.json();
+    assert_eq!(json["state"], "open");
+    assert_eq!(json["snoozed_until"], T0 + 7 * DAY);
+
+    let tick_at = |at: i64| {
+        let mut store = v.store();
+        for kind in CheckKind::ALL {
+            store
+                .record_run("site-a", kind.name(), at)
+                .expect("record_run");
+        }
+        drop(store);
+        let mail = MemoryNotifier::new();
+        tick::run_with(&v.config, at, &Options::default(), &mail).expect("tick");
+        mail.take()
+    };
+    // Un jour après : seul l'incident hors sourdine est rappelé.
+    let sent = tick_at(T0 - 60 + REMINDER_PERIOD);
+    assert_eq!(sent.len(), 1, "{sent:?}");
+    assert!(
+        sent[0].body.contains(&format!("Incident n° {other}")),
+        "{sent:?}"
+    );
+    // La sourdine passée, il l'est à son tour.
+    let sent = tick_at(T0 + 7 * DAY);
+    assert!(
+        sent.iter()
+            .any(|m| m.body.contains(&format!("Incident n° {snoozed}"))),
+        "{sent:?}"
+    );
+
+    // Un incident clos ne se met pas en sourdine : 409.
+    v.store()
+        .reconcile("site-a", "exposed", &[], T0 + 8 * DAY)
+        .expect("clôture");
+    let closed = v.call(Method::POST, &path, &token).await;
+    assert_eq!(closed.status, StatusCode::CONFLICT);
+}
+
+#[tokio::test]
 async fn a_watcher_incident_is_readable_and_ackable_but_in_no_site_view() {
     // Incident `vulns-sync` du pseudo-site du veilleur (#16) : lisible et
     // acquittable par son numéro, absent des vues par site (F7 pour la vue

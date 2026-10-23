@@ -49,6 +49,7 @@ function incident(fields: Partial<Incident> & Pick<Incident, 'id' | 'check' | 's
     open_notified_at: null,
     close_notified_at: null,
     last_reminder_at: null,
+    snoozed_until: null,
     state: 'open',
     ...fields,
   }
@@ -591,6 +592,16 @@ export function mockVeilleur(paired = true): Veilleur {
         if (found.state === 'closed') throw fail('conflict', 'incident fermé')
         found.state = 'acked'
         found.acked_at = Math.floor(Date.now() / 1000)
+        return found
+      }
+      case 'snooze': {
+        reach()
+        const found = findIncident(Number(args.id))
+        if (!found) throw fail('not_found', 'incident inconnu')
+        if (found.state === 'closed') throw fail('conflict', 'incident fermé')
+        const seconds = args.duration === '24h' ? DAY : args.duration === '7d' ? 7 * DAY : null
+        if (seconds === null) throw fail('not_found', 'durée inconnue')
+        found.snoozed_until = Math.floor(Date.now() / 1000) + seconds
         return found
       }
       case 'settings':

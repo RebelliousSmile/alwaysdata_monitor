@@ -26,7 +26,7 @@ use vigie::serve;
 use vigie::store::{AcceptedReport, ReportOutcome, RunRecord, Store};
 use vigie::tick::{self, Options};
 use vigie_console_lib::Console;
-use vigie_console_lib::client::{Client, ErrorKind, IncidentState, Severity, SiteState};
+use vigie_console_lib::client::{Client, ErrorKind, IncidentState, Severity, SiteState, Snooze};
 use vigie_console_lib::secret::{MemoryStore, TokenStorage};
 
 const T0: i64 = 1_792_000_000;
@@ -333,6 +333,42 @@ async fn acknowledges_an_open_incident_only() {
     let unknown = client.ack(999_999).await.expect_err("inconnu");
     assert_eq!(unknown.kind, ErrorKind::NotFound);
     let unknown = client.incident(999_999).await.expect_err("inconnu");
+    assert_eq!(unknown.kind, ErrorKind::NotFound);
+}
+
+#[tokio::test]
+async fn snoozes_the_reminders_of_an_open_incident_only() {
+    let v = Veilleur::start().await;
+    let client = v.paired("poste").await;
+    let detail = client.site("site-a").await.expect("site");
+    let open = detail
+        .open_incidents
+        .iter()
+        .find(|i| i.check == "exposed")
+        .expect("ouvert");
+    assert_eq!(open.snoozed_until, None);
+
+    let snoozed = client.snooze(open.id, Snooze::Week).await.expect("snooze");
+    assert_eq!(snoozed.snoozed_until, Some(T0 + 7 * 86_400));
+    assert_eq!(snoozed.state, IncidentState::Open, "toujours ouvert");
+    let snoozed = client.snooze(open.id, Snooze::Day).await.expect("snooze");
+    assert_eq!(snoozed.snoozed_until, Some(T0 + 86_400), "remplacée");
+
+    let history = client.incidents("site-a", None).await.expect("incidents");
+    let closed = history
+        .incidents
+        .iter()
+        .find(|i| i.state == IncidentState::Closed)
+        .expect("fermé");
+    let conflict = client
+        .snooze(closed.id, Snooze::Day)
+        .await
+        .expect_err("fermé");
+    assert_eq!(conflict.kind, ErrorKind::Conflict);
+    let unknown = client
+        .snooze(999_999, Snooze::Day)
+        .await
+        .expect_err("inconnu");
     assert_eq!(unknown.kind, ErrorKind::NotFound);
 }
 

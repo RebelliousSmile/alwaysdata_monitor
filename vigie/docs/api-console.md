@@ -123,6 +123,7 @@ révocation.
 | `GET /api/v1/vulns/sources` | sources de failles déclarées : âge, issue, attribution, constat `vulns-sync` | SourcesFailles |
 | `GET /api/v1/incidents/{id}` | un incident, ouvert ou fermé | Alerte |
 | `POST /api/v1/incidents/{id}/ack` | l'incident acquitté | Alerte |
+| `POST /api/v1/incidents/{id}/snooze/{duration}` | l'incident, rappels en sourdine (`24h` ou `7d`) | Alerte |
 | `GET /api/v1/settings` | sites, fréquences, destinataire masqué, appareils | Parametres, Reglages |
 | `DELETE /api/v1/devices/self` | 204, sans corps | Reglages |
 
@@ -171,6 +172,7 @@ Forme commune à toutes les routes qui renvoient un incident :
   "open_notified_at": 1792000060,
   "close_notified_at": null,
   "last_reminder_at": null,
+  "snoozed_until": null,
   "state": "open"
 }
 ```
@@ -179,6 +181,8 @@ Forme commune à toutes les routes qui renvoient un incident :
   par e-mail et ne compte pas dans l'état du site.
 - `state` : `closed` si `closed_at` est posé, sinon `acked` si `acked_at` est
   posé, sinon `open`.
+- `snoozed_until` : date (secondes Unix) avant laquelle aucun rappel n'est
+  envoyé, `null` hors sourdine. La sourdine ne change pas `state`.
 - `open_notified_at`, `last_reminder_at` et `close_notified_at` sont les dates
   d'envoi des e-mails d'ouverture, de dernier rappel et de rétablissement :
   ATraiter et Alerte en tirent les e-mails envoyés.
@@ -486,6 +490,23 @@ reçoit 415 (voir [En-têtes](#en-têtes)).
 - 404 si l'identifiant est inconnu.
 - Le journal du veilleur note l'id de l'appareil qui a acquitté.
 
+### `POST /api/v1/incidents/{id}/snooze/{duration}`
+
+Fait taire les **rappels** d'un incident ouvert pendant `24h` ou `7d`, les deux
+seules durées admises (décision de #35, `decisions.md`). L'e-mail d'ouverture et
+celui de clôture ne sont pas concernés, et la requête n'a aucun effet sur un
+site. Pire cas d'un jeton volé : des rappels retardés de 7 jours au plus.
+Même enveloppe que `ack` : aucun corps, un corps annoncé reçoit 415.
+
+- 200 et l'incident, `snoozed_until` posé à `maintenant + durée` ; une nouvelle
+  sourdine remplace la précédente.
+- 409 si l'incident est fermé : la base n'est pas modifiée.
+- 404 si l'identifiant est inconnu ou si la durée n'est ni `24h` ni `7d`.
+- Le journal du veilleur note l'id de l'appareil et la durée.
+
+« Jusqu'à la prochaine mise à jour » n'est pas une durée : pour cesser les
+rappels jusqu'à la clôture, l'acquittement (`ack`) existe déjà.
+
 ### `GET /api/v1/settings`
 
 ```json
@@ -563,7 +584,7 @@ des maquettes (non conforme, aveugle, à vérifier, OK) : il est placé avant
 | ----- | ------- |
 | Main | `overview` : `state`, `worst`, `open_count`, `last_read` de chaque site. |
 | ATraiter | `overview`, puis `sites/{id}` des sites concernés : incidents ouverts, e-mails envoyés tirés des dates de notification. |
-| Alerte | `incidents/{id}`, action Acquitter par `incidents/{id}/ack`. |
+| Alerte | `incidents/{id}`, actions Acquitter (`incidents/{id}/ack`) et Sourdine (`incidents/{id}/snooze/{duration}`). |
 | Dispo | `sites/{id}` (contrôles externes, `duration_ms`, `last_run`, `tls_not_after`) et `sites/{id}/incidents`. |
 | Controles | `sites/{id}` : `checks`, externes et d'agent. |
 | Parametres | `settings` (site concerné) et `sites/{id}` (`interval`, `agent_silence`). |

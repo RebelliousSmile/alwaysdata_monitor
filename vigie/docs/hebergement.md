@@ -30,6 +30,7 @@ est public.
 | Inventaire de l'agent PHP (agent 0.5.0, migration 16, issue #19) | **Déploiement non consigné** : le watcher accepte `/r/v1/inventory` pour les sites qui déclarent `[sites.inventory]` ; agent à redéployer sur chaque site |
 | Outil `vigie-inventory` (migration 20, issue #20) | **Déploiement non consigné** : binaire publié par le workflow `inventory-release` ; clé d'inventaire par site (`vigie site inventory-key`) |
 | Rapprochement des failles (migration `0021.sql`, issue #21) | **Déploiement non consigné** : relevé du premier rapprochement à faire, voir [Relevé du premier rapprochement](#relevé-du-premier-rapprochement) |
+| Sourdine des incidents (migration `0022.sql`, issue #50) | **Non déployée** : à relever après le déploiement (`vigie status` : schéma v22 ; une sourdine posée depuis la console retarde les rappels, pas les e-mails d'ouverture ni de clôture) |
 
 ## Installation
 

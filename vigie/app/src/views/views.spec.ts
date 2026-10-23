@@ -131,6 +131,22 @@ describe('Alerte', () => {
     expect(wrapper.findAll('[data-point]')[0]?.text()).toContain('acquitté à 10:02')
   })
 
+  it('Sourdine 7 jours fait taire les relances : la date est posée, l’incident reste ouvert', async () => {
+    vi.setSystemTime((NOW - 5 * MIN) * 1000)
+    mockVeilleur()
+    const { wrapper } = await open('/s/site-a/alerte/12')
+    expect(wrapper.get('[data-incident]').text()).not.toContain('Relances en sourdine')
+
+    await wrapper.get('[data-snooze="7d"]').trigger('click')
+    await settle()
+    const detail = wrapper.get('[data-incident]')
+    expect(detail.text()).toContain('En cours')
+    expect(detail.findAll('[data-step]').map((s) => s.text())).toContainEqual(
+      expect.stringMatching(/Relances en sourdine jusqu’à/),
+    )
+    expect(wrapper.find('[data-snooze="24h"]').exists()).toBe(true)
+  })
+
   it('un incident inconnu est dit introuvable', async () => {
     mockVeilleur()
     const { wrapper } = await open('/s/site-a/alerte/99')

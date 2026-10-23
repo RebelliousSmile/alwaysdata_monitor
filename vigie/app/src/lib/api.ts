@@ -6,6 +6,8 @@ import { invoke } from '@tauri-apps/api/core'
 
 export type Severity = 'info' | 'warning' | 'critical'
 export type IncidentState = 'open' | 'acked' | 'closed'
+/** Les seules durées de sourdine que le veilleur admet. */
+export type SnoozeDuration = '24h' | '7d'
 export type SiteState = 'non_compliant' | 'blind' | 'to_check' | 'first_read' | 'ok'
 export type CheckResult = 'ok' | 'finding' | 'error'
 
@@ -21,6 +23,8 @@ export interface Incident {
   open_notified_at: number | null
   close_notified_at: number | null
   last_reminder_at: number | null
+  /** Aucun rappel avant cette date ; `null` hors sourdine. */
+  snoozed_until: number | null
   state: IncidentState
 }
 
@@ -357,5 +361,6 @@ export const api = {
   vulnSources: () => call<VulnSources>('vuln_sources'),
   incident: (id: number) => call<Incident>('incident', { id }),
   ack: (id: number) => call<Incident>('ack', { id }),
+  snooze: (id: number, duration: SnoozeDuration) => call<Incident>('snooze', { id, duration }),
   settings: () => call<Settings>('settings'),
 }

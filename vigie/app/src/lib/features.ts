@@ -13,7 +13,6 @@ export type FeatureKey =
   | 'compte'
   | 'ajouter'
   | 'emails'
-  | 'sourdine'
   | 'file'
   | 'wordpress'
 
@@ -89,11 +88,6 @@ export const FEATURES: Record<FeatureKey, Feature> = {
     shows: 'L’aperçu des e-mails envoyés : alerte immédiate, e-mail du matin, « Vigie ne voit plus le site ».',
     missing: 'Le veilleur n’expose pas ses modèles d’e-mail à la console.',
     link: { label: 'Revenir aux réglages', name: 'reglages' },
-  },
-  sourdine: {
-    title: 'Sourdine',
-    shows: 'Faire taire une alerte pour 24 h, 7 jours ou jusqu’à la prochaine mise à jour.',
-    missing: 'Le veilleur ne connaît que l’acquittement, qui arrête les relances.',
   },
   file: {
     title: 'File d’écriture',
