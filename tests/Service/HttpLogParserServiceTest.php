@@ -42,12 +42,12 @@ class HttpLogParserServiceTest extends TestCase
     private function makeLine(array $overrides = []): string
     {
         $defaults = [
-            'ip'     => '203.0.113.14',
-            'hour'   => '14',
+            'ip' => '203.0.113.14',
+            'hour' => '14',
             'method' => 'GET',
-            'path'   => '/index.html',
+            'path' => '/index.html',
             'status' => '200',
-            'ua'     => 'Mozilla/5.0 (compatible)',
+            'ua' => 'Mozilla/5.0 (compatible)',
         ];
 
         $o = array_merge($defaults, $overrides);
@@ -379,10 +379,10 @@ class HttpLogParserServiceTest extends TestCase
     {
         $lines = [];
         // /page-a.html hit 3 times, /page-b.html hit 5 times
-        for ($i = 0; $i < 3; $i++) {
+        for ($i = 0; $i < 3; ++$i) {
             $lines[] = $this->makeLine(['path' => '/page-a.html', 'status' => '200']);
         }
-        for ($i = 0; $i < 5; $i++) {
+        for ($i = 0; $i < 5; ++$i) {
             $lines[] = $this->makeLine(['path' => '/page-b.html', 'status' => '200']);
         }
         $path = $this->createLogFile($lines);
@@ -396,7 +396,7 @@ class HttpLogParserServiceTest extends TestCase
     public function testPageCountsCappedAt20Entries(): void
     {
         $lines = [];
-        for ($i = 0; $i < 25; $i++) {
+        for ($i = 0; $i < 25; ++$i) {
             $lines[] = $this->makeLine(['path' => '/page-' . $i . '.html', 'status' => '200', 'ip' => '1.2.3.' . ($i % 254 + 1)]);
         }
         $path = $this->createLogFile($lines);
@@ -418,10 +418,10 @@ class HttpLogParserServiceTest extends TestCase
         ];
 
         $plainPath = $this->createLogFile($lines);
-        $gzPath    = $this->createGzLogFile($lines);
+        $gzPath = $this->createGzLogFile($lines);
 
         $plainResult = $this->service->parse($plainPath);
-        $gzResult    = $this->service->parse($gzPath);
+        $gzResult = $this->service->parse($gzPath);
 
         $this->assertSame($plainResult['requests_total'], $gzResult['requests_total']);
         $this->assertSame($plainResult['requests_human'], $gzResult['requests_human']);
@@ -459,7 +459,7 @@ class HttpLogParserServiceTest extends TestCase
     private function pages(int $n, string $ip, string $query = ''): array
     {
         $lines = [];
-        for ($i = 0; $i < $n; $i++) {
+        for ($i = 0; $i < $n; ++$i) {
             $lines[] = $this->makeLine(['ip' => $ip, 'path' => '/cat-' . $i . '.html' . $query]);
         }
 
@@ -500,7 +500,7 @@ class HttpLogParserServiceTest extends TestCase
     public function testIpMostlyOnFacetsIsCountedAsScraperEvenWithStatics(): void
     {
         $lines = $this->pages(25, '203.0.113.9', '?q=Couleur-Rouge');
-        for ($i = 0; $i < 3; $i++) {
+        for ($i = 0; $i < 3; ++$i) {
             $lines[] = $this->makeLine(['ip' => '203.0.113.9', 'path' => '/img/' . $i . '.jpg']);
         }
 
@@ -543,7 +543,7 @@ class HttpLogParserServiceTest extends TestCase
     public function testDeclaredBotIsNotCountedAsScraper(): void
     {
         $lines = [];
-        for ($i = 0; $i < 25; $i++) {
+        for ($i = 0; $i < 25; ++$i) {
             $lines[] = $this->makeLine(['path' => '/p-' . $i . '.html', 'ua' => 'Mozilla/5.0 (compatible; Googlebot/2.1)']);
         }
 
@@ -618,7 +618,7 @@ class HttpLogParserServiceTest extends TestCase
     public function testCheckout500DetailIsCappedButCounterStaysExact(): void
     {
         $lines = [];
-        for ($i = 0; $i < 250; $i++) {
+        for ($i = 0; $i < 250; ++$i) {
             $lines[] = $this->makeLine(['path' => '/commande', 'status' => '500']);
         }
 
