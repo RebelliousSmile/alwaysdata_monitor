@@ -497,6 +497,7 @@ async fn options_with_an_origin_is_the_uniform_404_without_cors() {
         "/api/v1/overview",
         "/api/v1/sites/site-a",
         "/api/v1/incidents/1/ack",
+        "/api/v1/incidents/1/snooze/24h",
         "/api/v1/devices/self",
     ] {
         let reply = v
@@ -1023,6 +1024,17 @@ async fn every_route_serves_only_the_reviewed_keys_and_no_seeded_secret() {
             PEER,
             Method::POST,
             &format!("/api/v1/incidents/{open}/ack"),
+            &token,
+        )
+        .await,
+    ));
+
+    bodies.push((
+        "POST /api/v1/incidents/{id}/snooze/{duration}".to_owned(),
+        v.call_from(
+            PEER,
+            Method::POST,
+            &format!("/api/v1/incidents/{open}/snooze/24h"),
             &token,
         )
         .await,

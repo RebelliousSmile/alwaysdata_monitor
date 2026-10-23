@@ -53,8 +53,8 @@ fn tick_then_status_succeeds_and_migrations_rerun_cleanly() {
     let after = vigie(&config, &["status"]);
     assert!(after.status.success(), "{after:?}");
     let stdout = String::from_utf8_lossy(&after.stdout);
-    // Dernière migration : le rapprochement des failles (#21).
-    let schema = format!("schéma v{}", vigie::store::SCHEMA_VULNS_MATCH);
+    // Dernière migration : la sourdine des incidents (#50).
+    let schema = format!("schéma v{}", vigie::store::SCHEMA_SNOOZE);
     assert!(stdout.contains(&schema), "{stdout}");
     assert!(stdout.contains("→ ok"), "{stdout}");
     assert!(stdout.contains("incidents ouverts : aucun"), "{stdout}");

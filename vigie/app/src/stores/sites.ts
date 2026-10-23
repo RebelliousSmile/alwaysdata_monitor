@@ -12,6 +12,7 @@ import {
   type SiteIncidents,
   type SiteLogs,
   type SiteVulns,
+  type SnoozeDuration,
   type VulnSources,
 } from '@/lib/api'
 import { asApiError, useConnection } from '@/stores/connection'
@@ -231,6 +232,22 @@ export const useSites = defineStore('sites', () => {
     }
   }
 
+  /** Fait taire les relances d'un incident ouvert ; renvoie l'échec, `null` si réussi. */
+  async function snooze(id: number, duration: SnoozeDuration): Promise<ApiError | null> {
+    const connection = useConnection()
+    try {
+      const incident = await api.snooze(id, duration)
+      keepIncident(incident, nowSeconds())
+      connection.ok()
+      return null
+    } catch (err) {
+      const error = asApiError(err)
+      connection.fail(error)
+      if (error.kind === 'conflict') await loadIncident(id)
+      return error
+    }
+  }
+
   /** Oublie tout ce qui a été lu, au retrait ou à la révocation de l'appareil. */
   function clear(): void {
     overview.value = null
@@ -275,6 +292,7 @@ export const useSites = defineStore('sites', () => {
     loadIncident,
     loadSettings,
     ack,
+    snooze,
     clear,
   }
 })

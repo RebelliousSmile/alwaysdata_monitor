@@ -112,6 +112,9 @@ const MIGRATIONS: &[&str] = &[
     // purl, date de perte de vue des incidents, dérogations. Version :
     // [`SCHEMA_VULNS_MATCH`].
     include_str!("../migrations/0021.sql"),
+    // Fichier 0022 : sourdine des incidents (#50), `incidents.snoozed_until`.
+    // Version : [`SCHEMA_SNOOZE`].
+    include_str!("../migrations/0022.sql"),
 ];
 
 /// Version d'une migration : sa place dans [`MIGRATIONS`], plus un.
@@ -189,6 +192,13 @@ pub const SCHEMA_INVENTORY_KEYS: usize = version_of(include_str!("../migrations/
 /// inventaire × failles et les dérogations existent (issue #21, fichier
 /// `0021.sql`).
 pub const SCHEMA_VULNS_MATCH: usize = version_of(include_str!("../migrations/0021.sql"));
+/// Version de schéma à partir de laquelle la sourdine des incidents existe
+/// (issue #50, fichier `0022.sql`).
+pub const SCHEMA_SNOOZE: usize = version_of(include_str!("../migrations/0022.sql"));
+/// Durées de sourdine admises, en secondes : fermées, pour qu'un jeton volé
+/// ne retarde jamais une alerte de plus de 7 jours.
+pub const SNOOZE_24H: i64 = 24 * 3600;
+pub const SNOOZE_7D: i64 = 7 * 24 * 3600;
 /// Une adresse source de retrait est oubliée 30 jours après le dernier.
 pub const AGENT_SOURCE_RETENTION: i64 = 30 * 86_400;
 
@@ -223,6 +233,9 @@ pub struct Incident {
     pub open_notified_at: Option<i64>,
     pub close_notified_at: Option<i64>,
     pub last_reminder_at: Option<i64>,
+    /// Aucun rappel avant cette date ; `None` hors sourdine (ou avant le
+    /// schéma 22).
+    pub snoozed_until: Option<i64>,
     /// `None` tant que l'incident est ouvert.
     pub close_reason: Option<CloseReason>,
 }
@@ -373,6 +386,14 @@ pub struct CheckRun {
     pub duration_ms: Option<i64>,
     /// Valeurs observées, en JSON.
     pub observed: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SnoozeOutcome {
+    NotFound,
+    AlreadyClosed,
+    /// Sourdine posée jusqu'à cette date.
+    Snoozed(i64),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -693,12 +714,16 @@ fn agent_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Agent> {
 }
 
 const INCIDENT_COLUMNS: &str = "id, key, site, check_name, severity, detail, opened_at, closed_at,
-     acked_at, open_notified_at, close_notified_at, last_reminder_at, close_reason";
+     acked_at, open_notified_at, close_notified_at, last_reminder_at, close_reason, snoozed_until";
+/// Avant le schéma 22, la sourdine n'existe pas : un lecteur la lit NULL.
+const INCIDENT_COLUMNS_V21: &str =
+    "id, key, site, check_name, severity, detail, opened_at, closed_at,
+     acked_at, open_notified_at, close_notified_at, last_reminder_at, close_reason, NULL";
 /// Avant le schéma 14, la raison de clôture n'existe pas : un lecteur
 /// (`status` pendant un déploiement) la lit NULL.
 const INCIDENT_COLUMNS_V13: &str =
     "id, key, site, check_name, severity, detail, opened_at, closed_at,
-     acked_at, open_notified_at, close_notified_at, last_reminder_at, NULL";
+     acked_at, open_notified_at, close_notified_at, last_reminder_at, NULL, NULL";
 
 fn incident_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Incident> {
     let severity: String = row.get(4)?;
@@ -718,6 +743,7 @@ fn incident_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Incident> {
         close_notified_at: row.get(10)?,
         last_reminder_at: row.get(11)?,
         close_reason: CloseReason::parse(row.get(7)?, row.get::<_, Option<String>>(12)?.as_deref()),
+        snoozed_until: row.get(13)?,
     })
 }
 
@@ -1080,8 +1106,11 @@ impl Store {
 
     /// Colonnes d'un incident selon le schéma de la base.
     fn incident_columns(&self) -> Result<&'static str> {
-        Ok(if self.schema_version()? >= SCHEMA_REGISTRY {
+        let version = self.schema_version()?;
+        Ok(if version >= SCHEMA_SNOOZE {
             INCIDENT_COLUMNS
+        } else if version >= SCHEMA_REGISTRY {
+            INCIDENT_COLUMNS_V21
         } else {
             INCIDENT_COLUMNS_V13
         })
@@ -1169,8 +1198,9 @@ impl Store {
         self.incidents_where(
             "closed_at IS NULL AND acked_at IS NULL AND open_notified_at IS NOT NULL
              AND severity != 'info'
-             AND COALESCE(last_reminder_at, open_notified_at) <= ?1",
-            &[&(now - REMINDER_PERIOD)],
+             AND COALESCE(last_reminder_at, open_notified_at) <= ?1
+             AND COALESCE(snoozed_until, 0) <= ?2",
+            &[&(now - REMINDER_PERIOD), &now],
         )
     }
 
@@ -1241,6 +1271,28 @@ impl Store {
             params![id, now],
         )?;
         Ok(AckOutcome::Acked)
+    }
+
+    /// Fait taire les rappels d'un incident ouvert pendant `seconds` (24 h ou
+    /// 7 jours : [`SNOOZE_24H`], [`SNOOZE_7D`]). Une nouvelle sourdine
+    /// remplace la précédente ; l'ouverture et la clôture restent notifiées.
+    pub fn snooze(&mut self, id: i64, seconds: i64, now: i64) -> Result<SnoozeOutcome> {
+        anyhow::ensure!(
+            seconds == SNOOZE_24H || seconds == SNOOZE_7D,
+            "durée de sourdine non admise : {seconds} s"
+        );
+        let Some(incident) = self.incident(id)? else {
+            return Ok(SnoozeOutcome::NotFound);
+        };
+        if incident.closed_at.is_some() {
+            return Ok(SnoozeOutcome::AlreadyClosed);
+        }
+        let until = now + seconds;
+        self.conn.execute(
+            "UPDATE incidents SET snoozed_until = ?2 WHERE id = ?1",
+            params![id, until],
+        )?;
+        Ok(SnoozeOutcome::Snoozed(until))
     }
 
     /// Agents déclarés, par site.
@@ -2955,6 +3007,48 @@ mod tests {
     }
 
     #[test]
+    fn a_snoozed_incident_gets_no_reminder_until_the_snooze_ends() {
+        let (_dir, mut store) = temp_store();
+        store
+            .reconcile("site-a", "exposed", &[crit(".env")], 0)
+            .expect("1");
+        let id = store.open_incidents().expect("open")[0].id;
+        store.mark_open_notified(id, 0).expect("mark");
+        assert_eq!(
+            store
+                .snooze(id, SNOOZE_7D, REMINDER_PERIOD)
+                .expect("snooze"),
+            SnoozeOutcome::Snoozed(REMINDER_PERIOD + SNOOZE_7D)
+        );
+        assert!(
+            store
+                .due_reminders(REMINDER_PERIOD + SNOOZE_7D - 1)
+                .expect("due")
+                .is_empty()
+        );
+        assert_eq!(
+            store
+                .due_reminders(REMINDER_PERIOD + SNOOZE_7D)
+                .expect("due")
+                .len(),
+            1
+        );
+        // Une durée hors liste est refusée, un incident inconnu ou clos aussi.
+        assert!(store.snooze(id, 60, 0).is_err());
+        assert_eq!(
+            store.snooze(999, SNOOZE_24H, 0).expect("snooze"),
+            SnoozeOutcome::NotFound
+        );
+        store
+            .reconcile("site-a", "exposed", &[], 50)
+            .expect("close");
+        assert_eq!(
+            store.snooze(id, SNOOZE_24H, 60).expect("snooze"),
+            SnoozeOutcome::AlreadyClosed
+        );
+    }
+
+    #[test]
     fn closes_incidents_of_unwatched_checks() {
         let (_dir, mut store) = temp_store();
         store
@@ -3430,9 +3524,11 @@ mod tests {
             columns("reports").last().map(String::as_str),
             Some("dropped")
         );
+        assert!(columns("incidents").contains(&"close_reason".to_owned()));
+        // Migration 22 : sourdine des relances.
         assert_eq!(
             columns("incidents").last().map(String::as_str),
-            Some("close_reason")
+            Some("snoozed_until")
         );
         // Migrations 9 et 16 : `seq` des lots de logs et des inventaires, à
         // côté de la clé.
@@ -3801,7 +3897,8 @@ mod tests {
         }
         let store = Store::open(&path).expect("open");
         assert_eq!(store.schema_version().expect("version"), MIGRATIONS.len());
-        assert_eq!(SCHEMA_VULNS_MATCH, MIGRATIONS.len());
+        assert_eq!(SCHEMA_SNOOZE, MIGRATIONS.len());
+        assert_eq!(SCHEMA_VULNS_MATCH + 1, SCHEMA_SNOOZE);
         assert_eq!(SCHEMA_INVENTORY_KEYS + 1, SCHEMA_VULNS_MATCH);
         assert_eq!(store.last_tick().expect("tick"), Some(42));
         let agent = store.agent("site-a").expect("agent").expect("clé");

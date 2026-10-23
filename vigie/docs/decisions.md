@@ -419,7 +419,7 @@ règles détaillées dans [`failles.md`](./failles.md#rapprochement-f7).
 | Lecture par l'API (curseurs figés sur les runs actifs, 409 au basculement), la CLI (`site components`, `site vulns`, `vulns report`, `status`) et deux écrans de console **sans action d'écriture** ; seule écriture : `site vulns-ack` (aperçu puis `--apply`) | Contrat de #5 ; l'exploitant décide sur le VPS |
 | Migration en fichier `0021.sql` (F6 a pris `0020.sql`), `SCHEMA_VULNS_MATCH` calculé par sa place | Une migration publiée ne se modifie jamais |
 
-## Écritures depuis la console (issue #35) — proposition à valider
+## Écritures depuis la console (issue #35) — décidé
 
 **Non tranché.** Cette section propose ; seul l'exploitant décide. Contexte : la
 console n'écrit aujourd'hui que par `POST /api/v1/incidents/{id}/ack` ; un test
@@ -457,6 +457,11 @@ pas un secret à stocker.
 - #35 : se ferme par cette décision consignée.
 - Le test du client est mis à jour dans la PR de la sourdine, jamais assoupli
   seul.
+
+Réalisation de la sourdine (#50) : `POST /api/v1/incidents/{id}/snooze/{duration}`
+avec `24h` ou `7d` dans le chemin (pas de corps à lire, durées fermées). « Jusqu'à
+un changement du constat » n'est pas livrée : un constat qui change ferme
+l'incident et en ouvre un autre, donc elle reviendrait à `ack`.
 
 ## Dépendances (issue #22)
 

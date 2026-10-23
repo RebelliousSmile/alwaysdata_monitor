@@ -291,6 +291,17 @@ async fn incident(console: State<'_, Console>, id: i64) -> Result<Incident, ApiE
 }
 
 #[tauri::command]
+async fn snooze(
+    console: State<'_, Console>,
+    id: i64,
+    duration: client::Snooze,
+) -> Result<Incident, ApiError> {
+    console
+        .call(|client| async move { client.snooze(id, duration).await })
+        .await
+}
+
+#[tauri::command]
 async fn ack(console: State<'_, Console>, id: i64) -> Result<Incident, ApiError> {
     console
         .call(|client| async move { client.ack(id).await })
@@ -330,6 +341,7 @@ pub fn run() {
             vuln_sources,
             incident,
             ack,
+            snooze,
             settings
         ])
         .run(tauri::generate_context!())
@@ -437,6 +449,7 @@ mod tests {
                 "vuln_sources",
                 "incident",
                 "ack",
+                "snooze",
                 "settings"
             ]
         );
@@ -444,10 +457,11 @@ mod tests {
         assert_eq!(code.matches("#[tauri::command]").count(), commands.len());
     }
 
-    /// La console lit ; sa seule écriture est l'acquittement. Hors `pair`
-    /// et `unpair`, toute requête de `client.rs` est un GET.
+    /// La console lit ; ses seules écritures sont l'acquittement et la
+    /// sourdine (décision de #35). Hors `pair` et `unpair`, toute autre
+    /// requête de `client.rs` est un GET.
     #[test]
-    fn ack_is_the_only_write_besides_pairing() {
+    fn ack_and_snooze_are_the_only_writes_besides_pairing() {
         let source = include_str!("client.rs");
         let code = &source[..source.find("#[cfg(test)]").expect("tests")];
         let mut writes = Vec::new();
@@ -465,6 +479,9 @@ mod tests {
                 assert!(!line.contains(raw), "requête hors de send : {line}");
             }
         }
-        assert_eq!(writes, ["pair POST", "ack POST", "unpair DELETE"]);
+        assert_eq!(
+            writes,
+            ["pair POST", "ack POST", "snooze POST", "unpair DELETE"]
+        );
     }
 }

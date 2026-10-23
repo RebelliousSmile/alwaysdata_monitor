@@ -54,7 +54,7 @@ use crate::request_id;
 use crate::serve::AppState;
 use crate::store::{
     AckOutcome, Agent, CheckRun, Device, Incident, RevokeOutcome, RunResult, SCHEMA_CHECK_RESULTS,
-    SCHEMA_FINDINGS, Store,
+    SCHEMA_FINDINGS, SNOOZE_7D, SNOOZE_24H, SnoozeOutcome, Store,
 };
 
 use limit::{IpKey, Limiter};
@@ -120,6 +120,10 @@ pub(crate) fn routes() -> Router<Arc<AppState>> {
         .route(
             "/api/v1/incidents/{id}/ack",
             post(ack_handler).fallback(not_found),
+        )
+        .route(
+            "/api/v1/incidents/{id}/snooze/{duration}",
+            post(snooze_handler).fallback(not_found),
         )
         .route(
             "/api/v1/settings",
@@ -779,6 +783,8 @@ struct IncidentJson {
     open_notified_at: Option<i64>,
     close_notified_at: Option<i64>,
     last_reminder_at: Option<i64>,
+    /// Aucun rappel avant cette date (secondes Unix) ; `null` hors sourdine.
+    snoozed_until: Option<i64>,
     /// `open`, `acked` ou `closed`.
     state: &'static str,
 }
@@ -819,6 +825,7 @@ impl From<&Incident> for IncidentJson {
             open_notified_at: i.open_notified_at,
             close_notified_at: i.close_notified_at,
             last_reminder_at: i.last_reminder_at,
+            snoozed_until: i.snoozed_until,
             state: match (i.closed_at, i.acked_at) {
                 (Some(_), _) => "closed",
                 (None, Some(_)) => "acked",
@@ -1851,6 +1858,46 @@ async fn ack_handler(
             }
             AckOutcome::AlreadyClosed => ApiError::CONFLICT.into_response(),
             AckOutcome::NotFound => ApiError::NOT_FOUND.into_response(),
+        })
+    })
+    .await
+}
+
+/// Fait taire les rappels d'un incident ouvert : `24h` ou `7d`, rien d'autre.
+/// L'ouverture et la clôture restent notifiées ; aucun effet sur un site.
+async fn snooze_handler(
+    State(state): State<Arc<AppState>>,
+    Authenticated(device): Authenticated,
+    path: Result<Path<(String, String)>, PathRejection>,
+) -> Response {
+    let Ok(Path((id, duration))) = path else {
+        return ApiError::NOT_FOUND.into_response();
+    };
+    let Ok(id) = id.parse::<i64>() else {
+        return ApiError::NOT_FOUND.into_response();
+    };
+    let seconds = match duration.as_str() {
+        "24h" => SNOOZE_24H,
+        "7d" => SNOOZE_7D,
+        _ => return ApiError::NOT_FOUND.into_response(),
+    };
+    let now = state.clock.unix();
+    let rid = request_id::current();
+    with_writer(&state, "/api/v1/incidents/snooze", move |store| {
+        Ok(match store.snooze(id, seconds, now)? {
+            SnoozeOutcome::Snoozed(until) => {
+                log::info!(
+                    "[{}] incident {id} en sourdine {duration} (jusqu'à {until}) par l'appareil {}",
+                    rid,
+                    device.id
+                );
+                match store.incident(id)? {
+                    Some(incident) => json(&IncidentJson::from(&incident)),
+                    None => ApiError::NOT_FOUND.into_response(),
+                }
+            }
+            SnoozeOutcome::AlreadyClosed => ApiError::CONFLICT.into_response(),
+            SnoozeOutcome::NotFound => ApiError::NOT_FOUND.into_response(),
         })
     })
     .await
