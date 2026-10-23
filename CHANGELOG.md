@@ -25,12 +25,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Known-vulnerability model (#15): per-ecosystem version comparators (Composer `VersionParser` then `version_compare`, strict semver for npm and Cargo, PHP `version_compare` for WordPress and PrestaShop) proven by vectors, fixed-seed fuzz and a differential test against PHP 8.1 in CI; the single shared purl module; a validated OSV 1.9 subset with measured bounds, per-record licence and attribution, CVSS 3.x scores in integer tenths; SQLite storage by reserved generations under lease, swapped atomically; read-only `vigie vulns sources | show | match` (no source wired yet)
 - Known-vulnerability groundwork (#14): verified sources (OSV.dev, GitHub Advisory, Wordfence v3, Friends-Of-Presta, CISA KEV, FIRST EPSS) and excluded ones, purl / CycloneDX 1.7 / OSV standards and conventions, severity, exemptions and confidentiality rules (`vigie/docs/failles.md`)
 - `osv-scanner` job in `garde-fous` (#22): Vigie's own Cargo, pnpm and Composer lockfiles scanned on every push and weekly, pinned binary checked by SHA-256, dated per-folder exceptions enforced by a script; `rqrr` 0.11 removes RUSTSEC-2026-0253
-- Vigie console (Tauri 2, Windows and Android): device pairing, authenticated read API and incident acknowledgement (3a6922d)
-- Cross-cutting foundation: single SQLite writer, uniform API errors with `X-Request-Id`, injectable clock, gitleaks, static musl build and TLS dependency guard in CI (#9, 624569f)
-- `LogSource` contract: normalized `Entry`, combined log splitter, timezone handling and shared fixtures (#7, b45372c)
-- Two-axis site typology (CMS kind filters checks, runtime filters commands) and the closed command list (#2, 3477886)
-- Signed command channel `/r/v1/commands` with a hash-chained, signed audit log and its CLI (#10, 58bfa82)
-- PHP agent 0.2.0: signed pull, verified responses, `ping` and `rotate-key`, end-to-end test against the real watcher in CI (#6, 4fe9ba9)
+- Vigie console (Tauri 2, Windows and Android): device pairing, authenticated read API and incident acknowledgement (a89ae68)
+- Cross-cutting foundation: single SQLite writer, uniform API errors with `X-Request-Id`, injectable clock, gitleaks, static musl build and TLS dependency guard in CI (#9, a905725)
+- `LogSource` contract: normalized `Entry`, combined log splitter, timezone handling and shared fixtures (#7, 3718dac)
+- Two-axis site typology (CMS kind filters checks, runtime filters commands) and the closed command list (#2, 0a63f14)
+- Signed command channel `/r/v1/commands` with a hash-chained, signed audit log and its CLI (#10, 46dbf38)
+- PHP agent 0.2.0: signed pull, verified responses, `ping` and `rotate-key`, end-to-end test against the real watcher in CI (#6, 5c33539)
 - Log analyzer wired into `tick`: bot catalogue, bounded path globs and declarative rules, incremental folding into persisted aggregates, IP suspicion score and load ported from the module, structured analysis snapshots, bounded `logs` findings, and robot user-agent signatures shared across sites without any IP (#8)
 - Alwaysdata log adapter: `/r/v1/logs` signed batches with high-water-mark idempotence, PHP agent 0.3.0 incremental reading across gz rotation, normalized entries only, 30-day purge, `AlwaysdataSource` (#1)
 - Vigie console: device token in the Windows Credential Manager (local persistence) and in Android `no_backup` storage with backup and device transfer disabled, migration from 0.1.1, security guards locked by tests (#12 phase 1)
@@ -42,54 +42,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [v1.11.2] - 2026-10-16
 
 ### Added
-- UptimeRobot probe recorded in the decision registry: no inbound webhook in V1, and the requirements a future webhook must meet (672fa0c)
+- UptimeRobot probe recorded in the decision registry: no inbound webhook in V1, and the requirements a future webhook must meet (1669ee5)
 
 ## [v1.11.1] - 2026-10-16
 
 ### Added
-- Dated product decision registry `vigie/docs/decisions.md`: every point left open by the 2026-10-15 brainstorm is settled, and the Vigie name is final (fc162a9)
+- Dated product decision registry `vigie/docs/decisions.md`: every point left open by the 2026-10-15 brainstorm is settled, and the Vigie name is final (6dbbdf7)
 
 ## [v1.11.0] - 2026-10-16
 
-Adds Vigie, a multi-site watcher living in `vigie/`, independent of the PrestaShop module, which is unchanged (`v1.10.0..cb90a9d`).
+Adds Vigie, a multi-site watcher living in `vigie/`, independent of the PrestaShop module, which is unchanged (`v1.10.0..46b986f`).
 
 ### Added
-- Vigie watcher skeleton (Rust, axum, SQLite) and VPS provisioning (1e26a20)
-- External checks and e-mail alerts (2b55edd)
-- Signed agent reports (ed25519) and agent silence detection (4932d34)
-- PHP agent and critical file integrity checks (208a73d)
-- Local replay of the 2026-09-07 incident as an acceptance test (b1e1161)
-- Module deployment script with lock and SSH validations (aaff9db)
-- Vigie console mockups and design handoff (c17e4ce)
-- Repository rule: no real production data in this public repository (46b2ad9)
+- Vigie watcher skeleton (Rust, axum, SQLite) and VPS provisioning (220fb19)
+- External checks and e-mail alerts (8f2d712)
+- Signed agent reports (ed25519) and agent silence detection (66d66f8)
+- PHP agent and critical file integrity checks (37806a1)
+- Local replay of the 2026-09-07 incident as an acceptance test (7cfb048)
+- Module deployment script with lock and SSH validations (705295d)
+- Vigie console mockups and design handoff (ccf9d2f)
+- Repository rule: no real production data in this public repository (79ad962)
 
 ### Changed
-- Project renamed Vigie: `monitor/` becomes `vigie/` (1a9de67)
+- Project renamed Vigie: `monitor/` becomes `vigie/` (de96b8e)
 
 ### Fixed
-- VPS installation through `git archive`, LF line endings under `autocrlf` (f9b9604)
-- `/health` proof taken outside the deployment lock (8b6a642)
-- OOM priority of `tick` aligned with `serve` (c874f74)
+- VPS installation through `git archive`, LF line endings under `autocrlf` (311c3ce)
+- `/health` proof taken outside the deployment lock (38f08e1)
+- OOM priority of `tick` aligned with `serve` (d93a0f0)
 
 ## [v1.10.0] - 2026-09-26
 
-First tagged release; covers the full history since the initial scaffold (`5ecd249..1f171d0`).
+First tagged release; covers the full history since the initial scaffold (`5ecd249..27fd6e0`).
 
 ### Added
-- Bot/scraper analytics in traffic stats (`requests_scrapers`), AI bot catalog, IP suspicion scoring, load diagnostic, htaccess doctor and robots.txt tools with admin tabs (1f171d0)
-- Resources monitoring, sampling and 500 tracing (b7bdc53)
-- Unified tab system with stats/conversion views and cron config (706a9ae)
-- Stats endpoints switched to POST, `errors_500_pages` added (df99891)
-- Stats: DailyStat entity, HTTP log parser, nightly cron with token auth, stats and conversion UI tabs (86f70b3, fde7328, cf9897b, d172019)
-- Log viewer: crawlers, PHP errors, htaccess block/unblock (647c1a6)
+- Bot/scraper analytics in traffic stats (`requests_scrapers`), AI bot catalog, IP suspicion scoring, load diagnostic, htaccess doctor and robots.txt tools with admin tabs (27fd6e0)
+- Resources monitoring, sampling and 500 tracing (a48ad94)
+- Unified tab system with stats/conversion views and cron config (b3fe171)
+- Stats endpoints switched to POST, `errors_500_pages` added (6ee6597)
+- Stats: DailyStat entity, HTTP log parser, nightly cron with token auth, stats and conversion UI tabs (86f70b3, 0a766cf, e6cfae5, 38a0701)
+- Log viewer: crawlers, PHP errors, htaccess block/unblock (61b7c85)
 - Initial module scaffold — log viewer & analyser (5ecd249)
 
 ### Changed
-- Nightly cron guarded by a MySQL lock against parallel runs (409 `running`), sargable order date range, compiled bot regex with per-UA cache, capped 500 checkout detail (1f171d0)
+- Nightly cron guarded by a MySQL lock against parallel runs (409 `running`), sargable order date range, compiled bot regex with per-UA cache, capped 500 checkout detail (27fd6e0)
 
 ### Fixed
-- Funnel scope in conversion stats (df99891)
-- Cron `run()` renamed to `processCron()` to avoid ControllerCore visibility conflict (9968b14)
+- Funnel scope in conversion stats (6ee6597)
+- Cron `run()` renamed to `processCron()` to avoid ControllerCore visibility conflict (5d35037)
 - Container compile: removed `controller.service_arguments` tag, service ID in routes.yml (ae5ab75, 492f07b)
 - Autoload fallback when `vendor/` is absent (d6d0703)
 - CSRF on block and settings forms, htaccess overwrite guard, install order, `fclose` in `finally` (3bc1a2b, 00ecb53)
