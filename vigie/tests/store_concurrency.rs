@@ -103,6 +103,16 @@ fn accept_batch(store: &mut Store, seq: i64, round: i64, key: &[u8; 32]) -> Resu
     )
 }
 
+/// Pause entre deux écritures d'un acteur qui joue `tick` ou `serve`. Ces
+/// processus écrivent par à-coups, pas en boucle serrée : sans pause, trois
+/// écrivains qui rebouclent monopolisent le verrou (SQLite ne l'attribue pas
+/// dans l'ordre de la file) et un quatrième, privé de processeur sur un runner
+/// chargé, dépasse les 5 s de `busy_timeout`. Le chargeur et les passes de
+/// rapprochement, eux, restent en boucle serrée : c'est le travail mesuré.
+fn breathe() {
+    std::thread::sleep(Duration::from_millis(5));
+}
+
 /// Attend que toutes les connexions soient ouvertes, puis boucle sur `step`
 /// pendant `DURATION` ; rend le nombre de tours. La fenêtre ne part qu'une
 /// fois toutes les connexions ouvertes : sous contention, une ouverture peut
@@ -438,6 +448,7 @@ fn a_vulns_load_in_contention_with_serve_tick_and_a_reader() {
             while !done.load(Ordering::SeqCst) || round == 0 {
                 round += 1;
                 store.record_tick(1_000 + round)?;
+                breathe();
             }
             Ok(round)
         })
@@ -455,6 +466,7 @@ fn a_vulns_load_in_contention_with_serve_tick_and_a_reader() {
                     outcome == LogsOutcome::Accepted { gap: 0 },
                     "lot {outcome:?}"
                 );
+                breathe();
             }
             Ok(round)
         })
@@ -583,6 +595,7 @@ fn an_epss_load_in_contention_with_serve_tick_and_a_reader() {
             while !done.load(Ordering::SeqCst) || round == 0 {
                 round += 1;
                 store.record_tick(1_000 + round)?;
+                breathe();
             }
             Ok(round)
         })
@@ -600,6 +613,7 @@ fn an_epss_load_in_contention_with_serve_tick_and_a_reader() {
                     outcome == LogsOutcome::Accepted { gap: 0 },
                     "lot {outcome:?}"
                 );
+                breathe();
             }
             Ok(round)
         })
@@ -805,6 +819,7 @@ fn two_match_passes_in_contention_with_serve_and_a_vulns_load() {
                     outcome == LogsOutcome::Accepted { gap: 0 },
                     "lot {outcome:?}"
                 );
+                breathe();
             }
             done.store(true, Ordering::SeqCst);
             Ok(round)

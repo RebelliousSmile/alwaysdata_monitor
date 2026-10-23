@@ -776,6 +776,22 @@ pub struct Store {
 /// Au-delà, une base toujours occupée fait échouer l'ouverture.
 const OPEN_PATIENCE: Duration = Duration::from_secs(5);
 
+/// Au-delà, une écriture occupée est rendue en erreur : un battement manqué se
+/// voit par le silence du veilleur, un lot refusé est renvoyé par l'agent.
+const WRITE_PATIENCE: Duration = Duration::from_secs(20);
+
+/// Rejoue `attempt` tant que la base est occupée, jusqu'à `patience`. Réservé
+/// aux transactions entières : un échec « occupé » n'a rien écrit.
+fn retry_busy<T>(patience: Duration, mut attempt: impl FnMut() -> Result<T>) -> Result<T> {
+    let give_up = Instant::now() + patience;
+    loop {
+        match attempt() {
+            Err(err) if is_busy(&err) && Instant::now() < give_up => {}
+            result => return result,
+        }
+    }
+}
+
 /// SQLite rend « occupé » sans passer par `busy_timeout` dans certains cas,
 /// dont le passage en WAL d'une base neuve ouverte par deux processus à la fois.
 fn is_busy(err: &anyhow::Error) -> bool {
@@ -902,7 +918,15 @@ impl Store {
         }
     }
 
+    /// Le battement est rejoué tel quel si la base reste occupée au-delà du
+    /// `busy_timeout` (un chargement long, un processeur disputé) : la
+    /// transaction est entière et sans effet de bord, et manquer un battement
+    /// de plus fait croire à tort que le veilleur est à l'arrêt.
     pub fn record_tick(&mut self, now: i64) -> Result<()> {
+        retry_busy(WRITE_PATIENCE, || self.record_tick_once(now))
+    }
+
+    fn record_tick_once(&mut self, now: i64) -> Result<()> {
         let tx = self
             .conn
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -1763,6 +1787,10 @@ impl Store {
     /// doublon), limite haute de `(site, file, gen)`, plafond quotidien, puis
     /// entrées, lot et nouvelle limite dans la même transaction.
     pub fn accept_logs(&mut self, batch: &LogBatch<'_>, now: i64) -> Result<LogsOutcome> {
+        retry_busy(WRITE_PATIENCE, || self.accept_logs_once(batch, now))
+    }
+
+    fn accept_logs_once(&mut self, batch: &LogBatch<'_>, now: i64) -> Result<LogsOutcome> {
         use crate::logs::receive::MAX_DAILY_BYTES;
         let tx = self
             .conn
