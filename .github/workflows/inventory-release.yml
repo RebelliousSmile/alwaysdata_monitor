@@ -5,7 +5,7 @@ name: inventory-release
 # une release GitHub en brouillon.
 #
 # Tag inventory-vX.Y.Z : brouillon rattaché à ce tag. Le préfixe tient à
-# l'écart les tags v* du module PrestaShop et console-v* de la console.
+# l'écart les tags v* hérités du module PrestaShop et console-v* de la console.
 # Lancement manuel : brouillon nommé inventory-vX.Y.Z-manuel.N, marqué
 # préversion, à essayer avant le premier tag.
 #

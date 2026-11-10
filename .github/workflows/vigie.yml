@@ -1,6 +1,6 @@
 name: vigie
 
-# Veilleur uniquement : ni le module PrestaShop ni la console (vigie/app).
+# Veilleur, agent PHP et scripts de déploiement : pas la console (vigie/app).
 on:
   push:
     paths:
@@ -46,6 +46,8 @@ jobs:
       - run: cargo fmt --check
       - run: cargo clippy --locked --all-targets -- -D warnings
       - run: cargo test --locked --all-targets
+      # Fonctions pures des scripts de déploiement du veilleur et de l'agent.
+      - run: node --test scripts/deploy-lib.test.mjs
       # Agent PHP sur la version minimale visée (8.1, celle du site A). Sous
       # Linux seulement : les tests de lien symbolique et de droits Unix sont
       # sautés sous Windows. Utilisateur non root, pour que les droits comptent.

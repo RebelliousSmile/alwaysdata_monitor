@@ -140,7 +140,7 @@ le build : aucun APK non signé n'atteint une release.
 
 `.github/workflows/console-release.yml` produit l'installeur Windows, l'APK
 signé et `SHA256SUMS`, puis crée une release GitHub en brouillon avec les trois
-fichiers. Les tags `v*` du module PrestaShop ne le déclenchent pas.
+fichiers. Les tags `v*`, hérités du module PrestaShop, ne le déclenchent pas.
 
 1. Bumper la version dans les trois fichiers, à la même valeur :
    - `package.json` (`tauri.conf.json` la lit) ;

@@ -580,6 +580,7 @@ Plan : `aidd_docs/tasks/2026_10/2026_10_17_osv-scanner/plan.md`. Job `deps`
 | **Script de contrôle** `vigie/scripts/check-osv-exceptions.py`, lancé avant le scan sur tous les `osv-scanner.toml` suivis par git : chaque `[[IgnoredVulns]]` a un `id`, une `reason` non vide et un `ignoreUntil` en date TOML au plus tard 92 jours après la date UTC du run ; toute autre clé de premier niveau est refusée, **`PackageOverrides` compris** (il ignore un paquet entier sans échéance). Une échéance passée n'est pas une erreur du script : osv-scanner rend la faille | osv-scanner accepte une exception sans échéance ou à 2099 : la règle « datée, motivée, ≤ 3 mois » ne tient pas à la seule relecture. 92 jours = trois mois calendaires au plus long |
 | **Le script et le job `deps` sont la règle.** Les exceptions et le refus de `PackageOverrides` passent par ce script : une PR qui modifie `check-osv-exceptions.py` ou le job `deps` de `garde-fous.yml` se relit avec le même soin qu'une PR qui ajoute une exception | Affaiblir le contrôle (limite, clés admises, lockfiles, code de sortie) ouvre la même porte qu'une exception, sans en avoir l'air |
 | `composer.lock` régénéré d'après `composer.json` (0 paquet, `require-dev` retiré en 1.10.0) et toujours scanné ; `composer validate --no-check-publish` fait échouer le job si le lock redevient périmé | Scanner un lock qui ne reflète pas `composer.json` ne prouve rien ; le lock vide reste le point d'entrée d'une future dépendance |
+| **2026-11-10** : `composer.json`, `composer.lock` et l'étape `composer validate` quittent le dépôt avec le module PrestaShop, désormais dans son propre dépôt ; trois lockfiles restent scannés (`vigie/Cargo.lock`, `vigie/app/src-tauri/Cargo.lock`, `vigie/app/pnpm-lock.yaml`). Les deux lignes précédentes sur `composer.lock` et les quatre lockfiles sont historiques | Le module n'est plus ici ; un lockfile absent ferait sortir le scan en 127 |
 | cargo-deny écarté pour l'instant ; à réévaluer si une politique de licences devient nécessaire | osv-scanner lit déjà RustSec ; les crates TLS interdites restent gardées par `check-tls-deps.sh` |
 | **2026-11-10, remédiations** : `rusqlite` 0.37 → 0.41 (tire `libsqlite3-sys` 0.39, SQLite ≥ 3.54, hors de RUSTSEC-2026-0459) dans les deux `Cargo.lock` ; `vite` 6.4.4 → 6.4.6 (hors de GHSA-8g5g-mxqh-grgj) | Un correctif existait. `rusqlite` 0.41 ajoute `sqlite-wasm-rs` et `rsqlite-vfs` au lockfile, compilés pour la seule cible wasm32 |
 | **2026-11-10, exceptions** dans `vigie/app/osv-scanner.toml`, échéance 2027-02-08 : minimatch `GHSA-g3hv-75wg-m249` (10.2.6 et 9.0.9, corrigé en 11.0.1) et glob `GHSA-3g3m-2fjr-6pw4` (13.0.6, corrigé en 14.0.2). braces `GHSA-vfj7-8cjw-p6xm` retirée | Aucune version publiée d'eslint, @eslint/config-array, @typescript-eslint/typescript-estree, editorconfig, js-beautify ou @vue/language-core n'accepte ces versions : forcer une majeure par `pnpm.overrides` hors de la plage déclarée n'est pas un correctif atteignable, même règle que postcss-selector-parser 6. Outils de lint, test et typage, absents du `dist` embarqué. L'avis braces a été retiré par GitHub (non exploitable) et osv-scanner signalait l'exception inutilisée |
@@ -587,11 +588,10 @@ Plan : `aidd_docs/tasks/2026_10/2026_10_17_osv-scanner/plan.md`. Job `deps`
 ### Quand le job `osv-scanner` est rouge
 
 1. Lire l'étape en échec. **Exceptions** : corriger le `osv-scanner.toml`
-   nommé. **composer.lock** : `composer update --no-install`, puis commit.
+   nommé.
    **Scan** : lire chaque faille sur `https://osv.dev/<id>`.
 2. Mettre à jour la dépendance si un correctif est atteignable
-   (`cargo update -p <crate>`, `pnpm update <paquet>`, `composer update
-   <paquet>`), puis vérifier que les tests restent verts.
+   (`cargo update -p <crate>`, `pnpm update <paquet>`), puis vérifier que les tests restent verts.
 3. Sinon seulement, ajouter en PR une exception dans le `osv-scanner.toml` du
    **dossier du lockfile** : `id`, `reason` (origine, pourquoi non
    exploitable chez nous, condition de levée), `ignoreUntil` au plus tard
@@ -608,13 +608,12 @@ Plan : `aidd_docs/tasks/2026_10/2026_10_17_osv-scanner/plan.md`. Job `deps`
 
 ```sh
 python3 -I vigie/scripts/check-osv-exceptions.py $(git ls-files ':(glob)**/osv-scanner.toml')
-composer validate --no-check-publish
 OSV_SCANNER_VERSION=2.6.0
 OSV_SCANNER_SHA256=ca69b3d3cd08f889a49dc0a383122f71cc528b83803671df5fd874d97485b108
 curl -sSfL -o osv-scanner "https://github.com/google/osv-scanner/releases/download/v${OSV_SCANNER_VERSION}/osv-scanner_linux_amd64"
 echo "${OSV_SCANNER_SHA256}  osv-scanner" | sha256sum -c -
 chmod +x osv-scanner
-./osv-scanner scan source --lockfile=vigie/Cargo.lock --lockfile=vigie/app/src-tauri/Cargo.lock --lockfile=vigie/app/pnpm-lock.yaml --lockfile=composer.lock
+./osv-scanner scan source --lockfile=vigie/Cargo.lock --lockfile=vigie/app/src-tauri/Cargo.lock --lockfile=vigie/app/pnpm-lock.yaml
 ```
 
 Sans accès à `api.osv.dev`, ajouter au scan `--offline-vulnerabilities

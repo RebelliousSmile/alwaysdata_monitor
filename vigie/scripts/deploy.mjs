@@ -4,7 +4,7 @@
 //   node vigie/scripts/deploy.mjs veilleur            prévisualisation (aucune écriture distante)
 //   node vigie/scripts/deploy.mjs veilleur --apply    envoi, bascule atomique, redémarrage de serve, preuve /health
 //
-// Comme pour le module : seul le contenu d'un commit est compilé (git archive),
+// Seul le contenu d'un commit est compilé (git archive),
 // jamais la copie de travail. Build statique musl dans WSL avec cargo-zigbuild,
 // transport ssh et scp de WSL avec une clé dédiée. Le redémarrage passe par la
 // seule règle sudo posée par deploy/provision.sh.
@@ -23,14 +23,11 @@ import {
   validateRemoteRelativePath,
   validateSshAccess,
   withRemoteLock,
-} from '../../scripts/deploy-lib.mjs'
+} from './deploy-lib.mjs'
 
 const vigieRoot = join(dirname(fileURLToPath(import.meta.url)), '..')
 const repoRoot = join(vigieRoot, '..')
 const options = parseArgs(process.argv.slice(2))
-if (options.allowDowngrade || options.clearCache) {
-  throw new Error('--allow-downgrade et --clear-cache ne concernent que le module PrestaShop')
-}
 
 const TARGET_TRIPLE = 'x86_64-unknown-linux-musl'
 // Mot pour mot la règle de /etc/sudoers.d/vigie : sudo refuse toute variante.

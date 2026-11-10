@@ -5,59 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+Until 2026-11-10 this repository also held the PrestaShop module `sc_alwaysdata`, which now lives in its own repository. The `v1.*` tags were releases of that module; the entries kept under them below are the Vigie changes they carried.
+
 ## [Unreleased]
 
-## [v1.11.5] - 2026-11-10
-
-### Fixed
-- Daily PHP error snapshot: the nightly cron counted no PHP error on accounts where Alwaysdata writes a single undated `php/php.log`, since only a file named after the date was looked for. `LogReaderService::readPhpLogForDate` now falls back to the undated files written since that day began (a rotated archive first, `.gz` included) and keeps the entries opening with that date, `[DD-Mon-YYYY HH:MM:SS …]`, with their stack trace lines; reading stops at the first entry of a later day and keeps the last `lines_php` lines
-
-### Added
-- `jobs` log folder (scheduled task output): its own tab in the logs viewer and its own `lines_jobs` setting (`SC_ALWAYSDATA_LINES_JOBS`, 2000 by default); a base path holding only `jobs/` is accepted
-
 ### Changed
-- An empty or missing log folder (`sites/` on most accounts, `jobs/` without scheduled tasks) is shown greyed out with a "vide" badge instead of a red error; `readSource` returns `error: null, empty: true` for it
-- The log folders and their default line counts come from `LogReaderService::LOG_DIRS` and `DEFAULT_LINES` in the controller and the settings form, whose bounds now follow `MIN_LINES` and `MAX_LINES` (the field allowed 100000 while the stored value is capped at 50000)
-
-## [v1.11.4] - 2026-11-10
-
-Closes the remaining findings of the module audit of 2026-11-10 (performance, UI, hardening).
-
-### Fixed
-- Load diagnostic: results are cached on disk under `_PS_CACHE_DIR_/sc_alwaysdata/` (`DiagnosticCache`). A closed day stays valid while the log signature (path, size, mtime) holds; the current day, whose log grows constantly and never matched its signature twice, is served for 5 minutes. Computing an entry takes a non-blocking lock: a second request for the same day gets HTTP 409 with a retry button instead of another full pass over the log on another PHP worker
-- Diagnostic tab: switching tabs no longer re-sends a request already running for the same date, and changing the date aborts the previous request (`AbortController`)
-- Diagnostic errors: a missing log (404) or a busy diagnostic (409) is shown as a warning, any other error as a failure
-- `badge-light` badges, unreadable on the back-office white background, replaced by `badge-secondary`
-
-### Security
-- JSON error responses of the back-office actions and of the three cron controllers no longer carry the exception message, file or stack trace: the detail goes to the PrestaShop logs; back-office actions still return it when `_PS_MODE_DEV_` is on
-- The logs base path is validated on save and on use (`LogReaderService::normalizeBasePath`): it must be an existing readable directory holding at least one of `apache`, `http`, `php`, `sites`; a value stored before this version goes through the same check
-- `lines_*` settings are bounded to 100–50,000 on save, and to 50,000 on read
-- The cron token and cron URLs are only exposed to profiles holding the `update` permission (index page and stats action)
-- `.htaccess` files deny direct HTTP access to `src/`, `config/`, `upgrade/` and `tests/` (Apache 2.2 and 2.4)
-- `esc()` in the admin templates also escapes the single quote
-- `symfony/filesystem` 6.4.50 in the module `composer.lock` (PKSA-g499-cm4q-v35y; development dependency of php-cs-fixer, never deployed)
-
-### Added
-- The nightly cron purges diagnostic cache entries older than 30 days (`purged_cache_files` in its response)
+- The PrestaShop module, its tests, its `module` workflow and its deployment tooling (`scripts/deploy.mjs`, `package.json`, `deploy/targets.example.json`) left the repository; `deploy-lib.mjs` and its tests moved to `vigie/scripts/` and keep only what the watcher and agent deployments use
+- The PHP agent, its tests and `docs/htaccess.md` no longer name the module: the `.htaccess` merge keeps any third-party block byte for byte
 
 ## [v1.11.3] - 2026-11-10
 
-Ports the v1.10.1 security hotfix (security audit of 2026-11-10, tag `v1.10.1` on `hotfix/1.10.1`) onto `main`.
-
-### Fixed
-- `.htaccess` write validation now checks the content itself, before anything is written (`HtaccessSyntaxChecker`): unbalanced or malformed section tags, unterminated quotes, `RewriteCond` / `RewriteRule` without two arguments, bad `RewriteEngine` value. A refused write leaves the live file untouched and creates no backup; a file that was already broken can still be edited but never made worse. Replaces `apachectl -t`, which checks the server configuration and never read the `.htaccess`, ran after the file was in place, and could roll back a valid edit because of an unrelated server configuration error
-
 ### Security
-- The `.htaccess` path is no longer configurable: the module always works on `_PS_ROOT_DIR_/.htaccess` and the `robots.txt` next to it. A stored path could redirect `.htaccess`/`robots.txt` writes and their `.bak` copies to any file writable by PHP. `upgrade-1.10.1` drops `SC_ALWAYSDATA_HTACCESS_PATH`.
-- Saving the configuration (POST on the index page) now requires the `update` permission, not only `read`.
-- User-agent blocks are validated before writing: plain token only (`[A-Za-z0-9._ -]`, 4 characters minimum), and refused when the pattern would also match a search engine or a real browser (`.`, `Mozilla`, `Googlebot`…). A refused token in a batch aborts the whole write.
-- Cron front controllers accept the token in an `X-Cron-Token` header (checked first) as well as the `token` query parameter, which stays accepted so scheduled URLs keep working; the header keeps the secret out of access logs and `Referer` values (`CronTokenGuard`)
 - `rustls-webpki` 0.103.16, `webpki-roots` and `webpki-root-certs` 1.0.10 in `vigie/Cargo.lock` and `vigie/app/src-tauri/Cargo.lock` (RUSTSEC-2026-0381, -0382, -0383)
 
 ### Added
 - Custom page checks (#33): `[[sites.custom_checks]]` in `config.toml` declares pages to watch by hand (expected status, text that must be present, text that must be absent, severity `warning` or `critical`, 20 rules per site at most); one `custom` check runs them with the other external checks and opens one incident per failing rule, keyed by the rule `id`. Paths are joined to the site origin and cannot leave it; no regular expressions. Declared in the capability registry (`Needs::CustomRules`): a site without a rule has no `custom` check. The console labels it "Pages personnalisées" and drops its "pas encore disponible" placeholder
-- PHPUnit 10.5 as a dev dependency of the module (`composer.lock` resolved against PHP 8.1) and a `module` workflow running the suite on PHP 8.1 and 8.4, plus a php-cs-fixer style check (`src/` reformatted to match `.php-cs-fixer.dist.php`)
 - Matching inventories against known vulnerabilities (#21): `tick` matches each site's latest inventories (agent and CI) against the vulnerability base in bounded, resumable runs (global sequence, cursor compare-and-swap, budget with a reserve kept for sending alerts) on a read-only connection, groups advisories by alias (union-find), assesses each group with the F4 severity rule (KEV, EPSS) and writes one `vulns` finding per (site, component, group) with per-source provenance, a stale-inventory warning per source and a matching-error finding; migration file `0021.sql` adds runs, state, components, items, provenance, keys and waivers; audited waivers (90 days at most, reason required, SHA-256 of the reason in the signed `_veilleur` audit chain) through `vigie site vulns-ack` with a dry-run preview; grouped emails above five new findings, closed findings masked after 30 days; `vigie site components | vulns` and `vigie vulns report`; API routes `GET /api/v1/sites/{id}/components`, `/sites/{id}/vulns` and `/vulns/sources` paginated on a pinned run; console Failles and Sources de failles screens; volume test (#[ignore], release) and fictional fixtures only
 - Known-vulnerability prioritisation (#18): CISA KEV (official `cisagov/kev-data` mirror, cisa.gov as fallback) and FIRST EPSS (daily gzip CSV, streamed) are declared automatically with the first vulnerability source and synced after them through the F2 engine (same lease, rate window, drop threshold, shrink guard and `vulns-sync` finding); generation-based `WITHOUT ROWID` tables swapped atomically in 5,000-row batches (migration `0019.sql`); validators bound to the URL that served them; a KEV catalogue older than the active one is refused (`stale_count`), a shrunk or failing mirror falls back to cisa.gov; EPSS `Content-Encoding: gzip` kept raw, scores in truncated integer millionths; the single F0 severity rule in `vulns/severity.rs` (`assess`, `assess_group`, `assess_unknown`, no floats, truth table and exhaustive-grid properties) read through `StoreTables` on a read-only connection; `vigie vulns sources` shows datasets and warns about a KEV catalogue older than 14 days, `vigie vulns show` explains KEV, EPSS and the resulting severity
 - CMS vulnerability sources (#17): Wordfence Intelligence v3 (`production` feed, WordPress plugins, themes and core) and Friends-Of-Presta (PrestaShop modules and core) plug into the #16 sync framework; the Wordfence feed is read entry by entry (`RawValue`, 4 MiB per value) with strict identity fields and per-field fallbacks, bounds mapped to OSV events, scores read as text into integer tenths, `copyrights` kept in a stable order or replaced by a counted fixed notice; Wordfence stays locked behind a two-key terms review (binary constant checked against `failles.md`, plus `[vulns.wordfence] terms_reviewed`), re-checked right before the request, with its token in a verified 0600 file (`secret.rs`, shared with the command keys), a sensitive `Bearer` header sent to `www.wordfence.com` only, and one request per 30 minutes; Friends-Of-Presta is read from the repository `.tar.gz` by an in-house bounded tar reader and a closed YAML front-matter parser, with a closed grammar for free-text affected releases (anything else stays "range unknown", never "not affected"); audited, append-only range corrections (`vigie vulns correct`, `vigie vulns corrections --audit --verify`, migration 18) signed in the `_veilleur` audit chain and applied at read time; per-source redistribution level (`registry::redistribution`) for #21; fictional fixtures only
@@ -101,7 +63,6 @@ Adds Vigie, a multi-site watcher living in `vigie/`, independent of the PrestaSh
 - Signed agent reports (ed25519) and agent silence detection (66d66f8)
 - PHP agent and critical file integrity checks (37806a1)
 - Local replay of the 2026-09-07 incident as an acceptance test (7cfb048)
-- Module deployment script with lock and SSH validations (705295d)
 - Vigie console mockups and design handoff (ccf9d2f)
 - Repository rule: no real production data in this public repository (79ad962)
 
@@ -112,26 +73,3 @@ Adds Vigie, a multi-site watcher living in `vigie/`, independent of the PrestaSh
 - VPS installation through `git archive`, LF line endings under `autocrlf` (311c3ce)
 - `/health` proof taken outside the deployment lock (38f08e1)
 - OOM priority of `tick` aligned with `serve` (d93a0f0)
-
-## [v1.10.0] - 2026-09-26
-
-First tagged release; covers the full history since the initial scaffold (`5ecd249..27fd6e0`).
-
-### Added
-- Bot/scraper analytics in traffic stats (`requests_scrapers`), AI bot catalog, IP suspicion scoring, load diagnostic, htaccess doctor and robots.txt tools with admin tabs (27fd6e0)
-- Resources monitoring, sampling and 500 tracing (a48ad94)
-- Unified tab system with stats/conversion views and cron config (b3fe171)
-- Stats endpoints switched to POST, `errors_500_pages` added (6ee6597)
-- Stats: DailyStat entity, HTTP log parser, nightly cron with token auth, stats and conversion UI tabs (86f70b3, 0a766cf, e6cfae5, 38a0701)
-- Log viewer: crawlers, PHP errors, htaccess block/unblock (61b7c85)
-- Initial module scaffold — log viewer & analyser (5ecd249)
-
-### Changed
-- Nightly cron guarded by a MySQL lock against parallel runs (409 `running`), sargable order date range, compiled bot regex with per-UA cache, capped 500 checkout detail (27fd6e0)
-
-### Fixed
-- Funnel scope in conversion stats (6ee6597)
-- Cron `run()` renamed to `processCron()` to avoid ControllerCore visibility conflict (5d35037)
-- Container compile: removed `controller.service_arguments` tag, service ID in routes.yml (ae5ab75, 492f07b)
-- Autoload fallback when `vendor/` is absent (d6d0703)
-- CSRF on block and settings forms, htaccess overwrite guard, install order, `fclose` in `finally` (3bc1a2b, 00ecb53)
