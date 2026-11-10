@@ -20,6 +20,8 @@ use ScAlwaysdata\Entity\DailyStat;
 use ScAlwaysdata\Entity\ResourceSample;
 use ScAlwaysdata\Service\AiBotCatalog;
 use ScAlwaysdata\Service\CrawlerAnalyserService;
+use ScAlwaysdata\Service\DiagnosticBusyException;
+use ScAlwaysdata\Service\DiagnosticCache;
 use ScAlwaysdata\Service\HtaccessService;
 use ScAlwaysdata\Service\LoadDiagnosticService;
 use ScAlwaysdata\Service\LogReaderService;
@@ -32,6 +34,7 @@ use Symfony\Component\HttpFoundation\Response;
 class ScAlwaysdataController extends FrameworkBundleAdminController
 {
     private const BACKUPS_KEPT_ON_PURGE = 10;
+    private const GENERIC_ERROR = 'Erreur interne du module. Le détail est consigné dans Paramètres avancés > Logs.';
 
     private LogReaderService $logReaderService;
     private CrawlerAnalyserService $crawlerAnalyserService;
@@ -82,17 +85,17 @@ class ScAlwaysdataController extends FrameworkBundleAdminController
                 return $this->redirectToRoute('sc_alwaysdata_index');
             }
 
-            $logsPath = rtrim(trim((string) $request->request->get('logs_path', '')), '/') . '/';
+            $logsPath = LogReaderService::normalizeBasePath((string) $request->request->get('logs_path', ''));
 
-            if ($logsPath === '/') {
+            if ($logsPath === null) {
                 $this->addFlash(
                     'error',
-                    $this->trans('Le chemin des logs ne peut pas être vide.', 'Modules.Scalwaysdata.Admin')
+                    $this->trans('Chemin des logs refusé : il doit désigner un répertoire existant et lisible, contenant au moins un des sous-dossiers apache, http, php ou sites.', 'Modules.Scalwaysdata.Admin')
                 );
             } else {
                 \Configuration::updateValue('SC_ALWAYSDATA_LOGS_PATH', $logsPath);
                 foreach (['apache', 'http', 'php', 'sites'] as $dir) {
-                    $val = max(100, (int) $request->request->get('lines_' . $dir, 5000));
+                    $val = LogReaderService::clampLines((int) $request->request->get('lines_' . $dir, 5000));
                     \Configuration::updateValue('SC_ALWAYSDATA_LINES_' . strtoupper($dir), $val);
                 }
                 $this->addFlash(
@@ -123,6 +126,10 @@ class ScAlwaysdataController extends FrameworkBundleAdminController
         $cronUrl = $baseUrl . '/module/sc_alwaysdata/cron?token=' . urlencode($cronToken);
         $cronResourcesUrl = $baseUrl . '/module/sc_alwaysdata/cron_resources?token=' . urlencode($cronToken);
         $cronResourcesSampleUrl = $baseUrl . '/module/sc_alwaysdata/cron_resources_sample?token=' . urlencode($cronToken);
+        // The token lets anyone trigger the crons: read-only profiles do not get the URLs
+        if (!$this->isGranted('update', $request->get('_legacy_controller'))) {
+            $cronUrl = $cronResourcesUrl = $cronResourcesSampleUrl = '';
+        }
 
         return $this->render(
             '@Modules/sc_alwaysdata/views/templates/admin/index.html.twig',
@@ -223,7 +230,7 @@ class ScAlwaysdataController extends FrameworkBundleAdminController
                 'blocked_uas' => $blockedUAs,
             ]);
         } catch (\Throwable $e) {
-            return new JsonResponse(['error' => $e->getMessage()], 500);
+            return $this->jsonError($e);
         }
     }
 
@@ -248,10 +255,37 @@ class ScAlwaysdataController extends FrameworkBundleAdminController
                 header('Content-Type: application/json', true, 500);
             }
 
+            $detail = sprintf('%s (%s:%d)', $error['message'], $error['file'], $error['line']);
+            self::logError('Fatal error: ' . $detail);
             echo json_encode([
-                'error' => sprintf('%s (%s:%d)', $error['message'], $error['file'], $error['line']),
+                'error' => self::isDevMode() ? $detail : self::GENERIC_ERROR,
             ]);
         });
+    }
+
+    /**
+     * Error envelope of the JSON endpoints. The message and its file:line go to
+     * the PrestaShop log; the response carries them only in dev mode, so server
+     * paths and SQL fragments never reach the browser in production.
+     */
+    private function jsonError(\Throwable $e, int $status = 500): JsonResponse
+    {
+        $detail = sprintf('%s: %s (%s:%d)', get_class($e), $e->getMessage(), $e->getFile(), $e->getLine());
+        self::logError($detail);
+
+        return new JsonResponse(['error' => self::isDevMode() ? $detail : self::GENERIC_ERROR], $status);
+    }
+
+    private static function logError(string $detail): void
+    {
+        if (class_exists('PrestaShopLogger')) {
+            \PrestaShopLogger::addLog('[sc_alwaysdata] ' . $detail, 3, null, 'sc_alwaysdata');
+        }
+    }
+
+    private static function isDevMode(): bool
+    {
+        return defined('_PS_MODE_DEV_') && _PS_MODE_DEV_;
     }
 
     /**
@@ -277,17 +311,20 @@ class ScAlwaysdataController extends FrameworkBundleAdminController
                  ORDER BY stat_date ASC'
             );
 
-            $cronToken = (string) \Configuration::get('SC_ALWAYSDATA_CRON_TOKEN');
-            $baseUrl = (string) \Tools::getShopDomainSsl(true);
-
-            return new JsonResponse([
+            $payload = [
                 'snapshot' => $snapshot ? $this->serializeStat($snapshot) : null,
                 'period' => $rows ?: [],
-                'cronToken' => $cronToken,
-                'cronUrl' => $baseUrl . '/module/sc_alwaysdata/cron?token=' . urlencode($cronToken),
-            ]);
+            ];
+            // The token lets anyone trigger the crons: read-only profiles do not get it
+            if ($this->isGranted('update', $request->get('_legacy_controller'))) {
+                $cronToken = (string) \Configuration::get('SC_ALWAYSDATA_CRON_TOKEN');
+                $payload['cronToken'] = $cronToken;
+                $payload['cronUrl'] = (string) \Tools::getShopDomainSsl(true) . '/module/sc_alwaysdata/cron?token=' . urlencode($cronToken);
+            }
+
+            return new JsonResponse($payload);
         } catch (\Throwable $e) {
-            return new JsonResponse(['error' => $e->getMessage(), 'trace' => $e->getFile() . ':' . $e->getLine()], 500);
+            return $this->jsonError($e);
         }
     }
 
@@ -319,7 +356,7 @@ class ScAlwaysdataController extends FrameworkBundleAdminController
                 'period' => $rows ?: [],
             ]);
         } catch (\Throwable $e) {
-            return new JsonResponse(['error' => $e->getMessage(), 'trace' => $e->getFile() . ':' . $e->getLine()], 500);
+            return $this->jsonError($e);
         }
     }
 
@@ -352,16 +389,17 @@ class ScAlwaysdataController extends FrameworkBundleAdminController
                 'report' => $report,
             ]);
         } catch (\Throwable $e) {
-            return new JsonResponse(['error' => $e->getMessage(), 'trace' => $e->getFile() . ':' . $e->getLine()], 500);
+            return $this->jsonError($e);
         }
     }
 
     /**
      * Load diagnostic of one day of HTTP logs (port of diag-site-a.sh).
      *
-     * A past day's log no longer changes: its result is cached on disk, keyed by
-     * the file's size and mtime, so re-opening the tab during an incident does
-     * not re-read a 300k-line file.
+     * Results go through DiagnosticCache: a past day is cached until its log
+     * changes, the current day for DiagnosticCache::TODAY_TTL seconds, and a
+     * second request while one is computing gets 409 instead of another pass
+     * over a 300k-line file on another worker.
      *
      * @AdminSecurity(
      *     "is_granted('read', request.get('_legacy_controller'))",
@@ -381,36 +419,40 @@ class ScAlwaysdataController extends FrameworkBundleAdminController
             }
 
             $signature = $logPath . '|' . filesize($logPath) . '|' . filemtime($logPath);
-            $cacheFile = _PS_CACHE_DIR_ . 'sc_alwaysdata/diagnostic-v4-' . $date . '.json';
-            $cached = is_readable($cacheFile) ? json_decode((string) file_get_contents($cacheFile), true) : null;
-
-            if (is_array($cached) && ($cached['signature'] ?? null) === $signature) {
-                $result = $cached['result'];
-            } else {
-                @set_time_limit(180);
-                $result = $this->loadDiagnosticService->analyse($logPath, $this->fetchShopDomains());
-                $result['file'] = basename($logPath);
-                if ($date < date('Y-m-d')) {
-                    @mkdir(dirname($cacheFile), 0755, true);
-                    @file_put_contents($cacheFile, json_encode(['signature' => $signature, 'result' => $result]));
-                }
-            }
-
-            // Kept apart from the day's cache: the blocked list changes after each block/unblock
+            $isToday = $date >= date('Y-m-d');
+            $cache = new DiagnosticCache(_PS_CACHE_DIR_ . 'sc_alwaysdata/');
             $blockedIps = $this->htaccessService->readBlockedIps();
-            $auditSignature = $signature . '|' . md5(implode(',', $blockedIps));
-            $auditFile = _PS_CACHE_DIR_ . 'sc_alwaysdata/blocked-audit-v1-' . $date . '.json';
-            $cachedAudit = is_readable($auditFile) ? json_decode((string) file_get_contents($auditFile), true) : null;
-            if (is_array($cachedAudit) && ($cachedAudit['signature'] ?? null) === $auditSignature) {
-                $audit = $cachedAudit['audit'];
-            } else {
+
+            try {
+                $shopDomains = null;
+                $domains = function () use (&$shopDomains): array {
+                    return $shopDomains ??= $this->fetchShopDomains();
+                };
+
+                $result = $cache->remember('diagnostic-v5-' . $date, $signature, $isToday, function () use ($logPath, $domains): array {
+                    @set_time_limit(180);
+                    $result = $this->loadDiagnosticService->analyse($logPath, $domains());
+                    $result['file'] = basename($logPath);
+
+                    return $result;
+                });
+
+                // Kept apart from the day's entry: the blocked list changes after each block/unblock
                 $audit = $blockedIps === []
                     ? ['seen' => [], 'absent' => []]
-                    : $this->loadDiagnosticService->auditBlockedIps($logPath, $blockedIps, $this->fetchShopDomains());
-                if ($date < date('Y-m-d')) {
-                    @mkdir(dirname($auditFile), 0755, true);
-                    @file_put_contents($auditFile, json_encode(['signature' => $auditSignature, 'audit' => $audit]));
-                }
+                    : $cache->remember(
+                        'blocked-audit-v2-' . $date . '-' . md5(implode(',', $blockedIps)),
+                        $signature,
+                        $isToday,
+                        function () use ($logPath, $blockedIps, $domains): array {
+                            return $this->loadDiagnosticService->auditBlockedIps($logPath, $blockedIps, $domains());
+                        }
+                    );
+            } catch (DiagnosticBusyException $e) {
+                return new JsonResponse([
+                    'error' => 'Un diagnostic de ce jour est déjà en cours de calcul. Réessayez dans quelques instants.',
+                    'busy' => true,
+                ], 409);
             }
 
             return new JsonResponse([
@@ -421,7 +463,7 @@ class ScAlwaysdataController extends FrameworkBundleAdminController
                 'blocked_uas' => $this->htaccessService->readBlockedUAs(),
             ]);
         } catch (\Throwable $e) {
-            return new JsonResponse(['error' => $e->getMessage()], 500);
+            return $this->jsonError($e);
         }
     }
 

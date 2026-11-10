@@ -120,7 +120,7 @@ class Sc_alwaysdataCron_resourcesModuleFrontController extends ModuleFrontContro
                 null,
                 'sc_alwaysdata'
             );
-            $this->responseData = ['error' => $e->getMessage(), 'date' => $date];
+            $this->responseData = ['error' => 'Cron failed, see the PrestaShop logs.', 'date' => $date];
             $this->responseHttpCode = 500;
         }
     }

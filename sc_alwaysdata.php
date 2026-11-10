@@ -30,7 +30,7 @@ if (file_exists($autoloadPath)) {
 
 class sc_alwaysdata extends Module
 {
-    public const VERSION = '1.11.3';
+    public const VERSION = '1.11.4';
 
     public const CONFIG_LOGS_PATH = 'SC_ALWAYSDATA_LOGS_PATH';
     public const CONFIG_LINES_APACHE = 'SC_ALWAYSDATA_LINES_APACHE';

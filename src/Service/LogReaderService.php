@@ -29,12 +29,53 @@ class LogReaderService
      */
     private const MAX_TAIL_BYTES = 33554432; // 32 MiB
 
+    public const MIN_LINES = 100;
+    /** Upper bound of SC_ALWAYSDATA_LINES_*: tailFileGz keeps up to twice this many lines in memory. */
+    public const MAX_LINES = 50000;
+
+    /**
+     * Bounds a configured line count to [MIN_LINES, MAX_LINES].
+     */
+    public static function clampLines(int $lines): int
+    {
+        return min(self::MAX_LINES, max(self::MIN_LINES, $lines));
+    }
+
+    /**
+     * Validates a logs base path before it is stored or used: it must resolve to
+     * an existing readable directory holding at least one of the Alwaysdata log
+     * folders (apache, http, php, sites). Returns the path with a trailing
+     * slash, or null when the path is refused.
+     */
+    public static function normalizeBasePath(string $path): ?string
+    {
+        $path = trim($path);
+        if ($path === '' || strpos($path, "\0") !== false) {
+            return null;
+        }
+
+        $real = realpath($path);
+        if ($real === false || !is_dir($real) || !is_readable($real)) {
+            return null;
+        }
+
+        foreach (self::LOG_DIRS as $dir) {
+            if (is_dir($real . DIRECTORY_SEPARATOR . $dir)) {
+                // The path as typed, not its realpath: the stored value stays recognisable
+                return rtrim($path, '/\\') . '/';
+            }
+        }
+
+        return null;
+    }
+
     private function getLinesForDir(string $dir): int
     {
         $key = 'SC_ALWAYSDATA_LINES_' . strtoupper($dir);
         $v = (int) \Configuration::get($key);
 
-        return $v > 0 ? $v : (self::DEFAULT_LINES[$dir] ?? 5000);
+        // Upper bound only: the lower one is a form constraint, a smaller stored value stays honoured
+        return $v > 0 ? min($v, self::MAX_LINES) : (self::DEFAULT_LINES[$dir] ?? 5000);
     }
 
     /**
@@ -188,9 +229,11 @@ class LogReaderService
             '/admin/logs/',
         ]));
 
+        // A stored value saved before 1.11.4 was never validated: it goes through the same check
         foreach ($candidates as $path) {
-            if (is_dir($path) && is_readable($path)) {
-                return $path;
+            $valid = self::normalizeBasePath($path);
+            if ($valid !== null) {
+                return $valid;
             }
         }
 

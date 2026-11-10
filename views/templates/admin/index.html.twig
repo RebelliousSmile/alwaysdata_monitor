@@ -314,7 +314,7 @@ window.cronResourcesSampleUrl = cronResourcesSampleUrl;
 <script>
 // Helpers globaux utilisés par les partiels _tab_trafic et _tab_conversion
 function esc(s) {
-    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
 function pct(a, b) {
     if (!b || b === 0) return '-';
@@ -390,16 +390,40 @@ function pct(a, b) {
             .finally(function() { if (spinner) spinner.style.display = 'none'; });
     }
 
+    // One diagnostic request at a time: the same date already in flight is not
+    // re-sent (tab switches), another date aborts the previous request.
+    var diagnosticInFlight = null;
+
     function fetchDiagnostic() {
         var el = document.getElementById('tab-diagnostic-content');
         if (!el) return;
+        var date = currentDate;
+        if (diagnosticInFlight) {
+            if (diagnosticInFlight.date === date) return;
+            diagnosticInFlight.controller.abort();
+        }
+        var request = { date: date, controller: new AbortController() };
+        diagnosticInFlight = request;
+
         if (spinner) spinner.style.display = 'inline-block';
-        el.innerHTML = '<div class="text-center text-muted py-4"><div class="spinner-border spinner-border-sm" role="status"></div> Lecture du log du ' + esc(currentDate) + '…</div>';
-        postJson(diagnosticUrl, { date: currentDate })
-            .then(function(r) { return r.json(); })
+        el.innerHTML = '<div class="text-center text-muted py-4"><div class="spinner-border spinner-border-sm" role="status"></div> Lecture du log du ' + esc(date) + '…</div>';
+        fetch(diagnosticUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-Requested-With': 'XMLHttpRequest' },
+            body: new URLSearchParams({ date: date }).toString(),
+            signal: request.controller.signal
+        })
+            .then(function(r) { return r.json().then(function(d) { d.httpStatus = r.status; return d; }); })
             .then(function(d) { renderDiagnostic(d); })
-            .catch(function(e) { el.innerHTML = '<div class="alert alert-danger">Erreur: ' + esc(e.message) + '</div>'; })
-            .finally(function() { if (spinner) spinner.style.display = 'none'; });
+            .catch(function(e) {
+                if (e.name === 'AbortError') return;
+                el.innerHTML = '<div class="alert alert-danger">Erreur: ' + esc(e.message) + '</div>';
+            })
+            .finally(function() {
+                if (diagnosticInFlight !== request) return;
+                diagnosticInFlight = null;
+                if (spinner) spinner.style.display = 'none';
+            });
     }
 
     function fetchActive() {
@@ -411,6 +435,7 @@ function pct(a, b) {
 
     // Exposés globalement pour runCron() dans _tab_trafic.html.twig
     window.fetchStats = fetchStats;
+    window.fetchDiagnostic = fetchDiagnostic;
     window.fetchResources = fetchResources;
 
     document.addEventListener('DOMContentLoaded', function() {
@@ -710,7 +735,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 var uaList = c.user_agents || [];
                 var uaCell = uaList.length
                     ? '<small style="word-break:break-all">' + escapeHtml(uaList[0]) + '</small>'
-                      + (uaList.length > 1 ? ' <span class="badge badge-light">+' + (uaList.length - 1) + '</span>' : '')
+                      + (uaList.length > 1 ? ' <span class="badge badge-secondary">+' + (uaList.length - 1) + '</span>' : '')
                     : '<em class="text-muted">-</em>';
 
                 // Actions
@@ -832,7 +857,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 .then(function(data) {
                     if (data.success) {
                         row.style.opacity = '0.4';
-                        row.querySelector('td:last-child').innerHTML = '<span class="badge badge-light">D\u00e9bloqu\u00e9</span>';
+                        row.querySelector('td:last-child').innerHTML = '<span class="badge badge-secondary">D\u00e9bloqu\u00e9</span>';
                     } else {
                         alert('Erreur: ' + (data.message || 'Erreur inconnue'));
                         self.disabled = false;

@@ -18,6 +18,7 @@ declare(strict_types=1);
 use ScAlwaysdata\Entity\DailyStat;
 use ScAlwaysdata\Service\CrawlerAnalyserService;
 use ScAlwaysdata\Service\CronTokenGuard;
+use ScAlwaysdata\Service\DiagnosticCache;
 use ScAlwaysdata\Service\HttpLogParserService;
 use ScAlwaysdata\Service\LogReaderService;
 use ScAlwaysdata\Service\PhpErrorAnalyserService;
@@ -164,6 +165,9 @@ class Sc_alwaysdataCronModuleFrontController extends ModuleFrontController
             );
             $purgedRows = $purged ? (int) Db::getInstance()->Affected_Rows() : 0;
 
+            // One diagnostic entry per consulted day: drop those older than 30 days
+            $purgedCacheFiles = (new DiagnosticCache(_PS_CACHE_DIR_ . 'sc_alwaysdata/'))->purge();
+
             $this->responseData = [
                 'date' => $date,
                 'requests_total' => (int) $stat->requests_total,
@@ -175,6 +179,7 @@ class Sc_alwaysdataCronModuleFrontController extends ModuleFrontController
                 'errors_500_front' => (int) $stat->errors_500_front,
                 'php_errors_count' => count($phpErrors),
                 'purged_rows' => $purgedRows,
+                'purged_cache_files' => $purgedCacheFiles,
             ];
         } catch (Throwable $e) {
             PrestaShopLogger::addLog(
@@ -183,7 +188,7 @@ class Sc_alwaysdataCronModuleFrontController extends ModuleFrontController
                 null,
                 'sc_alwaysdata'
             );
-            $this->responseData = ['error' => $e->getMessage(), 'date' => $date];
+            $this->responseData = ['error' => 'Cron failed, see the PrestaShop logs.', 'date' => $date];
             $this->responseHttpCode = 500;
         } finally {
             if ($locked) {

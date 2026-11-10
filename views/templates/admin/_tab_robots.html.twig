@@ -108,9 +108,9 @@
                         <td class="text-muted">{{ bot.vendor }}</td>
                         <td>
                             {% if bot.robots_only %}
-                            <span class="badge badge-light" title="Jeton lu dans robots.txt uniquement : l'éditeur crawle avec son robot de recherche habituel">robots.txt seul</span>
+                            <span class="badge badge-secondary" title="Jeton lu dans robots.txt uniquement : l'éditeur crawle avec son robot de recherche habituel">robots.txt seul</span>
                             {% elseif not bot.honours_robots %}
-                            <span class="badge badge-light" title="N'applique pas le robots.txt : seul le 403 du .htaccess l'arrête">ignore robots.txt</span>
+                            <span class="badge badge-secondary" title="N'applique pas le robots.txt : seul le 403 du .htaccess l'arrête">ignore robots.txt</span>
                             {% endif %}
                         </td>
                         <td class="text-right text-nowrap">

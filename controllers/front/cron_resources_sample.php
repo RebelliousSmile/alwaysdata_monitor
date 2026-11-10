@@ -123,7 +123,7 @@ class Sc_alwaysdataCron_resources_sampleModuleFrontController extends ModuleFron
                 null,
                 'sc_alwaysdata'
             );
-            $this->responseData = ['error' => $e->getMessage(), 'bucket_key' => $bucketKey];
+            $this->responseData = ['error' => 'Cron failed, see the PrestaShop logs.', 'bucket_key' => $bucketKey];
             $this->responseHttpCode = 500;
         }
     }

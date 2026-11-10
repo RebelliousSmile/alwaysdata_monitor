@@ -14,7 +14,12 @@ function renderDiagnostic(data) {
     var el = document.getElementById('tab-diagnostic-content');
     if (!el) return;
     if (data.error) {
-        el.innerHTML = '<div class="alert alert-warning">' + esc(data.error) + '</div>';
+        // 404 (no log for that day) and 409 (already computing) are expected states; anything else is a failure
+        var level = (data.httpStatus === 404 || data.busy) ? 'alert-warning' : 'alert-danger';
+        var retry = data.busy
+            ? ' <button type="button" class="btn btn-sm btn-outline-secondary ml-2" onclick="this.disabled=true;window.fetchDiagnostic()">Réessayer</button>'
+            : '';
+        el.innerHTML = '<div class="alert ' + level + '">' + esc(data.error) + retry + '</div>';
         return;
     }
 
@@ -62,7 +67,7 @@ function renderDiagnostic(data) {
     }
     function botCell(bot) {
         var lower = bot.toLowerCase();
-        if (searchEngines.indexOf(lower) !== -1) return '<span class="badge badge-light">Moteur</span>';
+        if (searchEngines.indexOf(lower) !== -1) return '<span class="badge badge-secondary">Moteur</span>';
         var blocked = blockedUas.some(function(u) { return lower.indexOf(u) !== -1 || u.indexOf(lower) !== -1; });
         if (blocked) return '<span class="badge badge-secondary">Bloqué</span>';
         return '<button type="button" class="btn btn-outline-danger btn-sm py-0 diag-block" data-type="ua" data-value="' + esc(bot) + '">Bloquer</button>';

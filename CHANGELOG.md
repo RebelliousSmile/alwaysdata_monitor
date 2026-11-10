@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v1.11.4] - 2026-11-10
+
+Closes the remaining findings of the module audit of 2026-11-10 (performance, UI, hardening).
+
+### Fixed
+- Load diagnostic: results are cached on disk under `_PS_CACHE_DIR_/sc_alwaysdata/` (`DiagnosticCache`). A closed day stays valid while the log signature (path, size, mtime) holds; the current day, whose log grows constantly and never matched its signature twice, is served for 5 minutes. Computing an entry takes a non-blocking lock: a second request for the same day gets HTTP 409 with a retry button instead of another full pass over the log on another PHP worker
+- Diagnostic tab: switching tabs no longer re-sends a request already running for the same date, and changing the date aborts the previous request (`AbortController`)
+- Diagnostic errors: a missing log (404) or a busy diagnostic (409) is shown as a warning, any other error as a failure
+- `badge-light` badges, unreadable on the back-office white background, replaced by `badge-secondary`
+
+### Security
+- JSON error responses of the back-office actions and of the three cron controllers no longer carry the exception message, file or stack trace: the detail goes to the PrestaShop logs; back-office actions still return it when `_PS_MODE_DEV_` is on
+- The logs base path is validated on save and on use (`LogReaderService::normalizeBasePath`): it must be an existing readable directory holding at least one of `apache`, `http`, `php`, `sites`; a value stored before this version goes through the same check
+- `lines_*` settings are bounded to 100–50,000 on save, and to 50,000 on read
+- The cron token and cron URLs are only exposed to profiles holding the `update` permission (index page and stats action)
+- `.htaccess` files deny direct HTTP access to `src/`, `config/`, `upgrade/` and `tests/` (Apache 2.2 and 2.4)
+- `esc()` in the admin templates also escapes the single quote
+- `symfony/filesystem` 6.4.50 in the module `composer.lock` (PKSA-g499-cm4q-v35y; development dependency of php-cs-fixer, never deployed)
+
+### Added
+- The nightly cron purges diagnostic cache entries older than 30 days (`purged_cache_files` in its response)
+
 ## [v1.11.3] - 2026-11-10
 
 Ports the v1.10.1 security hotfix (security audit of 2026-11-10, tag `v1.10.1` on `hotfix/1.10.1`) onto `main`.

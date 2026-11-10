@@ -281,6 +281,70 @@ class LogReaderServiceTest extends TestCase
         $this->assertSame(1, count($http['lines']));
     }
 
+    // -------------------------------------------------------------------------
+    // Case 10 — configured line counts are bounded
+    // -------------------------------------------------------------------------
+
+    public function testClampLinesBoundsTheConfiguredValue(): void
+    {
+        $this->assertSame(LogReaderService::MIN_LINES, LogReaderService::clampLines(1));
+        $this->assertSame(LogReaderService::MIN_LINES, LogReaderService::clampLines(-5));
+        $this->assertSame(5000, LogReaderService::clampLines(5000));
+        $this->assertSame(LogReaderService::MAX_LINES, LogReaderService::clampLines(10000000));
+    }
+
+    public function testAStoredLineCountAboveTheCapIsReducedOnRead(): void
+    {
+        $base = $this->createTmpBase();
+        \Configuration::$testValues['SC_ALWAYSDATA_LINES_HTTP'] = 10000000;
+        $this->mkdirUnder($base, 'http');
+        file_put_contents($base . '/http/http-' . date('Y-m-d') . '.log', "a\nb\n");
+
+        $http = $this->sourceNamed($this->service()->readTodayLogs(), 'http');
+
+        $this->assertSame(LogReaderService::MAX_LINES, $http['max_lines']);
+    }
+
+    // -------------------------------------------------------------------------
+    // Case 11 — the logs base path is validated before use
+    // -------------------------------------------------------------------------
+
+    public function testNormalizeBasePathRefusesEmptyNulByteAndMissingPaths(): void
+    {
+        $this->assertNull(LogReaderService::normalizeBasePath(''));
+        $this->assertNull(LogReaderService::normalizeBasePath('   '));
+        $this->assertNull(LogReaderService::normalizeBasePath("/tmp\0/etc"));
+        $this->assertNull(LogReaderService::normalizeBasePath(sys_get_temp_dir() . '/sc_alwaysdata_missing_' . uniqid()));
+    }
+
+    public function testNormalizeBasePathRefusesADirectoryWithoutLogFolders(): void
+    {
+        $base = $this->createTmpBase();
+        $this->mkdirUnder($base, 'unrelated');
+
+        $this->assertNull(LogReaderService::normalizeBasePath($base));
+    }
+
+    public function testNormalizeBasePathAcceptsADirectoryHoldingALogFolder(): void
+    {
+        $base = $this->createTmpBase();
+        $this->mkdirUnder($base, 'http');
+
+        $this->assertSame($base . '/', LogReaderService::normalizeBasePath($base));
+        $this->assertSame($base . '/', LogReaderService::normalizeBasePath($base . '/'));
+    }
+
+    public function testAStoredBasePathWithoutLogFoldersIsIgnored(): void
+    {
+        $base = $this->createTmpBase();
+        $this->mkdirUnder($base, 'unrelated');
+
+        $sources = $this->service()->readTodayLogs();
+
+        $this->assertSame('base', $sources[0]['source']);
+        $this->assertNotNull($sources[0]['error']);
+    }
+
     /**
      * @param array<int, array<string, mixed>> $sources
      *

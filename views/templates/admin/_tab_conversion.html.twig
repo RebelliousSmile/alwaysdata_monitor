@@ -137,7 +137,7 @@ function renderConversion(data, date, period) {
                 + '<td><small style="word-break:break-all">' + esc(fileShort) + '</small></td>'
                 + '<td class="text-muted small">' + esc(String(e.line || '—')) + '</td>'
                 + '<td><small style="word-break:break-all">' + esc(e.message || '') + '</small></td>'
-                + '<td class="text-right"><span class="badge badge-light">' + esc(String(e.count || 0)) + '</span></td>'
+                + '<td class="text-right"><span class="badge badge-secondary">' + esc(String(e.count || 0)) + '</span></td>'
                 + '</tr>';
         }).join('');
         phpErrorsBlock = '<div class="mb-3">'
