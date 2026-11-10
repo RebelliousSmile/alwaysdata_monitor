@@ -1,0 +1,5 @@
+# `git archive HEAD:deploy` lit les règles à la racine de cet arbre : les
+# chemins y perdent le préfixe deploy/, la règle eol=lf de la racine ne
+# s'applique plus, et core.autocrlf passerait les scripts en CRLF.
+* text=auto eol=lf
+.gitattributes export-ignore

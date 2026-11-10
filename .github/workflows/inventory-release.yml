@@ -1,6 +1,6 @@
 name: inventory-release
 
-# Release de vigie-inventory (issue #20, vigie/docs/inventaire.md) : binaires
+# Release de vigie-inventory (issue #20, docs/inventaire.md) : binaires
 # Linux musl (x86_64, aarch64), Windows et macOS, réunis avec SHA256SUMS dans
 # une release GitHub en brouillon.
 #
@@ -15,7 +15,7 @@ name: inventory-release
 # réécrits pour Rust (--remap-path-prefix) et pour le C de rusqlite et ring
 # (-ffile-prefix-map) ; sous Linux musl, deux builds x86_64 dans deux dossiers
 # différents doivent donner les mêmes octets. Windows et macOS : non vérifié.
-# Une cible qui échoue est retirée et notée dans vigie/docs/decisions.md.
+# Une cible qui échoue est retirée et notée dans docs/decisions.md.
 on:
   push:
     tags:
@@ -30,10 +30,10 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  RUST_TOOLCHAIN: "1.93.0" # même version que vigie/rust-toolchain.toml
+  RUST_TOOLCHAIN: "1.93.0" # même version que rust-toolchain.toml
 
 jobs:
-  # TOOL_VERSION de vigie/src/inventory/mod.rs, et, sur un tag, celle du tag :
+  # TOOL_VERSION de src/inventory/mod.rs, et, sur un tag, celle du tag :
   # sinon arrêt avant tout build.
   version:
     name: version
@@ -51,7 +51,7 @@ jobs:
           RUN_NUMBER: ${{ github.run_number }}
         run: |
           set -euo pipefail
-          VERSION=$(sed -n 's/^pub const TOOL_VERSION: &str = "\(.*\)";$/\1/p' vigie/src/inventory/mod.rs)
+          VERSION=$(sed -n 's/^pub const TOOL_VERSION: &str = "\(.*\)";$/\1/p' src/inventory/mod.rs)
           test -n "$VERSION" || { echo "::error::TOOL_VERSION introuvable"; exit 1; }
           echo "TOOL_VERSION : $VERSION"
           if [ "$REF_TYPE" = "tag" ]; then
@@ -73,11 +73,11 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-      - run: sh vigie/scripts/check-tls-deps.sh vigie/Cargo.lock
+      - run: sh scripts/check-tls-deps.sh Cargo.lock
 
   # cargo-zigbuild 0.23.4 comme vigie.yml ; zig 0.14.1 par le paquet ziglang
   # de PyPI, épinglé par la SHA-256 de sa roue (cargo-zigbuild le trouve par
-  # `python3 -m ziglang`) : vigie/docs/decisions.md.
+  # `python3 -m ziglang`) : docs/decisions.md.
   linux:
     name: linux musl
     needs: [version, guards]
@@ -111,7 +111,7 @@ jobs:
           build() { # dossier cible
             dir=$1 target=$2
             (
-              cd "$dir/vigie"
+              cd "$dir"
               export RUSTFLAGS="--remap-path-prefix=$dir=/build --remap-path-prefix=$CARGO_HOME=/cargo"
               export CFLAGS="-ffile-prefix-map=$dir=/build -ffile-prefix-map=$CARGO_HOME=/cargo"
               cargo zigbuild --release --locked --bin vigie-inventory --target "$target"
@@ -120,14 +120,14 @@ jobs:
           }
           build "$GITHUB_WORKSPACE" x86_64-unknown-linux-musl
           build "$COPY" x86_64-unknown-linux-musl
-          A="$GITHUB_WORKSPACE/vigie/target/x86_64-unknown-linux-musl/release/vigie-inventory"
-          B="$COPY/vigie/target/x86_64-unknown-linux-musl/release/vigie-inventory"
+          A="$GITHUB_WORKSPACE/target/x86_64-unknown-linux-musl/release/vigie-inventory"
+          B="$COPY/target/x86_64-unknown-linux-musl/release/vigie-inventory"
           sha256sum "$A" "$B"
           cmp "$A" "$B" || { echo "::error::deux builds x86_64 musl différents : build non reproductible"; exit 1; }
           build "$GITHUB_WORKSPACE" aarch64-unknown-linux-musl
           mkdir -p dist
           cp "$A" "dist/vigie-inventory-$VERSION-x86_64-unknown-linux-musl"
-          cp "vigie/target/aarch64-unknown-linux-musl/release/vigie-inventory" \
+          cp "target/aarch64-unknown-linux-musl/release/vigie-inventory" \
             "dist/vigie-inventory-$VERSION-aarch64-unknown-linux-musl"
           sha256sum dist/*
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -157,12 +157,11 @@ jobs:
           SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)
           export SOURCE_DATE_EPOCH
           export RUSTFLAGS="--remap-path-prefix=$GITHUB_WORKSPACE=/build --remap-path-prefix=$USERPROFILE\\.cargo=/cargo"
-          cd vigie
           cargo build --release --locked --bin vigie-inventory --target x86_64-pc-windows-msvc
-          mkdir -p ../dist
+          mkdir -p dist
           cp target/x86_64-pc-windows-msvc/release/vigie-inventory.exe \
-            "../dist/vigie-inventory-$VERSION-x86_64-pc-windows-msvc.exe"
-          sha256sum ../dist/*
+            "dist/vigie-inventory-$VERSION-x86_64-pc-windows-msvc.exe"
+          sha256sum dist/*
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: windows
@@ -192,8 +191,8 @@ jobs:
           export CFLAGS="-ffile-prefix-map=$GITHUB_WORKSPACE=/build -ffile-prefix-map=$CARGO_HOME=/cargo"
           mkdir -p dist
           for target in aarch64-apple-darwin x86_64-apple-darwin; do
-            (cd vigie && cargo build --release --locked --bin vigie-inventory --target "$target")
-            cp "vigie/target/$target/release/vigie-inventory" "dist/vigie-inventory-$VERSION-$target"
+            cargo build --release --locked --bin vigie-inventory --target "$target"
+            cp "target/$target/release/vigie-inventory" "dist/vigie-inventory-$VERSION-$target"
           done
           shasum -a 256 dist/*
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -231,7 +230,7 @@ jobs:
           {
             echo "vigie-inventory $VERSION : inventaire CycloneDX des lockfiles d'un projet, poussé au veilleur Vigie."
             echo
-            echo "Installation, clé et exemples de CI : vigie/docs/inventaire.md."
+            echo "Installation, clé et exemples de CI : docs/inventaire.md."
             echo "Vérifier le binaire avec SHA256SUMS, dans une étape à part, avant de l'exécuter :"
             echo
             echo '```'

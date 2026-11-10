@@ -1,16 +1,27 @@
 name: vigie
 
-# Veilleur, agent PHP et scripts de déploiement : pas la console (vigie/app).
+# Veilleur, agent PHP et scripts de déploiement : pas la console (app/), ni la
+# documentation de travail (aidd_docs/, .claude/) ; les exclusions gardent le
+# sens de l'ancien filtre (tout le veilleur sauf la console), config.example.toml
+# et docs/ compris.
 on:
   push:
     paths:
-      - "vigie/**"
-      - "!vigie/app/**"
+      - "**"
+      - "!app/**"
+      - "!aidd_docs/**"
+      - "!.claude/**"
+      - "!.github/**"
+      - "!CHANGELOG.md"
       - ".github/workflows/vigie.yml"
   pull_request:
     paths:
-      - "vigie/**"
-      - "!vigie/app/**"
+      - "**"
+      - "!app/**"
+      - "!aidd_docs/**"
+      - "!.claude/**"
+      - "!.github/**"
+      - "!CHANGELOG.md"
       - ".github/workflows/vigie.yml"
   workflow_dispatch:
 
@@ -27,22 +38,19 @@ jobs:
         # build Windows.
         os: [ubuntu-24.04, windows-latest]
     runs-on: ${{ matrix.os }}
-    defaults:
-      run:
-        working-directory: vigie
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master
         with:
-          toolchain: "1.93.0" # même version que vigie/rust-toolchain.toml
+          toolchain: "1.93.0" # même version que rust-toolchain.toml
           components: clippy, rustfmt
       - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            vigie/target
-          key: vigie-${{ runner.os }}-${{ hashFiles('vigie/Cargo.lock') }}
+            target
+          key: vigie-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
       - run: cargo fmt --check
       - run: cargo clippy --locked --all-targets -- -D warnings
       - run: cargo test --locked --all-targets
@@ -55,11 +63,10 @@ jobs:
       # 2026-01-02, PHP 8.1 n'étant plus maintenu).
       - name: agent PHP (8.1)
         if: runner.os == 'Linux'
-        working-directory: .
         run: >-
           docker run --rm --user "$(id -u):$(id -g)" -v "$GITHUB_WORKSPACE":/w -w /w
           php:8.1-cli@sha256:12154452109ad780fedbcf68b820a2b7dc5880d66ee38b7d87129c2de225f836
-          sh -c 'php -m | grep -qx sodium || { echo "sodium absent de php:8.1-cli"; exit 1; }; php vigie/agent/php/tests/run.php'
+          sh -c 'php -m | grep -qx sodium || { echo "sodium absent de php:8.1-cli"; exit 1; }; php agent/php/tests/run.php'
       # Bout en bout réel (tests/agent_e2e.rs) : serve Rust sur l'hôte, agent
       # PHP 8.1 dans la même image épinglée, réseau de l'hôte, même
       # utilisateur ; /tmp partagé pour les dossiers de l'agent. Le test échoue
@@ -93,14 +100,11 @@ jobs:
   musl:
     name: musl (zigbuild)
     runs-on: ubuntu-24.04
-    defaults:
-      run:
-        working-directory: vigie
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master
         with:
-          toolchain: "1.93.0" # même version que vigie/rust-toolchain.toml
+          toolchain: "1.93.0" # même version que rust-toolchain.toml
           targets: x86_64-unknown-linux-musl
       - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
         with:
@@ -111,8 +115,8 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             ~/.cargo/bin/cargo-zigbuild
-            vigie/target
-          key: vigie-musl-${{ hashFiles('vigie/Cargo.lock') }}
+            target
+          key: vigie-musl-${{ hashFiles('Cargo.lock') }}
       # Le cache peut déjà rendre le binaire : l'installer seulement s'il manque
       # ou n'est pas à la version épinglée.
       - name: cargo-zigbuild 0.23.4
@@ -136,7 +140,7 @@ jobs:
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: vigie-musl
-          path: vigie/target/x86_64-unknown-linux-musl/release/vigie
+          path: target/x86_64-unknown-linux-musl/release/vigie
           retention-days: 14
           if-no-files-found: error
 
@@ -144,7 +148,7 @@ jobs:
   # chaque fixture de tests/fixtures/inventory-tool/, copiée sous son vrai nom,
   # et composer/ aussi avec --cms wordpress. cyclonedx-cli v0.33.1 (publiée le
   # 2026-07-23), somme de cyclonedx-linux-x64 relevée sur la release
-  # (vigie/docs/decisions.md) ; téléchargé à chaque run, jamais mis en cache.
+  # (docs/decisions.md) ; téléchargé à chaque run, jamais mis en cache.
   inventory-schema:
     name: schéma CycloneDX 1.7 (vigie-inventory)
     runs-on: ubuntu-24.04
@@ -153,14 +157,11 @@ jobs:
       CYCLONEDX_CLI_VERSION: "0.33.1"
       CYCLONEDX_CLI_SHA256: bfc8b2538da86fe239bc53658bbb63c1c8c510a293c1e6891aa5bea5d3c58746
       DOTNET_SYSTEM_GLOBALIZATION_INVARIANT: "1"
-    defaults:
-      run:
-        working-directory: vigie
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master
         with:
-          toolchain: "1.93.0" # même version que vigie/rust-toolchain.toml
+          toolchain: "1.93.0" # même version que rust-toolchain.toml
       - name: installer cyclonedx-cli (somme vérifiée)
         run: |
           curl -sSfL -o "$RUNNER_TEMP/cyclonedx" "https://github.com/CycloneDX/cyclonedx-cli/releases/download/v${CYCLONEDX_CLI_VERSION}/cyclonedx-linux-x64"

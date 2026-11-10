@@ -10,7 +10,8 @@ Until 2026-11-10 this repository also held the PrestaShop module `sc_alwaysdata`
 ## [Unreleased]
 
 ### Changed
-- The PrestaShop module, its tests, its `module` workflow and its deployment tooling (`scripts/deploy.mjs`, `package.json`, `deploy/targets.example.json`) left the repository; `deploy-lib.mjs` and its tests moved to `vigie/scripts/` and keep only what the watcher and agent deployments use
+- The PrestaShop module, its tests, its `module` workflow and its deployment tooling (`scripts/deploy.mjs`, `package.json`, `deploy/targets.example.json`) left the repository; `deploy-lib.mjs` and its tests keep only what the watcher and agent deployments use
+- The Vigie sources moved from `vigie/` to the repository root; paths in workflows, deployment scripts and docs follow
 - The PHP agent, its tests and `docs/htaccess.md` no longer name the module: the `.htaccess` merge keeps any third-party block byte for byte
 
 ## [v1.11.3] - 2026-11-10

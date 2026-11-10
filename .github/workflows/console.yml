@@ -1,22 +1,22 @@
 name: console
 
-# Console (vigie/app), et sources du veilleur : tests/contract.rs appelle le
+# Console (app), et sources du veilleur : tests/contract.rs appelle le
 # client de la console contre le routeur du veilleur, un changement de l'API
 # doit le rejouer. Le reste du veilleur a son propre workflow.
 on:
   push:
     paths:
-      - "vigie/app/**"
-      - "vigie/src/**"
-      - "vigie/Cargo.*"
-      - "vigie/tests/support/**"
+      - "app/**"
+      - "src/**"
+      - "Cargo.*"
+      - "tests/support/**"
       - ".github/workflows/console.yml"
   pull_request:
     paths:
-      - "vigie/app/**"
-      - "vigie/src/**"
-      - "vigie/Cargo.*"
-      - "vigie/tests/support/**"
+      - "app/**"
+      - "src/**"
+      - "Cargo.*"
+      - "tests/support/**"
       - ".github/workflows/console.yml"
   workflow_dispatch:
 
@@ -33,7 +33,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     defaults:
       run:
-        working-directory: vigie/app
+        working-directory: app
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       # Bibliothèques du webview Linux, nécessaires pour compiler tauri.
@@ -45,12 +45,12 @@ jobs:
       # Version lue dans le champ packageManager de package.json.
       - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
         with:
-          package_json_file: vigie/app/package.json
+          package_json_file: app/package.json
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "20"
           cache: pnpm
-          cache-dependency-path: vigie/app/pnpm-lock.yaml
+          cache-dependency-path: app/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
       - run: pnpm typecheck
@@ -59,21 +59,21 @@ jobs:
       - run: pnpm exec vite build
       - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master
         with:
-          toolchain: "1.93.0" # même version que vigie/app/src-tauri/rust-toolchain.toml
+          toolchain: "1.93.0" # même version que app/src-tauri/rust-toolchain.toml
           components: clippy, rustfmt
       - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            vigie/app/src-tauri/target
-          key: console-${{ runner.os }}-${{ hashFiles('vigie/app/src-tauri/Cargo.lock') }}
+            app/src-tauri/target
+          key: console-${{ runner.os }}-${{ hashFiles('app/src-tauri/Cargo.lock') }}
       - run: cargo fmt --check
-        working-directory: vigie/app/src-tauri
+        working-directory: app/src-tauri
       - run: cargo clippy --locked --all-targets -- -D warnings
-        working-directory: vigie/app/src-tauri
+        working-directory: app/src-tauri
       - run: cargo test --locked --all-targets
-        working-directory: vigie/app/src-tauri
+        working-directory: app/src-tauri
 
   # APK de debug, comme lyremember : SDK, NDK et gen/android sont produits
   # dans le job, rien n'est installé sur le poste. L'APK est un artefact du
@@ -87,17 +87,17 @@ jobs:
       BUILD_TOOLS_VERSION: 35.0.0
     defaults:
       run:
-        working-directory: vigie/app
+        working-directory: app
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
         with:
-          package_json_file: vigie/app/package.json
+          package_json_file: app/package.json
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "20"
           cache: pnpm
-          cache-dependency-path: vigie/app/pnpm-lock.yaml
+          cache-dependency-path: app/pnpm-lock.yaml
       - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
         with:
           distribution: temurin
@@ -112,21 +112,21 @@ jobs:
       - run: sdkmanager "ndk;${{ env.NDK_VERSION }}" "build-tools;${{ env.BUILD_TOOLS_VERSION }}"
       - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master
         with:
-          toolchain: "1.93.0" # même version que vigie/app/src-tauri/rust-toolchain.toml
+          toolchain: "1.93.0" # même version que app/src-tauri/rust-toolchain.toml
           targets: aarch64-linux-android
       - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            vigie/app/src-tauri/target
-          key: console-android-${{ hashFiles('vigie/app/src-tauri/Cargo.lock') }}
+            app/src-tauri/target
+          key: console-android-${{ hashFiles('app/src-tauri/Cargo.lock') }}
       - run: pnpm install --frozen-lockfile
       # Le Credential Manager est propre à Windows : sous Android, le jeton
       # vit dans un fichier privé (secret.rs) et keyring-core ne doit pas
       # entrer dans le build.
       - name: keyring-core sous Windows seulement
-        working-directory: vigie/app/src-tauri
+        working-directory: app/src-tauri
         run: |
           set -euo pipefail
           ANDROID_TREE=$(cargo tree --locked --target aarch64-linux-android -i keyring-core 2>/dev/null)
@@ -173,7 +173,7 @@ jobs:
           test -n "$APK" || { echo "aucun APK produit"; exit 1; }
           ls -l "$APK"
           scripts/android-no-backup.sh verify "$APK"
-          echo "path=vigie/app/$APK" >> "$GITHUB_OUTPUT"
+          echo "path=app/$APK" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: vigie-console-debug-apk
