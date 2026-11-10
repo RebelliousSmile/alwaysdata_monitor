@@ -27,11 +27,10 @@ import {
   withRemoteLock,
 } from './deploy-lib.mjs'
 
-const vigieRoot = join(dirname(fileURLToPath(import.meta.url)), '..')
-const repoRoot = join(vigieRoot, '..')
+const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..')
 const options = parseArgs(process.argv.slice(2))
 
-const AGENT_PATH = 'vigie/agent/php/vigie-agent.php'
+const AGENT_PATH = 'agent/php/vigie-agent.php'
 
 function git(args, extra = {}) {
   return execFileSync('git', args, { cwd: repoRoot, encoding: 'utf-8', ...extra })
@@ -44,14 +43,14 @@ function wsl(args, extra = {}) {
 
 // --- Cible ------------------------------------------------------------------
 
-const targetsPath = join(vigieRoot, 'deploy', 'targets.json')
+const targetsPath = join(repoRoot, 'deploy', 'targets.json')
 if (!existsSync(targetsPath)) {
-  throw new Error('vigie/deploy/targets.json absent : copier targets.example.json et le renseigner (fichier ignoré par git, le dépôt est public)')
+  throw new Error('deploy/targets.json absent : copier targets.example.json et le renseigner (fichier ignoré par git, le dépôt est public)')
 }
 const target = validateAgentTarget(
   options.target,
   JSON.parse(readFileSync(targetsPath, 'utf-8'))[options.target],
-  'vigie/deploy/targets.json',
+  'deploy/targets.json',
 )
 
 // --- Validations locales ----------------------------------------------------

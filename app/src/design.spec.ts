@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import tokens from './styles/tokens.css?raw'
-import reference from '../../../aidd_docs/design/vigie-design/tokens.css?raw'
+import reference from '../../aidd_docs/design/vigie-design/tokens.css?raw'
 import light from './styles/tokens-light.css?raw'
 
 // Les couleurs viennent des jetons de la maquette, jamais d'une vue.

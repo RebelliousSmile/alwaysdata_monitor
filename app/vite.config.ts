@@ -19,7 +19,7 @@ export default defineConfig({
     hmr: host ? { protocol: 'ws', host, port: 1421 } : undefined,
     watch: { ignored: ['**/src-tauri/**'] },
     // Les tests comparent tokens.css à la maquette, hors de la racine.
-    fs: process.env.VITEST ? { allow: ['.', '../../aidd_docs/design/vigie-design'] } : undefined,
+    fs: process.env.VITEST ? { allow: ['.', '../aidd_docs/design/vigie-design'] } : undefined,
   },
   build: {
     target: 'es2021',

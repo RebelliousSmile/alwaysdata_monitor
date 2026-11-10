@@ -2,7 +2,7 @@
 # Installation du VPS du veilleur (Ubuntu 24.04 ou 26.04, Debian 12 ou 13), en root. Idempotente : la relancer
 # ne change que ce qui diffère.
 #
-#   git archive -o vigie-deploy.tar --prefix=vigie-deploy/ HEAD:vigie/deploy
+#   git archive -o vigie-deploy.tar --prefix=vigie-deploy/ HEAD:deploy
 #   scp vigie-deploy.tar root@<vps>:/root/
 #   ssh root@<vps> 'tar -xf /root/vigie-deploy.tar -C /root && sh /root/vigie-deploy/provision.sh "<clé publique ed25519 de déploiement>" [<sous-domaine>]'
 #

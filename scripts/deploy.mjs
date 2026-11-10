@@ -25,8 +25,7 @@ import {
   withRemoteLock,
 } from './deploy-lib.mjs'
 
-const vigieRoot = join(dirname(fileURLToPath(import.meta.url)), '..')
-const repoRoot = join(vigieRoot, '..')
+const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..')
 const options = parseArgs(process.argv.slice(2))
 
 const TARGET_TRIPLE = 'x86_64-unknown-linux-musl'
@@ -45,7 +44,7 @@ function wsl(args, extra = {}) {
 // --- Cible ------------------------------------------------------------------
 
 function validateTarget(name, raw) {
-  const access = validateSshAccess(name, raw, 'vigie/deploy/targets.json')
+  const access = validateSshAccess(name, raw, 'deploy/targets.json')
   const { remoteDir, healthUrl } = raw
   validateRemoteRelativePath('remoteDir', remoteDir)
   let health = null
@@ -68,9 +67,9 @@ function validateTarget(name, raw) {
   }
 }
 
-const targetsPath = join(vigieRoot, 'deploy', 'targets.json')
+const targetsPath = join(repoRoot, 'deploy', 'targets.json')
 if (!existsSync(targetsPath)) {
-  throw new Error('vigie/deploy/targets.json absent : copier targets.example.json et le renseigner (fichier ignoré par git, le dépôt est public)')
+  throw new Error('deploy/targets.json absent : copier targets.example.json et le renseigner (fichier ignoré par git, le dépôt est public)')
 }
 const target = validateTarget(options.target, JSON.parse(readFileSync(targetsPath, 'utf-8'))[options.target])
 
@@ -82,8 +81,8 @@ if (branch !== 'main' && !options.anyBranch) {
 }
 const commit = git(['rev-parse', 'HEAD']).trim()
 const shortCommit = commit.slice(0, 7)
-if (git(['status', '--porcelain', '--', 'vigie']).trim()) {
-  console.warn(`⚠ vigie/ modifié dans la copie de travail : seul le commit ${shortCommit} est compilé.`)
+if (git(['status', '--porcelain', '--', '.', ':!aidd_docs', ':!.claude']).trim()) {
+  console.warn(`⚠ copie de travail modifiée (hors aidd_docs/ et .claude/) : seul le commit ${shortCommit} est compilé.`)
 }
 
 // --- Build statique dans WSL ------------------------------------------------
@@ -93,15 +92,16 @@ const srcDir = `${wslHome}/deploy-stage/vigie-src`
 const targetDir = `${wslHome}/deploy-stage/vigie-target`
 const localBinary = `${targetDir}/${TARGET_TRIPLE}/release/vigie`
 
-// Archive du sous-arbre : l'attribut « /vigie export-ignore » de la racine
-// ne s'y applique pas, et aucune conversion CRLF n'a lieu.
-const archive = execFileSync('git', ['-c', 'core.autocrlf=false', 'archive', '--format=tar', `${commit}:vigie`], {
+// Archive du commit entier, sans conversion CRLF : le build lit aussi des
+// fichiers hors de src/ (include_str! vers tests/fixtures/), une liste de
+// chemins en oublierait. Environ 7 Mo, sous le maxBuffer.
+const archive = execFileSync('git', ['-c', 'core.autocrlf=false', 'archive', '--format=tar', commit], {
   cwd: repoRoot,
   maxBuffer: 64 * 1024 * 1024,
 })
 wsl(['bash', '-c', 'rm -rf "$1" && mkdir -p "$1" && tar -xf - -C "$1"', 'stage', srcDir], { input: archive })
 if (!wsl(['bash', '-c', 'test -f "$1/Cargo.toml" && echo ok || echo absent', 'stage', srcDir]).includes('ok')) {
-  throw new Error(`vigie/Cargo.toml absent du commit ${shortCommit}`)
+  throw new Error(`Cargo.toml absent du commit ${shortCommit}`)
 }
 
 console.log(`Build ${TARGET_TRIPLE} du commit ${shortCommit} (${branch})...`)

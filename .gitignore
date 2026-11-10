@@ -1,11 +1,14 @@
 *.log
-# Veilleur (vigie/) : build, cibles et configurations réelles, bases locales
-/vigie/target/
-/vigie/deploy/targets.json
-/vigie/config.toml
-/vigie/remote.toml
+# Veilleur : build, cibles et configurations réelles, bases locales
+/target/
+/deploy/targets.json
+/config.toml
+/remote.toml
 *.db
 *.db-wal
 *.db-shm
 # Fixtures de logs synthétiques des tests du veilleur (docs/logs.md).
-!vigie/tests/fixtures/logs/*.log
+!tests/fixtures/logs/*.log
+# Ancien emplacement : résidus ignorés des copies d'avant le déplacement
+# (targets.json réel, target/, node_modules/).
+/vigie/
