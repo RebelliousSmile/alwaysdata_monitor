@@ -1,6 +1,6 @@
 ---
 objective: "Le contenu de vigie/ est à la racine du dépôt sc-vigie, la CI, les tests et les deux scripts de déploiement passent sans aucun chemin vigie/ propre au dépôt."
-status: in-progress
+status: implemented
 ---
 
 <!-- Fill or omit these sections; never add, rename, or reorder one. -->
