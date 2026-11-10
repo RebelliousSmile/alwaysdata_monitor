@@ -90,11 +90,11 @@ class ScAlwaysdataController extends FrameworkBundleAdminController
             if ($logsPath === null) {
                 $this->addFlash(
                     'error',
-                    $this->trans('Chemin des logs refusé : il doit désigner un répertoire existant et lisible, contenant au moins un des sous-dossiers apache, http, php ou sites.', 'Modules.Scalwaysdata.Admin')
+                    $this->trans('Chemin des logs refusé : il doit désigner un répertoire existant et lisible, contenant au moins un des sous-dossiers %dirs%.', 'Modules.Scalwaysdata.Admin', ['%dirs%' => implode(', ', LogReaderService::LOG_DIRS)])
                 );
             } else {
                 \Configuration::updateValue('SC_ALWAYSDATA_LOGS_PATH', $logsPath);
-                foreach (['apache', 'http', 'php', 'sites'] as $dir) {
+                foreach (LogReaderService::LOG_DIRS as $dir) {
                     $val = LogReaderService::clampLines((int) $request->request->get('lines_' . $dir, 5000));
                     \Configuration::updateValue('SC_ALWAYSDATA_LINES_' . strtoupper($dir), $val);
                 }
@@ -108,7 +108,7 @@ class ScAlwaysdataController extends FrameworkBundleAdminController
         $logsPath = (string) \Configuration::get('SC_ALWAYSDATA_LOGS_PATH');
         $htaccessPath = $this->htaccessService->getPath();
         $logsPathHint = ($_SERVER['HOME'] ?? '') . '/admin/logs/';
-        $defaults = ['apache' => 5000, 'http' => 10000, 'php' => 5000, 'sites' => 2000];
+        $defaults = LogReaderService::DEFAULT_LINES;
         $linesPerSource = [];
         foreach ($defaults as $dir => $default) {
             $v = (int) \Configuration::get('SC_ALWAYSDATA_LINES_' . strtoupper($dir));
@@ -153,6 +153,8 @@ class ScAlwaysdataController extends FrameworkBundleAdminController
                 'backupsKeptOnPurge' => self::BACKUPS_KEPT_ON_PURGE,
                 'logsPathHint' => $logsPathHint,
                 'linesPerSource' => $linesPerSource,
+                'minLines' => LogReaderService::MIN_LINES,
+                'maxLines' => LogReaderService::MAX_LINES,
                 'statsUrl' => $this->generateUrl('sc_alwaysdata_stats'),
                 'conversionUrl' => $this->generateUrl('sc_alwaysdata_conversion'),
                 'resourcesStatsUrl' => $this->generateUrl('sc_alwaysdata_resources_stats'),
@@ -217,6 +219,7 @@ class ScAlwaysdataController extends FrameworkBundleAdminController
                     'source' => $source['source'],
                     'truncated' => $source['truncated'] ?? false,
                     'error' => $source['error'],
+                    'empty' => $source['empty'] ?? false,
                     'line_count' => count($lines),
                     'preview' => array_slice($lines, -100),
                 ];

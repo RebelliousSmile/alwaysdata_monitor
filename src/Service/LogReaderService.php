@@ -14,13 +14,20 @@ namespace ScAlwaysdata\Service;
 
 class LogReaderService
 {
-    private const DEFAULT_LINES = [
+    /** Log folders read under the base path, in display order, with their default line count. */
+    public const DEFAULT_LINES = [
         'apache' => 5000,
         'http' => 10000,
         'php' => 5000,
+        'jobs' => 2000,
         'sites' => 2000,
     ];
-    private const LOG_DIRS = ['apache', 'http', 'php', 'sites'];
+    public const LOG_DIRS = ['apache', 'http', 'php', 'jobs', 'sites'];
+
+    private const PHP_MONTHS = [
+        'Jan' => '01', 'Feb' => '02', 'Mar' => '03', 'Apr' => '04', 'May' => '05', 'Jun' => '06',
+        'Jul' => '07', 'Aug' => '08', 'Sep' => '09', 'Oct' => '10', 'Nov' => '11', 'Dec' => '12',
+    ];
 
     /**
      * Hard cap on how many bytes tailFile() may walk back through, whatever the
@@ -44,7 +51,7 @@ class LogReaderService
     /**
      * Validates a logs base path before it is stored or used: it must resolve to
      * an existing readable directory holding at least one of the Alwaysdata log
-     * folders (apache, http, php, sites). Returns the path with a trailing
+     * folders (LOG_DIRS). Returns the path with a trailing
      * slash, or null when the path is refused.
      */
     public static function normalizeBasePath(string $path): ?string
@@ -107,6 +114,10 @@ class LogReaderService
      * Lit le fichier de log PHP d'une date donnée et retourne un "source"
      * exploitable par PhpErrorAnalyserService::analyse().
      *
+     * A file whose name carries the date is read as is. Otherwise the undated
+     * files (Alwaysdata writes a single php/php.log) are filtered on the date
+     * that opens each entry, "[10-Nov-2026 08:53:33 Europe/Paris]".
+     *
      * @return array{source: string, lines: array<int, string>, truncated: bool, error: string|null}
      */
     public function readPhpLogForDate(string $date): array
@@ -121,24 +132,103 @@ class LogReaderService
             return ['source' => 'php', 'lines' => [], 'truncated' => false, 'error' => 'PHP log directory not readable: ' . $phpDir];
         }
 
-        $file = $this->findTodayFile($phpDir, $date);
-        if ($file === null) {
-            return ['source' => 'php', 'lines' => [], 'truncated' => false, 'error' => 'No PHP log file found for ' . $date];
-        }
-
         try {
             $maxLines = $this->getLinesForDir('php');
-            $lines = $this->readLogLines($file, $maxLines);
+
+            $file = $this->findTodayFile($phpDir, $date);
+            if ($file !== null) {
+                return [
+                    'source' => 'php',
+                    'lines' => $this->readLogLines($file, $maxLines),
+                    'truncated' => false,
+                    'error' => null,
+                    'max_lines' => $maxLines,
+                ];
+            }
+
+            $start = strtotime($date . ' 00:00:00');
+            if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date) || $start === false) {
+                return ['source' => 'php', 'lines' => [], 'truncated' => false, 'error' => 'Invalid date: ' . $date];
+            }
+
+            // A file last written before the day began holds none of its entries;
+            // oldest first so that a rotated file comes before the current one
+            $files = array_values(array_filter(
+                $this->collectAllFiles($phpDir),
+                fn (string $f): bool => (int) @filemtime($f) >= $start
+            ));
+            if ($files === []) {
+                return ['source' => 'php', 'lines' => [], 'truncated' => false, 'error' => 'No PHP log file found for ' . $date];
+            }
+            usort($files, fn (string $a, string $b): int => (int) filemtime($a) - (int) filemtime($b));
+
+            $lines = [];
+            $truncated = false;
+            foreach ($files as $f) {
+                $this->appendLinesOfDate($f, $date, $maxLines, $lines, $truncated);
+            }
 
             return [
                 'source' => 'php',
                 'lines' => $lines,
-                'truncated' => false,
+                'truncated' => $truncated,
                 'error' => null,
                 'max_lines' => $maxLines,
             ];
         } catch (\Throwable $e) {
             return ['source' => 'php', 'lines' => [], 'truncated' => false, 'error' => $e->getMessage()];
+        }
+    }
+
+    /**
+     * Streams a PHP error log (plain or gzip) and appends the entries dated
+     * $date to $lines, keeping the last $maxLines. A line that does not open
+     * with a date (stack trace) belongs to the entry above it. Reading stops
+     * at the first entry of a later day, the log being chronological.
+     *
+     * @param array<int, string> $lines
+     */
+    private function appendLinesOfDate(string $file, string $date, int $maxLines, array &$lines, bool &$truncated): void
+    {
+        // gzopen reads uncompressed files too
+        $fh = @gzopen($file, 'rb');
+        if ($fh === false) {
+            return;
+        }
+
+        try {
+            $inDay = false;
+            $lastDay = '';
+            $lastCmp = 0;
+            while (($line = gzgets($fh)) !== false) {
+                if (preg_match('/^\[(\d{2})-([A-Z][a-z]{2})-(\d{4}) /', $line, $m)) {
+                    $day = $m[3] . '-' . (self::PHP_MONTHS[$m[2]] ?? '00') . '-' . $m[1];
+                    if ($day !== $lastDay) {
+                        $lastDay = $day;
+                        $lastCmp = strcmp($day, $date);
+                    }
+                    if ($lastCmp > 0) {
+                        break;
+                    }
+                    $inDay = $lastCmp === 0;
+                }
+                if (!$inDay) {
+                    continue;
+                }
+
+                $lines[] = rtrim($line, "\r\n");
+                if (count($lines) >= $maxLines * 2) {
+                    $lines = array_slice($lines, -$maxLines);
+                    $truncated = true;
+                }
+            }
+
+            if (count($lines) > $maxLines) {
+                $lines = array_slice($lines, -$maxLines);
+                $truncated = true;
+            }
+        } finally {
+            gzclose($fh);
         }
     }
 
@@ -245,6 +335,11 @@ class LogReaderService
         try {
             $dirPath = $basePath . $dir . '/';
 
+            // A folder Alwaysdata did not create (no scheduled task, no site log) is shown like an empty one
+            if (!is_dir($dirPath)) {
+                return ['source' => $dir, 'lines' => [], 'truncated' => false, 'error' => null, 'empty' => true];
+            }
+
             if (!is_readable($dirPath)) {
                 return [
                     'source' => $dir,
@@ -262,11 +357,13 @@ class LogReaderService
             }
 
             if ($file === null) {
+                // An empty folder is a normal state (sites/ on most accounts), not an error
                 return [
                     'source' => $dir,
                     'lines' => [],
                     'truncated' => false,
-                    'error' => 'No log file found',
+                    'error' => null,
+                    'empty' => true,
                 ];
             }
 

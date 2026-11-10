@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v1.11.5] - 2026-11-10
+
+### Fixed
+- Daily PHP error snapshot: the nightly cron counted no PHP error on accounts where Alwaysdata writes a single undated `php/php.log`, since only a file named after the date was looked for. `LogReaderService::readPhpLogForDate` now falls back to the undated files written since that day began (a rotated archive first, `.gz` included) and keeps the entries opening with that date, `[DD-Mon-YYYY HH:MM:SS …]`, with their stack trace lines; reading stops at the first entry of a later day and keeps the last `lines_php` lines
+
+### Added
+- `jobs` log folder (scheduled task output): its own tab in the logs viewer and its own `lines_jobs` setting (`SC_ALWAYSDATA_LINES_JOBS`, 2000 by default); a base path holding only `jobs/` is accepted
+
+### Changed
+- An empty or missing log folder (`sites/` on most accounts, `jobs/` without scheduled tasks) is shown greyed out with a "vide" badge instead of a red error; `readSource` returns `error: null, empty: true` for it
+- The log folders and their default line counts come from `LogReaderService::LOG_DIRS` and `DEFAULT_LINES` in the controller and the settings form, whose bounds now follow `MIN_LINES` and `MAX_LINES` (the field allowed 100000 while the stored value is capped at 50000)
+
 ## [v1.11.4] - 2026-11-10
 
 Closes the remaining findings of the module audit of 2026-11-10 (performance, UI, hardening).

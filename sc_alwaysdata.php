@@ -30,12 +30,13 @@ if (file_exists($autoloadPath)) {
 
 class sc_alwaysdata extends Module
 {
-    public const VERSION = '1.11.4';
+    public const VERSION = '1.11.5';
 
     public const CONFIG_LOGS_PATH = 'SC_ALWAYSDATA_LOGS_PATH';
     public const CONFIG_LINES_APACHE = 'SC_ALWAYSDATA_LINES_APACHE';
     public const CONFIG_LINES_HTTP = 'SC_ALWAYSDATA_LINES_HTTP';
     public const CONFIG_LINES_PHP = 'SC_ALWAYSDATA_LINES_PHP';
+    public const CONFIG_LINES_JOBS = 'SC_ALWAYSDATA_LINES_JOBS';
     public const CONFIG_LINES_SITES = 'SC_ALWAYSDATA_LINES_SITES';
     public const CONFIG_CRON_TOKEN = 'SC_ALWAYSDATA_CRON_TOKEN';
 
@@ -73,6 +74,7 @@ class sc_alwaysdata extends Module
             self::CONFIG_LINES_APACHE => 5000,
             self::CONFIG_LINES_HTTP => 10000,
             self::CONFIG_LINES_PHP => 5000,
+            self::CONFIG_LINES_JOBS => 2000,
             self::CONFIG_LINES_SITES => 2000,
         ];
 
@@ -95,6 +97,7 @@ class sc_alwaysdata extends Module
             && Configuration::deleteByName(self::CONFIG_LINES_APACHE)
             && Configuration::deleteByName(self::CONFIG_LINES_HTTP)
             && Configuration::deleteByName(self::CONFIG_LINES_PHP)
+            && Configuration::deleteByName(self::CONFIG_LINES_JOBS)
             && Configuration::deleteByName(self::CONFIG_LINES_SITES)
             && Configuration::deleteByName(self::CONFIG_CRON_TOKEN)
             && Configuration::deleteByName(ScAlwaysdata\Service\RobotsTxtService::CONFIG_KEY)

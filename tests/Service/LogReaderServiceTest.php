@@ -345,6 +345,144 @@ class LogReaderServiceTest extends TestCase
         $this->assertNotNull($sources[0]['error']);
     }
 
+    // -------------------------------------------------------------------------
+    // Case 12 — the daily PHP snapshot reads an undated php.log by entry date
+    // -------------------------------------------------------------------------
+
+    public function testReadPhpLogForDateKeepsOnlyTheEntriesOfThatDay(): void
+    {
+        $base = $this->createTmpBase();
+        $this->mkdirUnder($base, 'php');
+        file_put_contents($base . '/php/php.log', implode("\n", [
+            '[14-Mar-2025 23:59:59 Europe/Paris] PHP Warning:  before in /a.php on line 1',
+            '[15-Mar-2025 00:00:01 Europe/Paris] PHP Fatal error:  first in /b.php on line 2',
+            'Stack trace:',
+            '#0 {main}',
+            '[15-Mar-2025 23:59:58 Europe/Paris] PHP Notice:  second in /c.php on line 3',
+            '[16-Mar-2025 00:00:00 Europe/Paris] PHP Warning:  after in /d.php on line 4',
+            '[15-Mar-2025 10:00:00 Europe/Paris] PHP Warning:  out of order, never reached',
+        ]) . "\n");
+
+        $php = $this->service()->readPhpLogForDate('2025-03-15');
+
+        $this->assertNull($php['error']);
+        $this->assertSame([
+            '[15-Mar-2025 00:00:01 Europe/Paris] PHP Fatal error:  first in /b.php on line 2',
+            'Stack trace:',
+            '#0 {main}',
+            '[15-Mar-2025 23:59:58 Europe/Paris] PHP Notice:  second in /c.php on line 3',
+        ], $php['lines']);
+        $this->assertFalse($php['truncated']);
+    }
+
+    public function testReadPhpLogForDateReadsARotatedArchiveBeforeTheCurrentFile(): void
+    {
+        $base = $this->createTmpBase();
+        $this->mkdirUnder($base, 'php');
+        $rotated = $base . '/php/php.log.1.gz';
+        file_put_contents($rotated, gzencode("[15-Mar-2025 08:00:00 UTC] PHP Warning:  morning in /a.php on line 1\n"));
+        touch($rotated, time() - 3600);
+        file_put_contents($base . '/php/php.log', "[15-Mar-2025 20:00:00 UTC] PHP Warning:  evening in /b.php on line 2\n");
+
+        $php = $this->service()->readPhpLogForDate('2025-03-15');
+
+        $this->assertSame([
+            '[15-Mar-2025 08:00:00 UTC] PHP Warning:  morning in /a.php on line 1',
+            '[15-Mar-2025 20:00:00 UTC] PHP Warning:  evening in /b.php on line 2',
+        ], $php['lines']);
+    }
+
+    public function testReadPhpLogForDateKeepsTheLastLinesOfTheDay(): void
+    {
+        $base = $this->createTmpBase();
+        \Configuration::$testValues['SC_ALWAYSDATA_LINES_PHP'] = 3;
+        $this->mkdirUnder($base, 'php');
+        $lines = [];
+        for ($i = 1; $i <= 10; ++$i) {
+            $lines[] = sprintf('[15-Mar-2025 10:00:%02d UTC] PHP Warning:  n%d in /a.php on line %d', $i, $i, $i);
+        }
+        file_put_contents($base . '/php/php.log', implode("\n", $lines) . "\n");
+
+        $php = $this->service()->readPhpLogForDate('2025-03-15');
+
+        $this->assertSame(array_slice($lines, -3), $php['lines']);
+        $this->assertTrue($php['truncated']);
+    }
+
+    public function testReadPhpLogForDatePrefersAFileNamedAfterTheDate(): void
+    {
+        $base = $this->createTmpBase();
+        $this->mkdirUnder($base, 'php');
+        file_put_contents($base . '/php/php-2025-03-15.log', "dated line\n");
+        file_put_contents($base . '/php/php.log', "[15-Mar-2025 10:00:00 UTC] PHP Warning:  undated in /a.php on line 1\n");
+
+        $php = $this->service()->readPhpLogForDate('2025-03-15');
+
+        $this->assertSame(['dated line'], $php['lines']);
+    }
+
+    public function testReadPhpLogForDateIgnoresFilesWrittenBeforeThatDay(): void
+    {
+        $base = $this->createTmpBase();
+        $this->mkdirUnder($base, 'php');
+        $old = $base . '/php/php.log';
+        file_put_contents($old, "[15-Mar-2025 10:00:00 UTC] PHP Warning:  impossible in /a.php on line 1\n");
+        touch($old, (int) strtotime('2025-03-14 12:00:00'));
+
+        $php = $this->service()->readPhpLogForDate('2025-03-15');
+
+        $this->assertSame([], $php['lines']);
+        $this->assertNotNull($php['error']);
+    }
+
+    // -------------------------------------------------------------------------
+    // Case 13 — jobs/ is read, an empty folder is not an error
+    // -------------------------------------------------------------------------
+
+    public function testReadTodayLogsReadsTheJobsFolder(): void
+    {
+        $base = $this->createTmpBase();
+        $this->mkdirUnder($base, 'jobs');
+        file_put_contents($base . '/jobs/jobs-' . date('Y-m-d') . '.log', "job ran\n");
+
+        $jobs = $this->sourceNamed($this->service()->readTodayLogs(), 'jobs');
+
+        $this->assertNull($jobs['error']);
+        $this->assertSame(['job ran'], $jobs['lines']);
+    }
+
+    public function testAnEmptyLogFolderIsReportedAsEmptyNotAsAnError(): void
+    {
+        $base = $this->createTmpBase();
+        $this->mkdirUnder($base, 'http');
+        $this->mkdirUnder($base, 'sites');
+
+        $sites = $this->sourceNamed($this->service()->readTodayLogs(), 'sites');
+
+        $this->assertNull($sites['error']);
+        $this->assertTrue($sites['empty']);
+        $this->assertSame([], $sites['lines']);
+    }
+
+    public function testAMissingLogFolderIsReportedAsEmpty(): void
+    {
+        $base = $this->createTmpBase();
+        $this->mkdirUnder($base, 'http');
+
+        $jobs = $this->sourceNamed($this->service()->readTodayLogs(), 'jobs');
+
+        $this->assertNull($jobs['error']);
+        $this->assertTrue($jobs['empty']);
+    }
+
+    public function testNormalizeBasePathAcceptsADirectoryHoldingOnlyJobs(): void
+    {
+        $base = $this->createTmpBase();
+        $this->mkdirUnder($base, 'jobs');
+
+        $this->assertSame($base . '/', LogReaderService::normalizeBasePath($base));
+    }
+
     /**
      * @param array<int, array<string, mixed>> $sources
      *

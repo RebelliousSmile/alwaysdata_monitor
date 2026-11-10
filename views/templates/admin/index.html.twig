@@ -103,14 +103,14 @@
             <div class="form-group">
                 <label>Lignes lues (tail -n) par source</label>
                 <div class="form-row">
-                    {% for dir, default in {apache: 5000, http: 10000, php: 5000, sites: 2000} %}
-                    <div class="col-md-3">
+                    {% for dir, value in linesPerSource %}
+                    <div class="col-md-4 col-lg">
                         <div class="input-group mb-2">
                             <div class="input-group-prepend">
                                 <span class="input-group-text" style="min-width:60px">{{ dir }}</span>
                             </div>
                             <input type="number" name="lines_{{ dir }}" class="form-control"
-                                   value="{{ linesPerSource[dir] ?? default }}" min="100" max="100000">
+                                   value="{{ value }}" min="{{ minLines }}" max="{{ maxLines }}">
                         </div>
                     </div>
                     {% endfor %}
@@ -635,6 +635,9 @@ document.addEventListener('DOMContentLoaded', function() {
             if (s.error) {
                 cls = 'danger';
                 label += ': ' + escapeHtml(s.error);
+            } else if (s.empty) {
+                cls = 'secondary';
+                label += ' (vide)';
             } else if (s.truncated) {
                 cls = 'warning';
                 label += ' (tronqu\u00e9)';
@@ -662,6 +665,8 @@ document.addEventListener('DOMContentLoaded', function() {
             var label = s.source;
             if (s.error) {
                 label += ' <span class="badge badge-danger ml-1">erreur</span>';
+            } else if (s.empty) {
+                label = '<span class="text-muted">' + label + '</span> <span class="badge badge-secondary ml-1">vide</span>';
             } else {
                 label += ' <span class="badge badge-secondary ml-1">' + (s.line_count || 0) + ' lignes</span>';
             }
@@ -680,6 +685,8 @@ document.addEventListener('DOMContentLoaded', function() {
             var logBlock;
             if (s.error) {
                 logBlock = '<div class="alert alert-danger m-3">' + escapeHtml(s.error) + '</div>';
+            } else if (s.empty) {
+                logBlock = '<div class="alert alert-secondary m-3">Aucun fichier de log dans ce dossier.</div>';
             } else if (!s.preview || !s.preview.length) {
                 logBlock = '<div class="alert alert-info m-3">Aucune ligne disponible.</div>';
             } else {
