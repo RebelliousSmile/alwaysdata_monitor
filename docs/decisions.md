@@ -625,13 +625,16 @@ ignoré par git.
 
 Branche jetable `test/osv-detecte` partie de `main`, un commit par essai, les
 quatre runs de `garde-fous` consignés. Le job échoue bien là où il le doit.
+Les runs ont disparu avec l'ancien dépôt (supprimé, puis recréé en
+`sc-vigie`) : leurs numéros restent pour mémoire, les commits sont toujours
+dans l'historique.
 
 | Essai | Commit | Run | Résultat |
 | --- | --- | --- | --- |
-| (a) `rqrr = "0.10"` (verrou régénéré, `lru` 0.16.4) | `fedfba3` | [39927723791](https://github.com/RebelliousSmile/alwaysdata_monitor/actions/runs/39927723791) | script, `composer validate` et installation verts ; **scan rouge** sur `RUSTSEC-2026-0253` (`lru` 0.16.4, `Cargo.lock`) |
-| (b) `rqrr` rétabli, échéance de l'exception glib au 2026-10-01 | `7ee02bc` | [39927803699](https://github.com/RebelliousSmile/alwaysdata_monitor/actions/runs/39927803699) | script **vert** (échéance passée admise) ; **scan rouge** sur `GHSA-wrw7-89jp-8q8g` : l'expiration est prouvée en CI |
-| (c) exception glib sans `ignoreUntil` | `556109a` | [39927873060](https://github.com/RebelliousSmile/alwaysdata_monitor/actions/runs/39927873060) | **script rouge** (`ignoreUntil absent`), `composer validate`, installation et scan sautés |
-| (d) échéance glib à +93 jours (2027-01-24) | `a4dfc51` | [39927876282](https://github.com/RebelliousSmile/alwaysdata_monitor/actions/runs/39927876282) | **script rouge** (« au-delà de 92 jours »), scan sauté |
+| (a) `rqrr = "0.10"` (verrou régénéré, `lru` 0.16.4) | `fedfba3` | `39927723791` | script, `composer validate` et installation verts ; **scan rouge** sur `RUSTSEC-2026-0253` (`lru` 0.16.4, `Cargo.lock`) |
+| (b) `rqrr` rétabli, échéance de l'exception glib au 2026-10-01 | `7ee02bc` | `39927803699` | script **vert** (échéance passée admise) ; **scan rouge** sur `GHSA-wrw7-89jp-8q8g` : l'expiration est prouvée en CI |
+| (c) exception glib sans `ignoreUntil` | `556109a` | `39927873060` | **script rouge** (`ignoreUntil absent`), `composer validate`, installation et scan sautés |
+| (d) échéance glib à +93 jours (2027-01-24) | `a4dfc51` | `39927876282` | **script rouge** (« au-delà de 92 jours »), scan sauté |
 
 Restent à faire : la vérification de la provenance SLSA (tâche 1), depuis un
 poste qui atteint `tuf-repo-cdn.sigstore.dev` (injoignable du conteneur de

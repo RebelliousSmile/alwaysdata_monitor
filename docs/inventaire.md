@@ -24,7 +24,7 @@ Depuis la release GitHub `inventory-vX.Y.Z` : un binaire par cible
 dans une étape à part, avant de lancer le binaire** :
 
 ```sh
-curl -sSfL -o vigie-inventory "https://github.com/RebelliousSmile/alwaysdata_monitor/releases/download/inventory-v0.1.0/vigie-inventory-0.1.0-x86_64-unknown-linux-musl"
+curl -sSfL -o vigie-inventory "https://github.com/RebelliousSmile/sc-vigie/releases/download/inventory-v0.1.0/vigie-inventory-0.1.0-x86_64-unknown-linux-musl"
 echo "<empreinte de SHA256SUMS>  vigie-inventory" | sha256sum -c -
 chmod +x vigie-inventory
 ```
