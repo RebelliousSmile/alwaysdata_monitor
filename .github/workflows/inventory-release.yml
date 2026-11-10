@@ -90,6 +90,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
+          components: clippy, rustfmt # ceux de rust-toolchain.toml : sinon rustup les ajoute au premier cargo, en conflit
           targets: x86_64-unknown-linux-musl, aarch64-unknown-linux-musl
       - name: zig 0.14.1 (somme vérifiée)
         run: |
@@ -151,6 +152,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
+          components: clippy, rustfmt # ceux de rust-toolchain.toml : sinon rustup les ajoute au premier cargo, en conflit
       - name: build
         run: |
           set -euo pipefail
@@ -180,6 +182,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
+          components: clippy, rustfmt # ceux de rust-toolchain.toml : sinon rustup les ajoute au premier cargo, en conflit
           targets: aarch64-apple-darwin, x86_64-apple-darwin
       - name: build
         run: |
