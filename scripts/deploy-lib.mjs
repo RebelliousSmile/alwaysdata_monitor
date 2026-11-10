@@ -152,3 +152,18 @@ export function parseVersion(raw) {
   if (!match) throw new Error(`Version non numérique MAJOR.MINOR.PATCH : ${raw}`)
   return match.slice(1).map(Number)
 }
+
+// Sortie de `curl -sS -w '\n%{http_code}'` : le corps, puis le code HTTP en
+// dernière ligne. Seul un 200 dont le tick suit la bascule la prouve.
+export function judgeHealth(output, since) {
+  const cut = output.lastIndexOf('\n')
+  const status = output.slice(cut + 1).trim()
+  let body = null
+  try {
+    body = JSON.parse(output.slice(0, Math.max(cut, 0)))
+  }
+  catch {}
+  const tick = Number.isInteger(body?.last_tick) ? body.last_tick : null
+  if (status === '200' && tick !== null && tick > since) return { ok: true, last: `200, tick ${tick}` }
+  return { ok: false, last: `${status || 'sans code'}${tick !== null ? `, dernier tick ${tick} (bascule ${since})` : ''}` }
+}

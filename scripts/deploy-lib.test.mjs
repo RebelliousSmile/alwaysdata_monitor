@@ -8,6 +8,7 @@ import {
   shQuote,
   sshOptions,
   extractAgentVersion,
+  judgeHealth,
   validateAgentTarget,
   validateRemoteRelativePath,
   validateSshAccess,
@@ -153,4 +154,15 @@ test('extractAgentVersion lit la constante de l\'agent', () => {
   assert.equal(extractAgentVersion("<?php\nconst VERSION = '0.1.0';\nconst AGENT = 'x';\n"), '0.1.0')
   assert.throws(() => extractAgentVersion('<?php\n'), /VERSION introuvable/)
   assert.throws(() => extractAgentVersion("const VERSION = '0.1';"), /non numérique/)
+})
+
+test('judgeHealth : seul un 200 au tick postérieur à la bascule prouve', () => {
+  const since = 1700000000
+  const out = (body, code) => `${body}\n${code}`
+  assert.deepEqual(judgeHealth(out('{"last_tick":1700000060}', 200), since), { ok: true, last: '200, tick 1700000060' })
+  assert.deepEqual(judgeHealth(out('{"last_tick":1700000000}', 200), since), { ok: false, last: '200, dernier tick 1700000000 (bascule 1700000000)' })
+  assert.deepEqual(judgeHealth(out('{"last_tick":1700000060}', 503), since), { ok: false, last: '503, dernier tick 1700000060 (bascule 1700000000)' })
+  assert.deepEqual(judgeHealth(out('<html>erreur</html>', 502), since), { ok: false, last: '502' })
+  assert.deepEqual(judgeHealth(out('{"last_tick":"1700000060"}', 200), since), { ok: false, last: '200' })
+  assert.deepEqual(judgeHealth('', since), { ok: false, last: 'sans code' })
 })

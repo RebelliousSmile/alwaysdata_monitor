@@ -16,6 +16,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
   assertWslHome,
+  judgeHealth,
   missingKeyHelp,
   parseArgs,
   shQuote,
@@ -156,17 +157,18 @@ if (!options.apply) {
 ssh(`mkdir -p ${target.binDir}`)
 
 // /health ne prouve la bascule que si le tick qu'il rapporte est postérieur :
-// un 200 seul peut venir d'un tick de l'ancien binaire.
+// un 200 seul peut venir d'un tick de l'ancien binaire (judgeHealth).
+// Requête par le curl de WSL, comme ssh et scp, et non par fetch : Node 26.13
+// s'est arrêté net (code 139) au premier fetch de cette preuve le 2026-11-10,
+// sans reproduction isolée depuis. curl sort la preuve de la pile TLS de Node.
 async function healthAfter(url, since) {
   let last = 'sans réponse'
   for (let attempt = 0; attempt < 18; attempt++) {
     if (attempt) await new Promise(resolve => setTimeout(resolve, 10_000))
     try {
-      const response = await fetch(url, { signal: AbortSignal.timeout(15_000) })
-      const body = await response.json().catch(() => null)
-      const tick = Number.isInteger(body?.last_tick) ? body.last_tick : null
-      if (response.status === 200 && tick !== null && tick > since) return { ok: true, last: `200, tick ${tick}` }
-      last = `${response.status}${tick !== null ? `, dernier tick ${tick} (bascule ${since})` : ''}`
+      const verdict = judgeHealth(wsl(['curl', '-sS', '--proto', '=https', '--max-time', '15', '-w', '\n%{http_code}', url]), since)
+      if (verdict.ok) return verdict
+      last = verdict.last
     }
     catch {
       last = 'sans réponse'
