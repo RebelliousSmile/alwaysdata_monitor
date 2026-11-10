@@ -174,7 +174,7 @@ jobs:
   macos:
     name: macos
     needs: [version, guards]
-    runs-on: macos-14
+    runs-on: macos-15 # macos-14 retiré par GitHub (run 42874444253 : configuration non prise en charge)
     env:
       VERSION: ${{ needs.version.outputs.version }}
     steps:
