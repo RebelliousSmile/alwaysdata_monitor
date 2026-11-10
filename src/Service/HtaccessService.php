@@ -16,19 +16,31 @@ class HtaccessService
 {
     public const FACET_MAX_FILTERS_LIMIT = 10;
 
+    /** Shortest user-agent token accepted for a block: shorter ones catch unrelated clients. */
+    public const UA_MIN_LENGTH = 4;
+
     private HtaccessDoctor $doctor;
 
     private HtaccessSyntaxChecker $syntaxChecker;
+
+    /** Always PrestaShop's own .htaccess: the path is not configurable, so writes cannot be redirected. */
+    private string $htaccessPath;
 
     private const PROTECTION_BEGIN = '# BEGIN sc_alwaysdata protection';
     private const PROTECTION_END = '# END sc_alwaysdata protection';
     private const PROTECTION_OPTIONS = '# sc_alwaysdata options:';
     private const PROTECTION_PATTERN = '/^# BEGIN sc_alwaysdata protection\n.*?^# END sc_alwaysdata protection\n?/ms';
 
-    public function __construct(?HtaccessDoctor $doctor = null, ?HtaccessSyntaxChecker $syntaxChecker = null)
+    public function __construct(?HtaccessDoctor $doctor = null, ?HtaccessSyntaxChecker $syntaxChecker = null, ?string $htaccessPath = null)
     {
         $this->doctor = $doctor ?? new HtaccessDoctor();
         $this->syntaxChecker = $syntaxChecker ?? new HtaccessSyntaxChecker();
+        $this->htaccessPath = $htaccessPath ?? _PS_ROOT_DIR_ . '/.htaccess';
+    }
+
+    public function getPath(): string
+    {
+        return $this->htaccessPath;
     }
 
     public function readBlockedIps(): array
@@ -163,10 +175,7 @@ class HtaccessService
 
     public function blockUserAgent(string $ua): void
     {
-        $ua = trim(str_replace(['"', '\\', "\n", "\r"], '', $ua));
-        if ($ua === '') {
-            throw new \InvalidArgumentException('Empty user-agent');
-        }
+        $ua = $this->sanitizeUserAgent($ua);
 
         $htaccessPath = $this->getHtaccessPath();
         $current = @file_get_contents($htaccessPath);
@@ -186,10 +195,11 @@ class HtaccessService
      */
     public function blockUserAgents(array $uas): void
     {
-        $uas = array_values(array_filter(array_map(
-            static fn ($ua): string => trim(str_replace(['"', '\\', "\n", "\r"], '', (string) $ua)),
-            $uas
-        ), static fn (string $ua): bool => $ua !== ''));
+        // Blank entries are skipped, any other refused token aborts the whole batch (nothing written)
+        $uas = array_values(array_map(
+            fn (string $ua): string => $this->sanitizeUserAgent($ua),
+            array_filter(array_map('strval', $uas), static fn (string $ua): bool => trim($ua) !== '')
+        ));
         if ($uas === []) {
             return;
         }
@@ -501,7 +511,42 @@ class HtaccessService
 
     private function getHtaccessPath(): string
     {
-        return (string) \Configuration::get('SC_ALWAYSDATA_HTACCESS_PATH');
+        return $this->htaccessPath;
+    }
+
+    /**
+     * The token lands in an Apache regex (RewriteCond ... [NC]): only a plain bot name is
+     * accepted, and never one that would also catch a search engine or a real browser.
+     */
+    private function sanitizeUserAgent(string $ua): string
+    {
+        $ua = trim(str_replace(['"', '\\', "\n", "\r"], '', $ua));
+        if ($ua === '') {
+            throw new \InvalidArgumentException('Empty user-agent');
+        }
+        if (!preg_match('/^[A-Za-z0-9._ -]+$/', $ua)) {
+            throw new \InvalidArgumentException(sprintf(
+                'User-agent « %s » refusé : seuls lettres, chiffres, espace, point, tiret et souligné sont acceptés.',
+                $ua
+            ));
+        }
+        if (strlen($ua) < self::UA_MIN_LENGTH) {
+            throw new \InvalidArgumentException(sprintf(
+                'User-agent « %s » refusé : %d caractères minimum.',
+                $ua,
+                self::UA_MIN_LENGTH
+            ));
+        }
+        $victims = $this->doctor->uaPatternVictims($ua);
+        if ($victims !== []) {
+            throw new \InvalidArgumentException(sprintf(
+                'User-agent « %s » refusé : il bloquerait aussi %s.',
+                $ua,
+                implode(', ', $victims)
+            ));
+        }
+
+        return $ua;
     }
 
     private function writeAtomic(string $content): void

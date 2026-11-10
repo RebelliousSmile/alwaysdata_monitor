@@ -7,10 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v1.11.3] - 2026-11-10
+
+Ports the v1.10.1 security hotfix (security audit of 2026-11-10, tag `v1.10.1` on `hotfix/1.10.1`) onto `main`.
+
 ### Fixed
 - `.htaccess` write validation now checks the content itself, before anything is written (`HtaccessSyntaxChecker`): unbalanced or malformed section tags, unterminated quotes, `RewriteCond` / `RewriteRule` without two arguments, bad `RewriteEngine` value. A refused write leaves the live file untouched and creates no backup; a file that was already broken can still be edited but never made worse. Replaces `apachectl -t`, which checks the server configuration and never read the `.htaccess`, ran after the file was in place, and could roll back a valid edit because of an unrelated server configuration error
 
 ### Security
+- The `.htaccess` path is no longer configurable: the module always works on `_PS_ROOT_DIR_/.htaccess` and the `robots.txt` next to it. A stored path could redirect `.htaccess`/`robots.txt` writes and their `.bak` copies to any file writable by PHP. `upgrade-1.10.1` drops `SC_ALWAYSDATA_HTACCESS_PATH`.
+- Saving the configuration (POST on the index page) now requires the `update` permission, not only `read`.
+- User-agent blocks are validated before writing: plain token only (`[A-Za-z0-9._ -]`, 4 characters minimum), and refused when the pattern would also match a search engine or a real browser (`.`, `Mozilla`, `Googlebot`…). A refused token in a batch aborts the whole write.
 - Cron front controllers accept the token in an `X-Cron-Token` header (checked first) as well as the `token` query parameter, which stays accepted so scheduled URLs keep working; the header keeps the secret out of access logs and `Referer` values (`CronTokenGuard`)
 - `rustls-webpki` 0.103.16, `webpki-roots` and `webpki-root-certs` 1.0.10 in `vigie/Cargo.lock` and `vigie/app/src-tauri/Cargo.lock` (RUSTSEC-2026-0381, -0382, -0383)
 

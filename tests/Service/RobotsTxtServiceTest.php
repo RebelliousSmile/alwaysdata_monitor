@@ -20,7 +20,7 @@ class RobotsTxtServiceTest extends TestCase
         $this->dir = sys_get_temp_dir() . '/robots_test_' . uniqid();
         mkdir($this->dir);
         $this->robots = $this->dir . '/robots.txt';
-        \Configuration::$testValues = ['SC_ALWAYSDATA_HTACCESS_PATH' => $this->dir . '/.htaccess'];
+        \Configuration::$testValues = [];
     }
 
     protected function tearDown(): void
@@ -33,10 +33,10 @@ class RobotsTxtServiceTest extends TestCase
 
     private function service(): RobotsTxtService
     {
-        return new RobotsTxtService();
+        return new RobotsTxtService($this->dir);
     }
 
-    public function testRobotsPathIsNextToHtaccess(): void
+    public function testRobotsPathIsInShopRoot(): void
     {
         $this->assertSame($this->robots, $this->service()->getRobotsPath());
     }

@@ -93,16 +93,10 @@
             </div>
 
             <div class="form-group">
-                <label for="htaccess_path">Chemin .htaccess</label>
-                <input
-                    type="text"
-                    id="htaccess_path"
-                    name="htaccess_path"
-                    class="form-control"
-                    value="{{ htaccessPath }}"
-                >
+                <label>Fichier .htaccess</label>
+                <p class="form-control-plaintext text-monospace py-0">{{ htaccessPath }}</p>
                 <small class="form-text text-muted">
-                    Chemin absolu vers le fichier .htaccess de PrestaShop.
+                    Toujours le .htaccess à la racine de PrestaShop (non modifiable).
                 </small>
             </div>
 

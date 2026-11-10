@@ -51,6 +51,14 @@ class RobotsTxtService
     private const BLOCK_END = '# END sc_alwaysdata robots';
     private const BLOCK_PATTERN = '/\n*^# BEGIN sc_alwaysdata robots\n.*?^# END sc_alwaysdata robots\n?/ms';
 
+    /** Shop root: robots.txt is always PrestaShop's own, the path is not configurable. */
+    private string $rootDir;
+
+    public function __construct(?string $rootDir = null)
+    {
+        $this->rootDir = rtrim($rootDir ?? _PS_ROOT_DIR_, '/\\');
+    }
+
     /**
      * @return array{configured: bool, enabled: bool, disallow: string[], bots: string[], in_file: bool}
      */
@@ -165,8 +173,7 @@ class RobotsTxtService
 
     public function getRobotsPath(): string
     {
-        // robots.txt sits next to PrestaShop's .htaccess, in the shop root
-        return dirname((string) \Configuration::get('SC_ALWAYSDATA_HTACCESS_PATH')) . '/robots.txt';
+        return $this->rootDir . '/robots.txt';
     }
 
     /**

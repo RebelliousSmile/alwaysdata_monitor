@@ -18,7 +18,6 @@ class HtaccessServiceTest extends TestCase
     protected function setUp(): void
     {
         $this->tmpFile = tempnam(sys_get_temp_dir(), 'htaccess_test_');
-        \Configuration::$testValues['SC_ALWAYSDATA_HTACCESS_PATH'] = $this->tmpFile;
     }
 
     protected function tearDown(): void
@@ -31,7 +30,7 @@ class HtaccessServiceTest extends TestCase
 
     private function service(): HtaccessService
     {
-        return new HtaccessService();
+        return new HtaccessService(null, null, $this->tmpFile);
     }
 
     private function write(string $content): void
@@ -315,6 +314,90 @@ class HtaccessServiceTest extends TestCase
         // The embedded quote must be gone (the surrounding htaccess quotes are fine)
         $this->assertStringNotContainsString('MJ12"bot', $content);
         $this->assertStringContainsString('MJ12bot', $content);
+    }
+
+    public function testWritesIgnoreLegacyConfiguredPath(): void
+    {
+        // 1.10.0 stored a free path in SC_ALWAYSDATA_HTACCESS_PATH: it must no longer redirect writes
+        $decoy = tempnam(sys_get_temp_dir(), 'htaccess_decoy_');
+        file_put_contents($decoy, "decoy\n");
+        \Configuration::$testValues['SC_ALWAYSDATA_HTACCESS_PATH'] = $decoy;
+        $this->write("RewriteEngine On\n");
+
+        try {
+            $this->service()->blockIp('203.0.113.7');
+
+            $this->assertSame("decoy\n", file_get_contents($decoy));
+            $this->assertSame([], glob($decoy . '.*.bak'));
+            $this->assertStringContainsString('203.0.113.7', file_get_contents($this->tmpFile));
+        } finally {
+            unset(\Configuration::$testValues['SC_ALWAYSDATA_HTACCESS_PATH']);
+            foreach (glob($decoy . '*') as $f) {
+                @unlink($f);
+            }
+        }
+    }
+
+    /**
+     * @return array<string, array{string}>
+     */
+    public static function rejectedUserAgents(): array
+    {
+        return [
+            'regex wildcard' => ['.*'],
+            'regex alternation' => ['AhrefsBot|Mozilla'],
+            'parentheses' => ['bot(s)'],
+            'too short' => ['bot'],
+            'browser token' => ['Mozilla'],
+            'browser engine' => ['AppleWebKit'],
+            'mobile token' => ['iPhone'],
+            'search engine' => ['Googlebot'],
+            'search engine, any case' => ['bingbot'],
+            'generic bot word' => ['compatible'],
+        ];
+    }
+
+    /**
+     * @dataProvider rejectedUserAgents
+     */
+    public function testBlockUserAgentRejectsDangerousPattern(string $ua): void
+    {
+        $initial = "RewriteEngine On\n";
+        $this->write($initial);
+
+        try {
+            $this->service()->blockUserAgent($ua);
+            $this->fail(sprintf('« %s » should have been refused', $ua));
+        } catch (\InvalidArgumentException $e) {
+            $this->assertSame($initial, file_get_contents($this->tmpFile));
+            $this->assertSame([], glob($this->tmpFile . '.*.bak'));
+        }
+    }
+
+    public function testBlockUserAgentAcceptsKnownBotNames(): void
+    {
+        $this->write("RewriteEngine On\n");
+
+        $this->service()->blockUserAgents(['Screaming Frog', 'archive.org_bot', '360Spider', 'ChatGPT-User']);
+
+        $content = file_get_contents($this->tmpFile);
+        foreach (['Screaming Frog', 'archive.org_bot', '360Spider', 'ChatGPT-User'] as $ua) {
+            $this->assertStringContainsString('"' . $ua . '" [NC]', $content);
+        }
+    }
+
+    public function testBlockUserAgentsWritesNothingWhenOneIsRefused(): void
+    {
+        $initial = "RewriteEngine On\n";
+        $this->write($initial);
+
+        $this->expectException(\InvalidArgumentException::class);
+
+        try {
+            $this->service()->blockUserAgents(['AhrefsBot', 'Mozilla']);
+        } finally {
+            $this->assertSame($initial, file_get_contents($this->tmpFile));
+        }
     }
 
     // -----------------------------------------------------------------

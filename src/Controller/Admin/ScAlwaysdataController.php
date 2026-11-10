@@ -69,6 +69,13 @@ class ScAlwaysdataController extends FrameworkBundleAdminController
         $this->ensureResourcesTable();
 
         if ($request->isMethod('POST')) {
+            // The page is readable with 'read'; saving the configuration is a write
+            if (!$this->isGranted('update', $request->get('_legacy_controller'))) {
+                $this->addFlash('error', $this->trans('Vous n\'avez pas la permission de modifier la configuration.', 'Modules.Scalwaysdata.Admin'));
+
+                return $this->redirectToRoute('sc_alwaysdata_index');
+            }
+
             if (!$this->isCsrfTokenValid('sc_alwaysdata_index', $request->request->get('_token'))) {
                 $this->addFlash('error', $this->trans('Jeton CSRF invalide.', 'Modules.Scalwaysdata.Admin'));
 
@@ -76,7 +83,6 @@ class ScAlwaysdataController extends FrameworkBundleAdminController
             }
 
             $logsPath = rtrim(trim((string) $request->request->get('logs_path', '')), '/') . '/';
-            $htaccessPath = trim((string) $request->request->get('htaccess_path', ''));
 
             if ($logsPath === '/') {
                 $this->addFlash(
@@ -85,7 +91,6 @@ class ScAlwaysdataController extends FrameworkBundleAdminController
                 );
             } else {
                 \Configuration::updateValue('SC_ALWAYSDATA_LOGS_PATH', $logsPath);
-                \Configuration::updateValue('SC_ALWAYSDATA_HTACCESS_PATH', $htaccessPath);
                 foreach (['apache', 'http', 'php', 'sites'] as $dir) {
                     $val = max(100, (int) $request->request->get('lines_' . $dir, 5000));
                     \Configuration::updateValue('SC_ALWAYSDATA_LINES_' . strtoupper($dir), $val);
@@ -98,7 +103,7 @@ class ScAlwaysdataController extends FrameworkBundleAdminController
         }
 
         $logsPath = (string) \Configuration::get('SC_ALWAYSDATA_LOGS_PATH');
-        $htaccessPath = (string) \Configuration::get('SC_ALWAYSDATA_HTACCESS_PATH');
+        $htaccessPath = $this->htaccessService->getPath();
         $logsPathHint = ($_SERVER['HOME'] ?? '') . '/admin/logs/';
         $defaults = ['apache' => 5000, 'http' => 10000, 'php' => 5000, 'sites' => 2000];
         $linesPerSource = [];
@@ -107,7 +112,7 @@ class ScAlwaysdataController extends FrameworkBundleAdminController
             $linesPerSource[$dir] = $v > 0 ? $v : $default;
         }
 
-        $htaccessReadable = $htaccessPath !== '' && is_readable($htaccessPath);
+        $htaccessReadable = is_readable($htaccessPath);
 
         $cronToken = (string) \Configuration::get('SC_ALWAYSDATA_CRON_TOKEN');
         if (!$cronToken) {
@@ -127,10 +132,10 @@ class ScAlwaysdataController extends FrameworkBundleAdminController
                 'help_link' => false,
                 'logsPath' => $logsPath,
                 'htaccessPath' => $htaccessPath,
-                'protection' => $htaccessPath !== '' ? $this->htaccessService->readProtection() : null,
-                'shopDomains' => $htaccessPath !== '' ? $this->fetchShopDomains() : [],
-                'robots' => $htaccessPath !== '' ? $this->robotsTxtService->readSettings() : null,
-                'robotsPath' => $htaccessPath !== '' ? $this->robotsTxtService->getRobotsPath() : '',
+                'protection' => $this->htaccessService->readProtection(),
+                'shopDomains' => $this->fetchShopDomains(),
+                'robots' => $this->robotsTxtService->readSettings(),
+                'robotsPath' => $this->robotsTxtService->getRobotsPath(),
                 'aiBots' => (new AiBotCatalog())->all(),
                 'facetMaxFiltersLimit' => HtaccessService::FACET_MAX_FILTERS_LIMIT,
                 'htaccessHealth' => $htaccessReadable ? $this->htaccessService->diagnose() : null,

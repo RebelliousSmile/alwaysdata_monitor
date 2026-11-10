@@ -30,10 +30,9 @@ if (file_exists($autoloadPath)) {
 
 class sc_alwaysdata extends Module
 {
-    public const VERSION = '1.10.0';
+    public const VERSION = '1.11.3';
 
     public const CONFIG_LOGS_PATH = 'SC_ALWAYSDATA_LOGS_PATH';
-    public const CONFIG_HTACCESS_PATH = 'SC_ALWAYSDATA_HTACCESS_PATH';
     public const CONFIG_LINES_APACHE = 'SC_ALWAYSDATA_LINES_APACHE';
     public const CONFIG_LINES_HTTP = 'SC_ALWAYSDATA_LINES_HTTP';
     public const CONFIG_LINES_PHP = 'SC_ALWAYSDATA_LINES_PHP';
@@ -71,7 +70,6 @@ class sc_alwaysdata extends Module
         // Only set defaults if not already configured (preserve values across reinstalls)
         $defaults = [
             self::CONFIG_LOGS_PATH => ($_SERVER['HOME'] ?? '') . '/admin/logs/',
-            self::CONFIG_HTACCESS_PATH => _PS_ROOT_DIR_ . '/.htaccess',
             self::CONFIG_LINES_APACHE => 5000,
             self::CONFIG_LINES_HTTP => 10000,
             self::CONFIG_LINES_PHP => 5000,
@@ -94,7 +92,6 @@ class sc_alwaysdata extends Module
     {
         return parent::uninstall()
             && Configuration::deleteByName(self::CONFIG_LOGS_PATH)
-            && Configuration::deleteByName(self::CONFIG_HTACCESS_PATH)
             && Configuration::deleteByName(self::CONFIG_LINES_APACHE)
             && Configuration::deleteByName(self::CONFIG_LINES_HTTP)
             && Configuration::deleteByName(self::CONFIG_LINES_PHP)

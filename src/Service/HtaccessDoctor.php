@@ -308,6 +308,24 @@ class HtaccessDoctor
     }
 
     /**
+     * Search engines and real browsers that a user-agent blocking pattern would catch.
+     * Used to refuse a block before it is written, not only to report it afterwards.
+     *
+     * @return string[] names of the matched reference user-agents
+     */
+    public function uaPatternVictims(string $pattern): array
+    {
+        $victims = [];
+        foreach (self::SEARCH_ENGINES + self::BROWSERS as $name => $sample) {
+            if ($this->uaMatches($pattern, $sample)) {
+                $victims[] = $name;
+            }
+        }
+
+        return $victims;
+    }
+
+    /**
      * Adds UA blocking rules to the managed "blocks" section, created right after the
      * protection block (or at the top of the file) so that it runs before PrestaShop.
      *
