@@ -22,7 +22,7 @@ Ce dossier contient :
 Deux morceaux : un téléphone en veille ne surveille rien.
 
 ```
-vigie/                      (workspace Cargo)
+sc-vigie/                   (workspace Cargo)
 ├── crates/vigie-core       bibliothèque partagée : parsing des logs (combined + php + apache),
 │                           regroupement en rafales, détection des robots, génération et diff
 │                           du bloc « # BEGIN Vigie » (.htaccess / robots.txt), règles d'alerte
@@ -107,7 +107,7 @@ Débloquer, restaurer, désactiver une protection : confirmation, puis passage p
 
 ## 7. Non dessiné, à faire
 
-- ~~Thème clair~~ : fait (#34), jetons dans `vigie/app/src/styles/tokens-light.css`
+- ~~Thème clair~~ : fait (#34), jetons dans `app/src/styles/tokens-light.css`
 - Mise en page large (> 900 px)
 - Appairage d'un appareil (QR code + jeton)
 - Jeu de contrôles WordPress détaillé

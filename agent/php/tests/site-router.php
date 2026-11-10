@@ -3,7 +3,7 @@
 declare(strict_types=1);
 
 // Routeur `php -S` d'un site de test (#13), partagé par AgentTest.php et
-// vigie/tests/agent_e2e.rs. Il lit le bloc vigie du .htaccess du dossier
+// tests/agent_e2e.rs. Il lit le bloc vigie du .htaccess du dossier
 // demandé et en applique les groupes à la place d'Apache : UA « contient,
 // sans casse », REMOTE_ADDR, %{TIME} à l'heure du scénario. Le scénario
 // (site.json du dossier VIGIE_SITE_DIR) simule les pannes : 500 dans le bac

@@ -4,10 +4,10 @@ Un agent installé sur un site envoie au veilleur, à intervalle régulier, un
 rapport signé de ce qu'il voit de l'intérieur. Le veilleur ne garde que la clé
 publique de chaque site : la clé privée ne quitte jamais le site.
 
-Ce document est le contrat. `vigie/src/report.rs`, `vigie/src/ingest.rs`,
-`vigie/src/facts.rs` et `vigie/tests/ingest.rs` en reprennent chaque règle.
+Ce document est le contrat. `src/report.rs`, `src/ingest.rs`,
+`src/facts.rs` et `tests/ingest.rs` en reprennent chaque règle.
 L'agent PHP qui le respecte est décrit dans `agent-php.md`, et
-`vigie/tests/interop.rs` vérifie un rapport qu'il a signé.
+`tests/interop.rs` vérifie un rapport qu'il a signé.
 
 ## Requête
 
@@ -168,7 +168,7 @@ clôt.
 CycloneDX, relevé par l'agent PHP 0.5.0 (`agent-php.md`, « Inventaire »,
 source `agent`) ou lu dans les lockfiles du projet par `vigie-inventory` au
 déploiement (`inventaire.md`, issue #20, source `ci`).
-Code : `vigie/src/inventory/` ; tests : `vigie/tests/inventory_receive.rs`,
+Code : `src/inventory/` ; tests : `tests/inventory_receive.rs`,
 `interop.rs`, `inventory_vectors.rs`, `agent_e2e.rs`.
 
 - Mêmes en-têtes que le rapport. `X-Vigie-Signature` signe
@@ -306,7 +306,7 @@ gzip ; les limites de relevé de l'agent sont dans `agent-php.md`.
 `POST /r/v1/errors` reçoit les erreurs d'un site, déjà groupées par message
 par l'agent PHP, un lot par (site, jour UTC). Contrat décidé dans
 `decisions.md`, « Erreurs des sites (issue #52) » ; code :
-`vigie/src/errors/` ; tests : `vigie/tests/errors_receive.rs`. **Côté
+`src/errors/` ; tests : `tests/errors_receive.rs`. **Côté
 veilleur seulement** : l'agent ne l'émet pas encore (sa source est à
 confirmer, `decisions.md`).
 

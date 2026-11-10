@@ -1,5 +1,5 @@
-// Fonctions pures du déploiement, partagées par vigie/scripts/deploy.mjs
-// (veilleur) et vigie/scripts/deploy-agent.mjs (agent) : aucune n'appelle git,
+// Fonctions pures du déploiement, partagées par scripts/deploy.mjs
+// (veilleur) et scripts/deploy-agent.mjs (agent) : aucune n'appelle git,
 // WSL ni le réseau, pour rester testables avec `node --test`. withRemoteLock
 // reçoit la fonction ssh en paramètre pour la même raison.
 
@@ -26,7 +26,7 @@ export function parseArgs(argv) {
     if (options.target) throw new Error(`Une seule cible attendue, reçu « ${options.target} » et « ${arg} »`)
     options.target = arg
   }
-  if (!options.target) throw new Error('Cible manquante : node vigie/scripts/deploy.mjs <cible> [--apply]')
+  if (!options.target) throw new Error('Cible manquante : node scripts/deploy.mjs <cible> [--apply]')
   if (options.apply && options.check) throw new Error('--apply et --check sont incompatibles')
   return options
 }

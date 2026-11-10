@@ -1,4 +1,4 @@
-# Exemple GitLab CI pour vigie-inventory (issue #20, vigie/docs/inventaire.md),
+# Exemple GitLab CI pour vigie-inventory (issue #20, docs/inventaire.md),
 # à fusionner dans le .gitlab-ci.yml du projet avec vigie-inventory-push.sh à
 # la racine du dépôt.
 #

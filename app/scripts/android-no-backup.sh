@@ -11,7 +11,7 @@
 # seul n'y coupe pas le transfert d'appareil à appareil : il faut aussi
 # `dataExtractionRules`. Le jeton vit en plus dans `no_backup` (secret.rs).
 #
-# Lancé depuis vigie/app. `verify` lit aapt2 dans les build-tools du SDK
+# Lancé depuis app. `verify` lit aapt2 dans les build-tools du SDK
 # (BUILD_TOOLS_VERSION, ANDROID_HOME).
 
 set -euo pipefail

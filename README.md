@@ -1,6 +1,10 @@
 # vigie — veilleur multi-sites
 
-Veilleur hébergé sur un VPS. Il surveille les sites de
+Ce dépôt réunit les trois pièces de Vigie : le veilleur (crate Rust à la
+racine), l'agent PHP (`agent/php/`) et la console Windows et Android
+(`app/`, voir [`app/README.md`](./app/README.md)).
+
+Le veilleur est hébergé sur un VPS. Il surveille les sites de
 l'extérieur, reçoit les rapports signés d'un agent PHP posé sur chaque site
 (protocole : [`docs/protocole-agent.md`](./docs/protocole-agent.md), pose :
 [`docs/agent-php.md`](./docs/agent-php.md)) et alerte par e-mail.
@@ -146,7 +150,6 @@ la boucle locale. Elle entre dans le lien d'appairage ; sans elle,
 ## Développement
 
 ```powershell
-cd vigie
 cargo test --locked --all-targets
 cargo clippy --locked --all-targets -- -D warnings
 ```
@@ -163,15 +166,15 @@ L'agent PHP a ses propres tests, sans Composer, sur les arborescences de
 `agent/php/tests/fixtures/` (sodium requis, PHP 8.1 au moins) :
 
 ```powershell
-php -d extension=sodium vigie/agent/php/tests/run.php
+php -d extension=sodium agent/php/tests/run.php
 # Après une modification du format du rapport : régénérer la fixture d'interopérabilité
-php -d extension=sodium vigie/agent/php/tests/make-interop-fixture.php
+php -d extension=sodium agent/php/tests/make-interop-fixture.php
 ```
 
 La reprise de l'incident du 2026-09-07 (promesse : alerte sous 10 min) se
 rejoue en heure logique par `tests/replay_2026_09_07.rs`, et en processus réels
 (`vigie serve`, agent PHP, `tick` chaque minute) par
-`node vigie/scripts/replay-incident.mjs`, en 12 à 15 min. Procédure et
+`node scripts/replay-incident.mjs`, en 12 à 15 min. Procédure et
 résultats datés : [`docs/reception.md`](./docs/reception.md).
 
 Sous Windows, l'antivirus peut mettre en quarantaine un fichier de test qui
@@ -191,9 +194,9 @@ systemd, Caddy, pare-feu).
 
 ```powershell
 copy vigie\deploy\targets.example.json vigie\deploy\targets.json   # ignoré par git
-node vigie/scripts/deploy.mjs veilleur --check    # build et validations locales
-node vigie/scripts/deploy.mjs veilleur            # prévisualisation, aucune écriture
-node vigie/scripts/deploy.mjs veilleur --apply    # envoi, bascule atomique, redémarrage de serve
+node scripts/deploy.mjs veilleur --check    # build et validations locales
+node scripts/deploy.mjs veilleur            # prévisualisation, aucune écriture
+node scripts/deploy.mjs veilleur --apply    # envoi, bascule atomique, redémarrage de serve
 ```
 
 Garde-fous : seul le contenu du commit est compilé, branche `main` exigée (sauf
@@ -210,9 +213,9 @@ L'agent PHP se déploie de la même façon sur le compte SSH de chaque site, dan
 liens) :
 
 ```powershell
-node vigie/scripts/deploy-agent.mjs site-a-agent --check    # php -l local si PHP est disponible
-node vigie/scripts/deploy-agent.mjs site-a-agent            # prévisualisation, compare les sha256
-node vigie/scripts/deploy-agent.mjs site-a-agent --apply    # envoi, php -l distant, bascule atomique
+node scripts/deploy-agent.mjs site-a-agent --check    # php -l local si PHP est disponible
+node scripts/deploy-agent.mjs site-a-agent            # prévisualisation, compare les sha256
+node scripts/deploy-agent.mjs site-a-agent --apply    # envoi, php -l distant, bascule atomique
 ```
 
 Le script ne touche ni à la configuration ni à la clé de l'agent : la pose

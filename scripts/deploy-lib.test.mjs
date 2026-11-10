@@ -42,7 +42,7 @@ test('validateSshAccess compose le remote et cite le fichier de la cible absente
   assert.deepEqual(validateSshAccess('shop', TARGET, 'x.json'), {
     name: 'shop', host: TARGET.host, user: 'site', sshKey: '~/.ssh/site_ci', remote: 'site@ssh-site.example.org',
   })
-  assert.throws(() => validateSshAccess('shop', undefined, 'vigie/deploy/targets.json'), /absente de vigie\/deploy\/targets\.json/)
+  assert.throws(() => validateSshAccess('shop', undefined, 'deploy/targets.json'), /absente de deploy\/targets\.json/)
 })
 
 test('validateSshAccess refuse un nom, un hôte ou une clé hors liste blanche', () => {

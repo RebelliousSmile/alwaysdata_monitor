@@ -34,7 +34,7 @@ promesse des 10 minutes.
 ## 1. Pire cas simulé
 
 ```sh
-cd vigie && cargo test --locked --test replay_2026_09_07 -- --nocapture
+cargo test --locked --test replay_2026_09_07 -- --nocapture
 ```
 
 `tests/replay_2026_09_07.rs` sert le site A en HTTPS local
@@ -63,7 +63,7 @@ Preuve négative : avec une promesse ramenée à 4 min, le test échoue.
 ## 2. Reprise locale réelle
 
 ```sh
-node vigie/scripts/replay-incident.mjs [--delay <s>] [--keep]
+node scripts/replay-incident.mjs [--delay <s>] [--keep]
 ```
 
 Prérequis : cargo, php avec l'extension sodium chargeable

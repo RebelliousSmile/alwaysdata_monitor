@@ -1,7 +1,7 @@
 //! `vigie-inventory` : inventaire des composants d'un projet, lu dans ses
 //! lockfiles au déploiement, écrit en CycloneDX 1.7 ou signé par la clé
 //! d'inventaire du site et poussé au veilleur (issue #20,
-//! `vigie/docs/inventaire.md`).
+//! `docs/inventaire.md`).
 //!
 //! La graine vient de `VIGIE_INVENTORY_KEY` (lue après l'analyse des
 //! arguments, jamais par `clap`) ou de `--key-file`. Codes de sortie : 0

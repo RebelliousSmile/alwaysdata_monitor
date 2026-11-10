@@ -1,6 +1,6 @@
 # Changelog de la console Vigie
 
-Versions de la console (`vigie/app`), publiées par les tags `console-vX.Y.Z`.
+Versions de la console (`app`), publiées par les tags `console-vX.Y.Z`.
 Le veilleur a son propre historique.
 
 ## Non publiée

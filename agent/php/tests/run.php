@@ -3,7 +3,7 @@
 declare(strict_types=1);
 
 // Exécuteur minimal des tests de l'agent, sans Composer :
-//   php vigie/agent/php/tests/run.php [filtre]
+//   php agent/php/tests/run.php [filtre]
 // Code 0 si tout passe, 1 sinon. Les tests sont dans AgentTest.php.
 
 namespace Vigie\Agent\Tests;

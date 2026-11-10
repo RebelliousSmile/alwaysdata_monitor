@@ -1,6 +1,6 @@
 #!/bin/sh
 # Enveloppe de `vigie-inventory push` pour la CI (issue #20,
-# vigie/docs/inventaire.md) : un veilleur injoignable ou un refus (code 1)
+# docs/inventaire.md) : un veilleur injoignable ou un refus (code 1)
 # laisse un avertissement visible sans bloquer le déploiement ; une
 # configuration fausse (code 2 : usage, clé, lockfile, projet) arrête le job.
 # Aucune option de CI qui laisse passer un job en échec : elle masquerait le

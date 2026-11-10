@@ -1,6 +1,6 @@
 // Reprise locale réelle de l'incident du 2026-09-07, chronométrée.
 //
-//   node vigie/scripts/replay-incident.mjs [--delay <s>] [--keep]
+//   node scripts/replay-incident.mjs [--delay <s>] [--keep]
 //
 // Processus réels, en local, dans un dossier temporaire :
 //   - `vigie serve` (le binaire) reçoit les rapports de l'agent ;
@@ -37,7 +37,7 @@ function parseArgs(argv) {
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--keep') options.keep = true
     else if (argv[i] === '--delay' && /^\d+$/.test(argv[i + 1] ?? '')) options.delay = Number(argv[++i])
-    else throw new Error('Usage : node vigie/scripts/replay-incident.mjs [--delay <s>] [--keep]')
+    else throw new Error('Usage : node scripts/replay-incident.mjs [--delay <s>] [--keep]')
   }
   return options
 }

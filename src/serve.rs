@@ -3,7 +3,7 @@
 //! Trois familles de routes :
 //!
 //! - `GET /health` publie l'heure du dernier `tick`, sans aucun nom de site :
-//!   `vigie/scripts/deploy.mjs` en a besoin pour prouver qu'un `tick` du
+//!   `scripts/deploy.mjs` en a besoin pour prouver qu'un `tick` du
 //!   nouveau binaire est passé ;
 //! - `POST /r/v1/report` reçoit les rapports signés des agents
 //!   (`docs/protocole-agent.md`) et n'envoie jamais d'e-mail : `tick` notifie ;

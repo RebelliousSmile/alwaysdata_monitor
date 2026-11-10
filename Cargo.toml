@@ -1,5 +1,5 @@
 [package]
-# Vigie : nom figé le 2026-10-16 (vigie/docs/decisions.md).
+# Vigie : nom figé le 2026-10-16 (docs/decisions.md).
 name = "vigie"
 version = "0.3.0"
 edition = "2024"

@@ -105,7 +105,7 @@ const CRITICAL = ['wp-config.php', '.htaccess', '.user.ini', 'wordfence-waf.php'
 
 // --- Commandes -------------------------------------------------------------
 
-/** Vecteurs partagés avec les tests Rust (vigie/tests/commands_vectors.rs). */
+/** Vecteurs partagés avec les tests Rust (tests/commands_vectors.rs). */
 function vectors(): array
 {
     return json_decode((string) file_get_contents(__DIR__ . '/../../../tests/fixtures/commands-vectors.json'), true, 32, \JSON_THROW_ON_ERROR);
@@ -309,7 +309,7 @@ function with_logs_server(callable $fn): void
 // sans la page témoin, horloge décalée, accueil en 500 une fois le bloc
 // posé, fichier modifié par un tiers.
 
-/** Vecteurs de la grammaire, générés par vigie/tests/htaccess.rs. */
+/** Vecteurs de la grammaire, générés par tests/htaccess.rs. */
 function htaccess_vectors(): array
 {
     return json_decode((string) file_get_contents(__DIR__ . '/../../../tests/fixtures/htaccess/vectors.json'), true, 32, \JSON_THROW_ON_ERROR);
@@ -1298,7 +1298,7 @@ return [
     "fixture d'interopérabilité à jour et signature valide" => function (): void {
         foreach (interop_files() as $name => $content) {
             $tracked = @file_get_contents(interop_path($name));
-            check($tracked !== false, "{$name} absente : php vigie/agent/php/tests/make-interop-fixture.php");
+            check($tracked !== false, "{$name} absente : php agent/php/tests/make-interop-fixture.php");
             same($content, $tracked, "{$name} périmée : relancer make-interop-fixture.php");
         }
         $fixture = json_decode((string) file_get_contents(interop_path()), true);

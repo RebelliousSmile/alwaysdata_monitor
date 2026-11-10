@@ -6,9 +6,9 @@ un jeton qui lui est propre, une seule fois, en échange d'un code d'appairage
 créé sur le VPS. Le veilleur ne garde que l'empreinte SHA-256 des jetons et
 des codes : ni l'un ni l'autre n'est écrit en clair, en base comme au journal.
 
-Ce document est le contrat. `vigie/src/device.rs`, `vigie/src/api.rs`,
-`vigie/tests/api_auth.rs`, `vigie/tests/api_read.rs`,
-`vigie/tests/api_guards.rs` et `vigie/tests/cli.rs` en reprennent chaque règle.
+Ce document est le contrat. `src/device.rs`, `src/api.rs`,
+`tests/api_auth.rs`, `tests/api_read.rs`,
+`tests/api_guards.rs` et `tests/cli.rs` en reprennent chaque règle.
 
 ## Configuration
 
@@ -601,7 +601,7 @@ l'appareil révoqué.
 ## Texte issu des logs
 
 Tout champ dont le texte vient des logs d'un site est assaini avant d'être
-servi (`LogText`, `vigie/src/api/log_text.rs`) : caractères de contrôle C0,
+servi (`LogText`, `src/api/log_text.rs`) : caractères de contrôle C0,
 DEL et C1, U+2028, U+2029 et contrôles bidirectionnels (U+061C, U+200E,
 U+200F, U+202A à U+202E, U+2066 à U+2069) deviennent U+FFFD. Aujourd'hui :
 `key` et `detail` des incidents du contrôle `logs`, `detail` de son passage
@@ -611,11 +611,11 @@ U+200F, U+202A à U+202E, U+2066 à U+2069) deviennent U+FFFD. Aujourd'hui :
 configuration mais relus de la base. Un user-agent ou un chemin, s'il en est
 servi un jour, suit la même règle : coupé à 512 caractères, chemin sans query
 string, referer réduit à son origine. La console n'injecte jamais de HTML brut (`vue/no-v-html` en erreur
-dans `vigie/app/eslint.config.js`).
+dans `app/eslint.config.js`).
 
 ## État d'un site
 
-Calculé par le veilleur seul (`SiteState` dans `vigie/src/api.rs`) ; la
+Calculé par le veilleur seul (`SiteState` dans `src/api.rs`) ; la
 console l'affiche sans le recalculer. Le premier cas qui s'applique l'emporte :
 
 | Ordre | `state` | Règle |

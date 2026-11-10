@@ -5,8 +5,8 @@ declare(strict_types=1);
 // Rapport et inventaire signés par l'agent avec une graine fixe, que
 // tests/interop.rs et tests/inventory_vectors.rs font accepter (ou refuser)
 // par le veilleur :
-//   php vigie/agent/php/tests/make-interop-fixture.php
-// écrit vigie/tests/fixtures/php-signed-report.json,
+//   php agent/php/tests/make-interop-fixture.php
+// écrit tests/fixtures/php-signed-report.json,
 // php-signed-inventory.json (fixture wp-inventory du site A fictif) et
 // inventory-vectors.json (domaine, corps valide, corps d'autres usages
 // rejoués sur /r/v1/inventory, inventaire sans préfixe). Tout y est fixe

@@ -1,8 +1,8 @@
 // Déploie le binaire Linux du veilleur sur son VPS (utilisateur vigie).
 //
-//   node vigie/scripts/deploy.mjs veilleur --check    build et validations locales, sans contacter la cible
-//   node vigie/scripts/deploy.mjs veilleur            prévisualisation (aucune écriture distante)
-//   node vigie/scripts/deploy.mjs veilleur --apply    envoi, bascule atomique, redémarrage de serve, preuve /health
+//   node scripts/deploy.mjs veilleur --check    build et validations locales, sans contacter la cible
+//   node scripts/deploy.mjs veilleur            prévisualisation (aucune écriture distante)
+//   node scripts/deploy.mjs veilleur --apply    envoi, bascule atomique, redémarrage de serve, preuve /health
 //
 // Seul le contenu d'un commit est compilé (git archive),
 // jamais la copie de travail. Build statique musl dans WSL avec cargo-zigbuild,

@@ -1,4 +1,4 @@
-//! Client de l'API du veilleur (`vigie/docs/api-console.md`). Le jeton est
+//! Client de l'API du veilleur (`docs/api-console.md`). Le jeton est
 //! ajouté ici, côté Rust : le webview ne reçoit que les réponses lues.
 //!
 //! Les types ne portent que les champs que la console affiche. Un champ

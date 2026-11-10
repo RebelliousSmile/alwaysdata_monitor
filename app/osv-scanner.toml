@@ -1,13 +1,13 @@
-# Exceptions osv-scanner pour vigie/app/pnpm-lock.yaml (issue #22).
+# Exceptions osv-scanner pour app/pnpm-lock.yaml (issue #22).
 #
-# Règles (vigie/docs/decisions.md, section « Dépendances (issue #22) ») :
+# Règles (docs/decisions.md, section « Dépendances (issue #22) ») :
 # - remédier d'abord : une exception seulement quand aucun correctif n'est
 #   atteignable ;
 # - ce fichier ne vaut que pour le lockfile de son dossier : osv-scanner ne
 #   le lit ni pour un dossier voisin ni pour un sous-dossier ;
 # - chaque entrée porte id, reason (origine, pourquoi non exploitable chez
 #   nous, condition de levée) et ignoreUntil, au plus tard 92 jours après
-#   la date du jour : vigie/scripts/check-osv-exceptions.py le vérifie en CI
+#   la date du jour : scripts/check-osv-exceptions.py le vérifie en CI
 #   et refuse toute autre clé (PackageOverrides compris).
 
 [[IgnoredVulns]]

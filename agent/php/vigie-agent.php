@@ -10,7 +10,7 @@ if (\PHP_SAPI !== 'cli') {
     exit;
 }
 
-// Agent Vigie, protocole v1 (vigie/docs/protocole-agent.md, vigie/docs/agent-php.md).
+// Agent Vigie, protocole v1 (docs/protocole-agent.md, docs/agent-php.md).
 //
 //   php vigie-agent.php              contrôles, rapport signé, envoi au veilleur
 //                                    (puis commandes, inventaire et logs, s'ils sont
@@ -810,7 +810,7 @@ function send(Config $config, string $body, string $signature): void
     }
 }
 
-// --- Commandes (vigie/docs/protocole-commandes.md) ----------------------
+// --- Commandes (docs/protocole-commandes.md) ----------------------
 //
 // L'agent retire sa commande à chaque passage. Rien ne s'exécute sans une
 // réponse signée par la clé de commandes épinglée dans config.json, et rien
@@ -1312,7 +1312,7 @@ function rotate_key(Config $config, string $dir, string $id, callable $result): 
     return $result('ok', 'nouvelle clé créée', ['new_pubkey' => $public, 'proof' => $proof]);
 }
 
-// --- .htaccess (vigie/docs/htaccess.md) -----------------------------------
+// --- .htaccess (docs/htaccess.md) -----------------------------------
 //
 // htaccess-apply remplace le bloc `# BEGIN vigie` du .htaccess de la racine,
 // htaccess-rollback remet la copie précédente. Le bloc est revalidé ici par
@@ -2234,7 +2234,7 @@ function resume_htaccess(Config $config, string $dir, array &$state): void
     save_state($dir, $state);
 }
 
-// --- Inventaire (vigie/docs/agent-php.md, vigie/docs/failles.md) ----------
+// --- Inventaire (docs/agent-php.md, docs/failles.md) ----------
 //
 // Facultatif. Avec `"inventory": {"enabled": true}`, l'agent relève les
 // composants du site, en lecture seule et sans jamais exécuter ni inclure de
@@ -2358,7 +2358,7 @@ function valid_vigie_path(string $path): bool
     return true;
 }
 
-// --- purl (grammaire commune de failles.md, vigie/src/vulns/purl.rs) ------
+// --- purl (grammaire commune de failles.md, src/vulns/purl.rs) ------
 
 /** Version de la grammaire commune, telle quelle, sinon '' (jamais tronquée). */
 function clean_version(mixed $raw): string
@@ -3333,7 +3333,7 @@ function inventory_pass(Config $config, string $dir, int $now, int $deadline): v
     throw new SendError('inventaire refusé (raison dans journalctl -u vigie-serve) : nouvel essai dans 1 h');
 }
 
-// --- Logs (vigie/docs/logs.md) -----------------------------------------
+// --- Logs (docs/logs.md) -----------------------------------------
 //
 // Facultatif. Avec une section `logs`, l'agent pousse après le rapport et le
 // retrait les lignes nouvelles du log HTTP d'Alwaysdata

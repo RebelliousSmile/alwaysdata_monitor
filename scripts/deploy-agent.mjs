@@ -1,13 +1,13 @@
 // Envoie l'agent PHP sur le compte SSH d'un site, hors du webroot.
 //
-//   node vigie/scripts/deploy-agent.mjs site-a-agent --check    validations locales, sans contacter la cible
-//   node vigie/scripts/deploy-agent.mjs site-a-agent            prévisualisation (aucune écriture distante)
-//   node vigie/scripts/deploy-agent.mjs site-a-agent --apply    envoi, contrôle php -l distant, bascule atomique
+//   node scripts/deploy-agent.mjs site-a-agent --check    validations locales, sans contacter la cible
+//   node scripts/deploy-agent.mjs site-a-agent            prévisualisation (aucune écriture distante)
+//   node scripts/deploy-agent.mjs site-a-agent --apply    envoi, contrôle php -l distant, bascule atomique
 //
 // Comme pour le veilleur : seul le contenu d'un commit part (git show), jamais
 // la copie de travail. Transport ssh de WSL avec une clé dédiée. Le script ne
 // touche ni à la configuration ni à la clé de l'agent (~/.vigie-agent) : la
-// pose est décrite dans vigie/docs/agent-php.md.
+// pose est décrite dans docs/agent-php.md.
 
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
@@ -131,7 +131,7 @@ const keyState = ssh('test -f .vigie-agent/secret.key && echo present || echo ab
 const nextSteps = keyState === 'present'
   ? []
   : [
-      'Clé de l\'agent absente (~/.vigie-agent/secret.key) : après envoi, voir vigie/docs/agent-php.md',
+      'Clé de l\'agent absente (~/.vigie-agent/secret.key) : après envoi, voir docs/agent-php.md',
       `  wsl ssh -i ${target.sshKey} ${target.remote} "php ${target.script} --init"`,
     ]
 

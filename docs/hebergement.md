@@ -37,16 +37,16 @@ est public.
 Sur un VPS neuf, avec la clé root déposée à la commande :
 
 ```console
-$ git archive -o vigie-deploy.tar --prefix=vigie-deploy/ HEAD:vigie/deploy
+$ git archive -o vigie-deploy.tar --prefix=vigie-deploy/ HEAD:deploy
 $ scp vigie-deploy.tar root@<vps>:/root/
 $ ssh root@<vps> 'tar -xf /root/vigie-deploy.tar -C /root && sh /root/vigie-deploy/provision.sh "<clé publique ed25519 de déploiement>" <sous-domaine>'
 ```
 
 `git archive` plutôt que `scp -r` : seul le contenu du commit part, pas le
-`targets.json` local, ignoré par git. Avec `HEAD:vigie/deploy`, les chemins
-perdent le préfixe `vigie/` et la règle `eol=lf` de la racine ne s'applique
+`targets.json` local, ignoré par git. Avec `HEAD:deploy`, les chemins
+perdent le préfixe `deploy/` et la règle `eol=lf` de la racine ne s'applique
 plus : sous Windows, `core.autocrlf` passerait le script en CRLF
-(`set: Illegal option -` sur le VPS). `vigie/deploy/.gitattributes` reprend
+(`set: Illegal option -` sur le VPS). `deploy/.gitattributes` reprend
 la règle à la racine de cet arbre ; il n'agit qu'une fois commité, `git
 archive` lisant les règles du commit.
 
@@ -565,7 +565,7 @@ vigie 0.1.0
 ```
 
 Depuis le socle (issue #9), la CI refait ce build à chaque push touchant
-`vigie/` (job `musl` de `.github/workflows/vigie.yml`, cargo-zigbuild 0.23.4 et
+le veilleur (job `musl` de `.github/workflows/vigie.yml`, cargo-zigbuild 0.23.4 et
 zig 0.14.1 épinglés) et échoue si le binaire n'est pas statique. Le même build,
 lancé en local le 2026-10-16, rend `statically linked, stripped` et
 `vigie 0.3.0`. Le job `tls-deps` de `.github/workflows/garde-fous.yml` refuse

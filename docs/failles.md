@@ -518,7 +518,7 @@ Seul `composer` passe en minuscules ; `npm` et `cargo` sont comparés tels
 quels. Les types `wordpress` et `prestashop` ne sont pas enregistrés : ces
 conventions sont à revoir si la spécification officialise autre chose.
 
-**Grammaire commune** (un seul module `vigie/src/vulns/purl.rs`, écrit en F1 et
+**Grammaire commune** (un seul module `src/vulns/purl.rs`, écrit en F1 et
 importé par l'inventaire F5 ; un seul fichier de vecteurs partagé par le Rust
 et l'agent PHP) :
 

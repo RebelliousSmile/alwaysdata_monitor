@@ -11,7 +11,7 @@ Chaque point cite sa preuve : un test (fichier et nom), un job de
 
 - **test** : `cargo fmt`, `cargo clippy`, `cargo test --locked --all-targets`,
   sous `ubuntu-24.04` et `windows-latest` ;
-- **agent PHP (8.1)** : `php vigie/agent/php/tests/run.php` dans l'image
+- **agent PHP (8.1)** : `php agent/php/tests/run.php` dans l'image
   `php:8.1-cli` épinglée, sous Linux ;
 - **bout en bout serve + agent PHP (8.1)** :
   `cargo test --test agent_e2e -- --ignored`, agent dans la même image, sous

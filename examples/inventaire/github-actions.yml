@@ -1,5 +1,5 @@
 # Exemple GitHub Actions pour vigie-inventory (issue #20,
-# vigie/docs/inventaire.md), à copier dans .github/workflows/ du projet avec
+# docs/inventaire.md), à copier dans .github/workflows/ du projet avec
 # vigie-inventory-push.sh à la racine du dépôt.
 #
 # - deploy : le job de déploiement (environnement production, jamais sur une

@@ -2,7 +2,7 @@ import { invoke } from '@tauri-apps/api/core'
 
 // Commandes Tauri de `src-tauri/src/lib.rs`. Le webview ne fait aucune
 // requête réseau et ne reçoit jamais le jeton : seulement les réponses du
-// veilleur (`vigie/docs/api-console.md`), réduites aux champs affichés.
+// veilleur (`docs/api-console.md`), réduites aux champs affichés.
 
 export type Severity = 'info' | 'warning' | 'critical'
 export type IncidentState = 'open' | 'acked' | 'closed'

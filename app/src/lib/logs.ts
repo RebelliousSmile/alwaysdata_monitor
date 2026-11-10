@@ -1,7 +1,7 @@
 import type { Bot, LoadHour, Verdict } from '@/lib/api'
 import type { Tone } from '@/lib/state'
 
-// Libellés de l'analyse des logs (`vigie/docs/api-console.md`) et
+// Libellés de l'analyse des logs (`docs/api-console.md`) et
 // propositions tirées des maquettes Trafic. La console n'applique rien : une
 // action de la maquette devient le texte d'une commande à passer sur le VPS.
 

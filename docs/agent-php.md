@@ -41,7 +41,7 @@ les suivants.
 Les exemples visent le site A et le compte `<compte-site-a>`. Les commandes
 `ssh` passent par WSL avec la clé dédiée de la cible.
 
-1. **Accès SSH.** Ajouter la cible à `vigie/deploy/targets.json` (fichier ignoré
+1. **Accès SSH.** Ajouter la cible à `deploy/targets.json` (fichier ignoré
    par git, modèle `site-a-agent` dans `targets.example.json`), puis créer et
    autoriser la clé :
 
@@ -57,8 +57,8 @@ Les exemples visent le site A et le compte `<compte-site-a>`. Les commandes
 2. **Envoi de l'agent** dans `~/vigie-agent/vigie-agent.php` :
 
    ```powershell
-   node vigie/scripts/deploy-agent.mjs site-a-agent           # prévisualisation
-   node vigie/scripts/deploy-agent.mjs site-a-agent --apply   # envoi
+   node scripts/deploy-agent.mjs site-a-agent           # prévisualisation
+   node scripts/deploy-agent.mjs site-a-agent --apply   # envoi
    ```
 
 3. **Configuration**, sur le compte du site, dans `~/.vigie-agent/config.json`
@@ -460,14 +460,14 @@ site tombe en silence (`heartbeat`).
    rapports, la référence des empreintes et les inventaires sont effacés ; les incidents
    `agent:` ouverts sont clos au `tick` suivant.
 3. Sur le compte du site : `rm -r ~/vigie-agent ~/.vigie-agent`.
-4. Retirer la cible de `vigie/deploy/targets.json` et, si la clé SSH était
+4. Retirer la cible de `deploy/targets.json` et, si la clé SSH était
    dédiée à l'agent, la clé publique `vigie_agent` de `~/.ssh/authorized_keys`
    du compte. Une clé partagée avec le déploiement du site reste en place.
 
 ## Tests en local
 
 ```powershell
-php -d extension=sodium vigie/agent/php/tests/run.php
+php -d extension=sodium agent/php/tests/run.php
 ```
 
 Les tests `htaccess` servent un site par `php -S` (routeur
