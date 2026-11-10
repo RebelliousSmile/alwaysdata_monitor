@@ -329,7 +329,7 @@ function site_router(string $dir, array $scenario): string
 function with_htaccess_site(array $scenario, callable $fn, array $override = []): void
 {
     $root = tmp_site();
-    file_put_contents("{$root}/.htaccess", SC_BLOCK . "\n" . file_get_contents("{$root}/.htaccess"));
+    file_put_contents("{$root}/.htaccess", THIRD_PARTY_BLOCK . "\n" . file_get_contents("{$root}/.htaccess"));
     $server = tmp_dir();
     [$port, $stop] = php_server(site_router($server, $scenario), $root, ['VIGIE_SITE_DIR' => $server]);
     try {
@@ -340,8 +340,8 @@ function with_htaccess_site(array $scenario, callable $fn, array $override = [])
     }
 }
 
-/** Bloc du module PrestaShop, à garder intact. */
-const SC_BLOCK = "# BEGIN sc_alwaysdata protection\n<IfModule mod_rewrite.c>\nRewriteEngine on\n</IfModule>\n# END sc_alwaysdata protection";
+/** Bloc posé par un autre outil, à garder intact. */
+const THIRD_PARTY_BLOCK = "# BEGIN other-tool\n<IfModule mod_rewrite.c>\nRewriteEngine on\n</IfModule>\n# END other-tool";
 
 /** Bloc valide maintenant : un groupe d'UA de 24 h, et une IP si donnée. */
 function block_now(array $literals = ['Bytespider'], ?string $ip = null): string
@@ -1739,13 +1739,13 @@ return [
         check(\in_array(\Vigie\Agent\BROWSER_UA, \Vigie\Agent\PROTECTED_UAS, true), 'UA de navigateur');
     },
 
-    'htaccess : bloc vigie remplacé ou ajouté en tête, bloc sc_alwaysdata intact au-dessus ou au-dessous' => function (): void {
+    'htaccess : bloc vigie remplacé ou ajouté en tête, bloc tiers intact au-dessus ou au-dessous' => function (): void {
         $block = "# BEGIN vigie\nRewriteEngine On\n# END vigie\n";
         $other = "# BEGIN vigie\n# autre\nRewriteEngine On\n# END vigie\n";
         $wp = "# BEGIN WordPress\nRewriteEngine On\n# END WordPress\n";
-        same([$block . SC_BLOCK . "\n" . $wp, null], \Vigie\Agent\htaccess_merge(SC_BLOCK . "\n" . $wp, $block), 'ajouté en tête');
-        same([SC_BLOCK . "\n" . $other . $wp, null], \Vigie\Agent\htaccess_merge(SC_BLOCK . "\n" . $block . $wp, $other), 'sous le module');
-        same([$other . SC_BLOCK . "\n", null], \Vigie\Agent\htaccess_merge($block . SC_BLOCK . "\n", $other), 'au-dessus du module');
+        same([$block . THIRD_PARTY_BLOCK . "\n" . $wp, null], \Vigie\Agent\htaccess_merge(THIRD_PARTY_BLOCK . "\n" . $wp, $block), 'ajouté en tête');
+        same([THIRD_PARTY_BLOCK . "\n" . $other . $wp, null], \Vigie\Agent\htaccess_merge(THIRD_PARTY_BLOCK . "\n" . $block . $wp, $other), 'sous le bloc tiers');
+        same([$other . THIRD_PARTY_BLOCK . "\n", null], \Vigie\Agent\htaccess_merge($block . THIRD_PARTY_BLOCK . "\n", $other), 'au-dessus du bloc tiers');
         same([$other, null], \Vigie\Agent\htaccess_merge(rtrim($block, "\n"), $other), 'sans fin de ligne');
         check(\Vigie\Agent\htaccess_merge($block . $block, $other)[0] === null, 'deux paires refusées');
         check(\Vigie\Agent\htaccess_merge("# END vigie\n# BEGIN vigie\n", $other)[0] === null, 'ordre inversé refusé');

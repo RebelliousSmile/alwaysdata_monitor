@@ -25,14 +25,11 @@ import {
   sshOptions,
   validateAgentTarget,
   withRemoteLock,
-} from '../../scripts/deploy-lib.mjs'
+} from './deploy-lib.mjs'
 
 const vigieRoot = join(dirname(fileURLToPath(import.meta.url)), '..')
 const repoRoot = join(vigieRoot, '..')
 const options = parseArgs(process.argv.slice(2))
-if (options.allowDowngrade || options.clearCache) {
-  throw new Error('--allow-downgrade et --clear-cache ne concernent que le module PrestaShop')
-}
 
 const AGENT_PATH = 'vigie/agent/php/vigie-agent.php'
 

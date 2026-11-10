@@ -126,9 +126,9 @@ cette correspondance (fichier modifié hors de Vigie, retour arrière, première
 application), les règles en place sont inconnues : `--apply` exige
 `--replace`.
 
-Le bloc `# BEGIN sc_alwaysdata protection` du module PrestaShop reste intact,
-au-dessus ou au-dessous du bloc vigie ; `HtaccessDoctor::removeUaRules` laisse
-le bloc vigie intact (test du module).
+Tout bloc posé par un autre outil (`# BEGIN …` / `# END …`) reste intact,
+au-dessus ou au-dessous du bloc vigie : seule la paire `# BEGIN vigie` /
+`# END vigie` est remplacée.
 
 ## `vigie site recommend`
 

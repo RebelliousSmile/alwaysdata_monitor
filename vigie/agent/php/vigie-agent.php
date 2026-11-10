@@ -1681,8 +1681,8 @@ function htaccess_to_unix(string $digits, \DateTimeZone $tz): ?int
 
 /**
  * Nouveau contenu : le bloc vigie remplacé (lignes exactes, au plus une
- * paire), ou ajouté en tête. Le reste, dont le bloc sc_alwaysdata du
- * module, est gardé à l'octet.
+ * paire), ou ajouté en tête. Le reste, dont tout bloc posé par un autre
+ * outil, est gardé à l'octet.
  *
  * @return array{0: ?string, 1: ?string} contenu, ou raison du refus
  */

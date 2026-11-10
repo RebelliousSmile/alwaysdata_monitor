@@ -1,4 +1,4 @@
-# gitleaks (CI : .github/workflows/vigie.yml, job secrets). Règles par défaut,
+# gitleaks (CI : .github/workflows/garde-fous.yml, job secrets). Règles par défaut,
 # plus des exceptions étroites pour des faux positifs avérés. Un vrai secret
 # n'entre jamais ici : on le révoque et on le change.
 

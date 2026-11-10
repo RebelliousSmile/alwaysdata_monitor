@@ -4,7 +4,7 @@ name: console-release
 # signé par la clé release, réunis dans une release GitHub en brouillon.
 #
 # Tag console-vX.Y.Z : brouillon rattaché à ce tag. Le préfixe tient à
-# l'écart les tags v* du module PrestaShop.
+# l'écart les tags v* hérités du module PrestaShop.
 # Lancement manuel : brouillon nommé console-vX.Y.Z-manuel.N, marqué
 # préversion. Un brouillon ne crée son tag qu'à la publication : on le
 # vérifie, puis on le supprime.

@@ -60,10 +60,6 @@ jobs:
       # osv-scanner accepterait une entrée sans échéance ou PackageOverrides.
       - name: exceptions osv-scanner conformes
         run: python3 -I vigie/scripts/check-osv-exceptions.py $(git ls-files ':(glob)**/osv-scanner.toml')
-      # Un composer.lock périmé ne reflète pas composer.json : le scanner ne
-      # prouverait rien (sortie 2 sur un lock périmé).
-      - name: composer.lock à jour
-        run: composer validate --no-check-publish
       - name: installer osv-scanner (somme vérifiée)
         run: |
           curl -sSfL -o osv-scanner "https://github.com/google/osv-scanner/releases/download/v${OSV_SCANNER_VERSION}/osv-scanner_linux_amd64"
@@ -79,4 +75,3 @@ jobs:
           --lockfile=vigie/Cargo.lock
           --lockfile=vigie/app/src-tauri/Cargo.lock
           --lockfile=vigie/app/pnpm-lock.yaml
-          --lockfile=composer.lock

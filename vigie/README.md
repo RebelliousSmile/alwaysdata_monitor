@@ -8,10 +8,6 @@ Les décisions de produit sont consignées dans
 [`docs/decisions.md`](./docs/decisions.md) ; les sources de failles connues et
 leurs conventions dans [`docs/failles.md`](./docs/failles.md).
 
-Ce dossier est indépendant du module PrestaShop `sc_alwaysdata` à la racine du
-dépôt : il n'entre ni dans son déploiement (`scripts/deploy.mjs`), ni dans une
-archive du module (`.gitattributes`, `export-ignore`).
-
 ## Commandes
 
 Sur le veilleur, toujours appeler le binaire par son chemin complet.
